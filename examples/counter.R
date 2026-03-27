@@ -23,14 +23,4 @@ CounterApp <- function() {
   )
 }
 
-ui <- fluidPage(
-  nacreOutput("app")
-)
-
-server <- function(input, output, session) {
-  output$app <- renderNacre({
-    CounterApp()
-  })
-}
-
-shinyApp(ui, server)
+nacreApp(CounterApp)

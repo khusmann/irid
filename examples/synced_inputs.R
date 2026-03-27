@@ -14,14 +14,4 @@ SyncedInputs <- function() {
   )
 }
 
-ui <- fluidPage(
-  nacreOutput("sync")
-)
-
-server <- function(input, output, session) {
-  output$sync <- renderNacre({
-    SyncedInputs()
-  })
-}
-
-shinyApp(ui, server)
+nacreApp(SyncedInputs)

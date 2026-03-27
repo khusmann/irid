@@ -1,3 +1,4 @@
+export(nacreApp)
 export(nacreOutput)
 export(renderNacre)
 import(shiny)

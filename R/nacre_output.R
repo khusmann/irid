@@ -1,3 +1,11 @@
+nacreApp <- function(fn, ...) {
+  ui <- fluidPage(nacreOutput("nacre-app"))
+  server <- function(input, output, session) {
+    output[["nacre-app"]] <- renderNacre(fn())
+  }
+  shinyApp(ui, server, ...)
+}
+
 nacreOutput <- function(id) {
   tagList(
     uiOutput(id),
