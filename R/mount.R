@@ -98,6 +98,143 @@ nacre_mount_processed <- function(result, session) {
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
       })
+    } else if (cf$type == "each") {
+      local({
+        current_mount <- NULL
+        cf_id <- cf$id
+        cf_items <- cf$items
+        cf_fn <- cf$fn
+        env <- environment()
+
+        obs <- observe({
+          item_list <- cf_items()
+
+          # Destroy previous render
+          if (!is.null(env$current_mount)) {
+            env$current_mount$destroy()
+            env$current_mount <- NULL
+          }
+
+          if (length(item_list) > 0L) {
+            # Build tag list by calling fn for each item
+            children <- lapply(seq_along(item_list), function(i) {
+              item_val <- item_list[[i]]
+              item_fn <- function() item_val
+              cf_fn(item_fn, i)
+            })
+            tag_list <- tagList(children)
+            processed <- process_tags(tag_list)
+
+            session$sendCustomMessage("nacre-swap", list(
+              id = cf_id,
+              html = as.character(processed$tag)
+            ))
+            env$current_mount <- nacre_mount_processed(processed, session)
+          } else {
+            session$sendCustomMessage("nacre-swap", list(
+              id = cf_id,
+              html = ""
+            ))
+          }
+        })
+        observers[[length(observers) + 1L]] <<- obs
+        cf_envs[[length(cf_envs) + 1L]] <<- env
+      })
+
+    } else if (cf$type == "index") {
+      local({
+        current_mount <- NULL
+        slots <- list()  # list of reactiveVal, one per position
+        cf_id <- cf$id
+        cf_items <- cf$items
+        cf_fn <- cf$fn
+        env <- environment()
+
+        obs <- observe({
+          item_list <- cf_items()
+          new_len <- length(item_list)
+          old_len <- length(env$slots)
+
+          if (new_len != old_len) {
+            # Length changed — rebuild entirely
+            if (!is.null(env$current_mount)) {
+              env$current_mount$destroy()
+              env$current_mount <- NULL
+            }
+
+            env$slots <- lapply(seq_len(new_len), function(i) {
+              reactiveVal(item_list[[i]])
+            })
+
+            if (new_len > 0L) {
+              children <- lapply(seq_along(env$slots), function(i) {
+                cf_fn(env$slots[[i]], i)
+              })
+              tag_list <- tagList(children)
+              processed <- process_tags(tag_list)
+
+              session$sendCustomMessage("nacre-swap", list(
+                id = cf_id,
+                html = as.character(processed$tag)
+              ))
+              env$current_mount <- nacre_mount_processed(processed, session)
+            } else {
+              session$sendCustomMessage("nacre-swap", list(
+                id = cf_id,
+                html = ""
+              ))
+            }
+          } else {
+            # Same length — update slots in place
+            for (i in seq_len(new_len)) {
+              env$slots[[i]](item_list[[i]])
+            }
+          }
+        })
+        observers[[length(observers) + 1L]] <<- obs
+        cf_envs[[length(cf_envs) + 1L]] <<- env
+      })
+
+    } else if (cf$type == "match") {
+      local({
+        current_mount <- NULL
+        cf_id <- cf$id
+        cf_cases <- cf$cases
+        env <- environment()
+
+        obs <- observe({
+          # Find first matching case
+          branch <- NULL
+          for (case in cf_cases) {
+            if (isTRUE(case$condition())) {
+              branch <- case$content
+              break
+            }
+          }
+
+          # Destroy previous branch
+          if (!is.null(env$current_mount)) {
+            env$current_mount$destroy()
+            env$current_mount <- NULL
+          }
+
+          if (!is.null(branch)) {
+            processed <- process_tags(branch)
+            session$sendCustomMessage("nacre-swap", list(
+              id = cf_id,
+              html = as.character(processed$tag)
+            ))
+            env$current_mount <- nacre_mount_processed(processed, session)
+          } else {
+            session$sendCustomMessage("nacre-swap", list(
+              id = cf_id,
+              html = ""
+            ))
+          }
+        })
+        observers[[length(observers) + 1L]] <<- obs
+        cf_envs[[length(cf_envs) + 1L]] <<- env
+      })
     }
   }
 

@@ -27,6 +27,25 @@ process_tags <- function(tag) {
       return(node$output_tag)
     }
 
+    if (inherits(node, "nacre_each") || inherits(node, "nacre_index")) {
+      id <- nacre_next_id()
+      type <- if (inherits(node, "nacre_each")) "each" else "index"
+      control_flows[[length(control_flows) + 1L]] <<- list(
+        type = type, id = id,
+        items = node$items, fn = node$fn
+      )
+      return(tags$div(id = id, style = "display:contents"))
+    }
+
+    if (inherits(node, "nacre_match")) {
+      id <- nacre_next_id()
+      control_flows[[length(control_flows) + 1L]] <<- list(
+        type = "match", id = id,
+        cases = node$cases
+      )
+      return(tags$div(id = id, style = "display:contents"))
+    }
+
     if (inherits(node, "nacre_when")) {
       id <- nacre_next_id()
       control_flows[[length(control_flows) + 1L]] <<- list(

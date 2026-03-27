@@ -22,7 +22,11 @@
   Shiny.addCustomMessageHandler('nacre-swap', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
+    Shiny.unbindAll(el);
     el.innerHTML = msg.html;
+    // Defer bindAll so Shiny finishes processing all messages in the
+    // current flush before we ask it to discover new output bindings
+    setTimeout(function() { Shiny.bindAll(el); }, 0);
   });
 
   Shiny.addCustomMessageHandler('nacre-events', function(msgs) {
