@@ -135,4 +135,4 @@ KitchenSinkApp <- function() {
   )
 }
 
-nacreApp(KitchenSinkApp)
+nacreApp(KitchenSinkApp())

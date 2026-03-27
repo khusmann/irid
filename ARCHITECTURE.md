@@ -137,11 +137,6 @@ process them.
 Events are currently global so multiple sessions are tied together. Need to
 scope events to just the current session.
 
-### `nacreApp` entrypoint
-
-Currently expects a fn with zero args. Instead it should be closer to
-`renderNacre()` -- take a expr that results in a tag tree
-
 ### `Each` — keyed-by-identity rendering
 
 Currently destroys and recreates all items on any list change. Should reorder

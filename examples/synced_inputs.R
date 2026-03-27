@@ -24,4 +24,4 @@ SyncedInputs <- function() {
   )
 }
 
-nacreApp(SyncedInputs)
+nacreApp(SyncedInputs())

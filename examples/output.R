@@ -26,4 +26,4 @@ OutputApp <- function() {
   )
 }
 
-nacreApp(OutputApp)
+nacreApp(OutputApp())

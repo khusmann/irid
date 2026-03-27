@@ -36,4 +36,4 @@ CounterApp <- function() {
   )
 }
 
-nacreApp(CounterApp)
+nacreApp(CounterApp())

@@ -86,10 +86,9 @@ App <- function() {
 nacreApp(App())
 ```
 
-`nacreApp` calls the component function once at build time, processes the tag
-tree into static HTML, and mounts reactive observers on the server. It returns a
-`shinyApp` object, so it works with `runApp()`, `shinytest2`, and deployment
-tools.
+`nacreApp` processes the tag tree at build time into static HTML and mounts
+reactive observers on the server. It returns a `shinyApp` object, so it works
+with `runApp()`, `shinytest2`, and deployment tools.
 
 ### Incremental adoption — `nacreOutput` / `renderNacre`
 
@@ -303,7 +302,7 @@ event, preventing queue buildup when the server is slow.
 
 | Function                                | Purpose                               |
 | --------------------------------------- | ------------------------------------- |
-| `nacreApp(fn)`                          | Create a full nacre app               |
+| `nacreApp(tag_tree)`                    | Create a full nacre app               |
 | `nacreOutput(id)` / `renderNacre(expr)` | Drop nacre into an existing Shiny app |
 | `When(condition, yes, otherwise)`       | Conditional rendering                 |
 | `Match(Case(...), ..., Default(...))`   | Multi-branch conditional              |

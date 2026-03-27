@@ -31,4 +31,4 @@ ToggleApp <- function() {
   )
 }
 
-nacreApp(ToggleApp)
+nacreApp(ToggleApp())

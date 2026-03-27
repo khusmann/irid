@@ -4,7 +4,7 @@
 \alias{Output}
 \title{Embed a Shiny render/output pair in a nacre tag tree}
 \usage{
-Output(render_fn, output_fn, expr, ..., env = parent.frame())
+Output(render_fn, output_fn, expr, ..., env = parent.frame(), quoted = FALSE)
 }
 \arguments{
 \item{render_fn}{A Shiny render function (e.g. \code{renderPlot}).}
