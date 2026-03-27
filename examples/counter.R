@@ -3,7 +3,11 @@ library(nacre)
 
 CounterApp <- function() {
   count <- reactiveVal(0)
-  color <- reactiveVal("black")
+  color <- reactive({
+    r <- round(count() * 255 / 100)
+    b <- 255 - r
+    sprintf("rgb(%d,0,%d)", r, b)
+  })
 
   tags$div(
     tags$h1(
