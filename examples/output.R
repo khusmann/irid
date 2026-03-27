@@ -6,7 +6,6 @@ OutputApp <- function() {
   bins <- reactiveVal(30)
 
   page_sidebar(
-    theme = bs_theme(bootswatch = "minty"),
     title = "Old Faithful Geyser Data",
     sidebar = sidebar(
       tags$label("Number of bins:", class = "form-label"),

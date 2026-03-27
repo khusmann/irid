@@ -6,7 +6,6 @@ ToggleApp <- function() {
   show <- reactiveVal(TRUE)
 
   page_fluid(
-    theme = bs_theme(bootswatch = "minty"),
     card(
       card_header("When / Toggle"),
       card_body(

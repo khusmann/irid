@@ -119,7 +119,6 @@ KitchenSinkApp <- function() {
   new_item <- reactiveVal("")
 
   page_fluid(
-    theme = bs_theme(bootswatch = "minty"),
     tags$h2("Nacre Kitchen Sink"),
 
     TabBar(tab, list(

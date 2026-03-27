@@ -6,7 +6,6 @@ SyncedInputs <- function() {
   name <- reactiveVal("")
 
   page_fluid(
-    theme = bs_theme(bootswatch = "minty"),
     card(
       card_header("Synced Textboxes"),
       card_body(

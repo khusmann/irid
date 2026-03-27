@@ -43,7 +43,6 @@ counterServer <- function(id) {
 }
 
 ui <- page_fluid(
-  theme = bs_theme(bootswatch = "minty"),
   tags$h3("Nacre + Shiny Modules"),
   layout_columns(
     counterUI("A"),

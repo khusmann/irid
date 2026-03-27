@@ -11,7 +11,6 @@ CounterApp <- function() {
   })
 
   page_fluid(
-    theme = bs_theme(bootswatch = "minty"),
     card(
       card_header("Counter"),
       card_body(
