@@ -120,9 +120,9 @@ Match <- function(...) {
 #' @return A nacre output node.
 #' @export
 Output <- function(render_fn, output_fn, expr, ...,
-                   env = parent.frame()) {
+                   env = parent.frame(), quoted = FALSE) {
   id <- nacre_next_id()
-  expr_q <- substitute(expr)
+  expr_q <- if (quoted) expr else substitute(expr)
   render_call <- eval(as.call(list(substitute(render_fn), expr_q)), env)
   result <- list(
     id = id,
@@ -143,7 +143,8 @@ Output <- function(render_fn, output_fn, expr, ...,
 #' @return A nacre output node.
 #' @export
 PlotOutput <- function(expr, ..., env = parent.frame()) {
-  Output(renderPlot, plotOutput, expr, ..., env = env)
+  expr_q <- substitute(expr)
+  Output(renderPlot, plotOutput, expr_q, ..., env = env, quoted = TRUE)
 }
 
 #' Embed a table output in a nacre tag tree
@@ -156,7 +157,8 @@ PlotOutput <- function(expr, ..., env = parent.frame()) {
 #' @return A nacre output node.
 #' @export
 TableOutput <- function(expr, ..., env = parent.frame()) {
-  Output(renderTable, tableOutput, expr, ..., env = env)
+  expr_q <- substitute(expr)
+  Output(renderTable, tableOutput, expr_q, ..., env = env, quoted = TRUE)
 }
 
 #' Embed a DT DataTable output in a nacre tag tree
@@ -173,7 +175,8 @@ DTOutput <- function(expr, ..., env = parent.frame()) {
   if (!requireNamespace("DT", quietly = TRUE)) {
     stop("Package 'DT' is required for DTOutput(). Install it with install.packages('DT').")
   }
-  Output(DT::renderDT, DT::DTOutput, expr, ..., env = env)
+  expr_q <- substitute(expr)
+  Output(DT::renderDT, DT::DTOutput, expr_q, ..., env = env, quoted = TRUE)
 }
 
 # -- Portal (stub) --------------------------------------------------------
