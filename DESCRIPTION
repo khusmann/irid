@@ -1,0 +1,17 @@
+Package: nacre
+Title: Fine-Grained Reactive DOM Bindings for Shiny
+Version: 0.0.0.9000
+Authors@R: person("Kyle", "Husmann", role = c("aut", "cre"),
+    email = "khusmann@gmail.com")
+Description: A thin rendering layer on top of Shiny that replaces renderUI
+    with Solid-style fine-grained DOM bindings. Pass a function instead of a
+    value to make any tag attribute reactive.
+License: MIT + file LICENSE
+Depends:
+    R (>= 4.1.0)
+Imports:
+    shiny,
+    htmltools
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
