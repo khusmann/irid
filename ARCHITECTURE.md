@@ -132,6 +132,11 @@ process them.
 
 ## Remaining Work
 
+### Scope events by session
+
+Events are currently global so multiple sessions are tied together. Need to
+scope events to just the current session.
+
 ### `nacreApp` entrypoint
 
 Currently expects a fn with zero args. Instead it should be closer to
