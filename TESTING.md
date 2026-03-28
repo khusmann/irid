@@ -28,6 +28,14 @@ static HTML.
 Verify that control-flow nodes correctly create, destroy, and reuse child
 mounts in response to reactive changes.
 
+### Destroy / cleanup
+
+- [ ] `$destroy()` on a mount handle tears down all observers
+- [ ] When/Match: destroying the mount destroys the active branch's child mount
+- [ ] Each: destroying the mount destroys all per-item child mounts
+- [ ] Index: destroying the mount destroys all per-slot child mounts
+- [ ] Nested control flows: destroy propagates recursively
+
 ### When
 
 - [ ] Renders the `yes` branch when condition is `TRUE`
@@ -106,6 +114,15 @@ Verify the sequence-based optimistic update system for controlled inputs.
 - [ ] **Current echo, same value** — `sequence >= latest sent` and `el.value === msg.value` is skipped (avoids cursor reset)
 - [ ] **Server transform** — `sequence >= latest sent` and different value is applied (e.g. server truncates input)
 - [ ] **Programmatic update** — `nacre-attr` with no sequence always applies, even on focused element
+- [ ] **Non-value attributes** — optimistic logic only gates `value` on focused
+      elements; other attrs (`disabled`, `class`, etc.) always apply immediately
+- [ ] **Element loses focus before response** — user types, tabs away, server
+      responds: update applies normally (element no longer focused, no
+      optimistic gating)
+- [ ] **Sequence counter vs sent payloads** — with throttle/coalesce,
+      `sequences[id]` increments on every DOM event (via `buildPayload`), but
+      only some payloads are actually sent. A response to an early payload is
+      correctly treated as stale relative to later unsent keystrokes
 
 ### Cross-element updates
 
@@ -122,6 +139,8 @@ Verify the sequence-based optimistic update system for controlled inputs.
       can apply the server transform
 - [ ] Handler sets `reactiveVal` to a new value: both force-send and binding
       observer fire; client handles the duplicate harmlessly (second is no-op)
+- [ ] Force-send uses `isolate()` — does not create reactive dependencies in
+      the event observer (event observer should only depend on its input)
 - [ ] Server transform example: typing past `maxlength` in a truncating input
       with high latency — input snaps to truncated value when response arrives,
       even if `reactiveVal` was already at the truncated value
@@ -134,6 +153,11 @@ Verify the sequence-based optimistic update system for controlled inputs.
 - [ ] With throttle (`leading = TRUE`): first event fires immediately, subsequent
       events are gated by both the throttle timer and server idle
 - [ ] With debounce: events are held until the user pauses, then gated by server idle
+- [ ] With `coalesce = FALSE` (default for `event_immediate`): events fire on
+      every input without waiting for server — events pile up under high latency
+- [ ] Multiple events in one flush: later sequence overwrites earlier on
+      `session$userData$nacre_current_sequence`, so all bindings in that flush
+      are tagged with the most recent sequence
 
 ## Stale UI indicator
 
@@ -142,6 +166,8 @@ disappears at the correct times.
 
 ### Basic show/hide
 
+- [ ] Indicator does not appear on initial page load (server is busy rendering
+      but no events have been sent)
 - [ ] Indicator does not appear when server responds within `nacre.stale_timeout`
 - [ ] Indicator appears after `nacre.stale_timeout` ms when server is slow
 - [ ] Indicator clears when `shiny:idle` fires (after debounce delay)
@@ -168,6 +194,9 @@ disappears at the correct times.
 - [ ] `nacre-config` message arrives before `nacre-events` in the initial flush
 - [ ] `nacreApp` sends config synchronously in the server function
 - [ ] `renderNacre` sends config in the `onFlushed` callback
+- [ ] Repeated `nacre-config` messages (e.g. `renderNacre` re-renders) update
+      the client-side timeout without side effects
+- [ ] App with no event handlers: stale indicator never appears
 
 ### Visual
 
