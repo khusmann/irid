@@ -5,7 +5,7 @@
 ```
 R/
   app.R           nacreApp, nacreOutput, renderNacre
-  primitives.R    When, Each, Index, Match/Case/Default, Output, Portal, Catch
+  primitives.R    When, Each, Index, Match/Case/Default, Output
   event.R         event_throttle, event_debounce
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
@@ -163,15 +163,15 @@ Currently does a full rebuild when list length changes. Needs:
 - When list shrinks: destroy trailing slots.
 - Same-length updates already work (reactiveVal in-place update).
 
-### `Portal`
+### `Portal` (planned)
 
-Exported as a stub. `process_tags` and `nacre_mount_processed` don't handle it.
-Needs client-side support to render content into a different DOM target.
+Not yet implemented. Would render content into a different DOM target.
+Needs `process_tags` handling and client-side support.
 
-### `Catch`
+### `Catch` (planned)
 
-Exported as a stub. Needs error-boundary logic: if any `observe()` inside the
-content tree errors, tear it down and render the fallback.
+Not yet implemented. Would provide error boundaries: if any `observe()` inside
+the content tree errors, tear it down and render a fallback.
 
 ### Reactive child validation
 

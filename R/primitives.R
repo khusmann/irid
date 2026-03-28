@@ -178,37 +178,3 @@ DTOutput <- function(expr, ..., env = parent.frame()) {
   expr_q <- substitute(expr)
   Output(DT::renderDT, DT::DTOutput, expr_q, ..., env = env, quoted = TRUE)
 }
-
-# -- Portal (stub) --------------------------------------------------------
-
-#' Render content into a different location in the DOM (stub)
-#'
-#' Placeholder for portal functionality. Not yet implemented.
-#'
-#' @param target The target element ID where content should be rendered.
-#' @param content Tag tree to render at the target location.
-#' @return A nacre portal node.
-#' @export
-Portal <- function(target, content) {
-  structure(
-    list(target = target, content = content),
-    class = "nacre_portal"
-  )
-}
-
-# -- Error boundary (stub) -----------------------------------------------
-
-#' Catch rendering errors and show a fallback (stub)
-#'
-#' Placeholder for error boundary functionality. Not yet implemented.
-#'
-#' @param content Tag tree to render.
-#' @param fallback Tag tree to render if `content` produces an error.
-#' @return A nacre error boundary node.
-#' @export
-Catch <- function(content, fallback) {
-  structure(
-    list(content = content, fallback = fallback),
-    class = "nacre_catch"
-  )
-}
