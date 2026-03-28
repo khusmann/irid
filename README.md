@@ -59,7 +59,7 @@ App <- function() {
   )
 }
 
-nacreApp(App())
+nacreApp(App)
 ```
 
 No new reactivity model. No hooks. No dependency arrays. Just Shiny reactives
@@ -83,7 +83,7 @@ App <- function() {
   )
 }
 
-nacreApp(App())
+nacreApp(App)
 ```
 
 `nacreApp` processes the tag tree at build time into static HTML and mounts
@@ -173,9 +173,9 @@ tags$div(When(show, tags$p("Hello"), otherwise = tags$span("Bye")))  # structura
 
 ### Event Callbacks
 
-Event callbacks receive `(event)` or `(event, id)`. The `event` is a list of
-all primitive-valued properties from the browser event, plus element properties
-like `value`, `valueAsNumber`, and `checked`. Define callbacks with 0, 1, or 2
+Event callbacks receive `(event)` or `(event, id)`. The `event` is a list of all
+primitive-valued properties from the browser event, plus element properties like
+`value`, `valueAsNumber`, and `checked`. Define callbacks with 0, 1, or 2
 parameters as needed:
 
 ```r
@@ -239,8 +239,8 @@ Match(
 
 ### Each
 
-Dynamic lists. Replaces `renderUI(lapply(...))`. The callback receives each
-item as a **plain value** — when the list changes, all items are destroyed and
+Dynamic lists. Replaces `renderUI(lapply(...))`. The callback receives each item
+as a **plain value** — when the list changes, all items are destroyed and
 recreated. (Future: keyed reordering via the `by` argument will move DOM nodes
 instead of recreating them.)
 
