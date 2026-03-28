@@ -183,10 +183,6 @@ a way to distinguish "server echoing back what the user typed" (skip) from
 Reactive children should return text only. Currently no validation — non-text
 returns silently produce unexpected output.
 
-### Each / For
-
-Should I rename Each -> For to match Solid.js?
-
 ### Testing
 
 No test suite yet. Key areas: `process_tags` extraction, observer lifecycle for
