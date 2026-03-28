@@ -12,13 +12,13 @@ ControlledInputs <- function() {
         tags$p(class = "text-muted", "Type in any input — the others follow."),
         tags$input(type = "text", class = "form-control mb-2",
           placeholder = "Input 1",
-          value = name, onInput = \(value) name(value)),
+          value = name, onInput = \(event) name(event$value)),
         tags$input(type = "text", class = "form-control mb-2",
           placeholder = "Input 2",
-          value = name, onInput = \(value) name(value)),
+          value = name, onInput = \(event) name(event$value)),
         tags$input(type = "text", class = "form-control",
           placeholder = "Input 3",
-          value = name, onInput = \(value) name(value))
+          value = name, onInput = \(event) name(event$value))
       )
     )
   )

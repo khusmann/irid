@@ -80,7 +80,8 @@ TodoApp <- function() {
               class = "form-control",
               placeholder = "What needs to be done?",
               value = new_text,
-              onInput = \(value) new_text(value)
+              onInput = \(event) new_text(event$value),
+              onKeyDown = \(event) if (event$key == "Enter") add_todo()
             ),
             tags$button(
               class = "btn btn-primary",

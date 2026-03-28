@@ -23,7 +23,7 @@ Slider <- function(val, on_change, min, max) {
       type = "range", min = min, max = max,
       style = "appearance: slider-vertical; height: 200px; width: 30px;",
       value = val,
-      onInput = event_throttle(\(value) on_change(as.numeric(value)), 100)
+      onInput = event_throttle(\(event) on_change(event$valueAsNumber), 100)
     ),
     tags$small(class = "text-muted", min)
   )
@@ -51,8 +51,8 @@ TemperatureApp <- function() {
                 type = "number",
                 class = "form-control form-control-lg text-center",
                 value = celsius,
-                onInput = \(value) {
-                  c <- as.numeric(value)
+                onInput = \(event) {
+                  c <- event$valueAsNumber
                   if (!is.na(c)) celsius(c)
                 }
               ),
@@ -68,8 +68,8 @@ TemperatureApp <- function() {
                 type = "number",
                 class = "form-control form-control-lg text-center",
                 value = fahrenheit,
-                onInput = \(value) {
-                  f <- as.numeric(value)
+                onInput = \(event) {
+                  f <- event$valueAsNumber
                   if (!is.na(f)) celsius(f_to_c(f))
                 }
               ),

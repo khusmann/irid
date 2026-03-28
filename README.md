@@ -49,7 +49,7 @@ App <- function() {
     tags$input(
       type = "range", min = 0, max = 100,
       value = count,
-      onInput = \(value) count(as.numeric(value))
+      onInput = \(event) count(event$valueAsNumber)
     ),
     tags$button(
       disabled = \() count() == 0,
@@ -78,7 +78,7 @@ App <- function() {
 
   fluidPage(
     tags$input(type = "text", value = name,
-      onInput = event_debounce(\(value) name(value), 150)),
+      onInput = event_debounce(\(event) name(event$value), 150)),
     tags$p(\() paste("Hello,", name()))
   )
 }
@@ -101,7 +101,7 @@ ThresholdControl <- function(threshold) {
       tags$input(
         type = "range", min = 0, max = 1, step = 0.1,
         value = threshold,
-        onInput = event_throttle(\(value) threshold(as.numeric(value)), 100)
+        onInput = event_throttle(\(event) threshold(event$valueAsNumber), 100)
       ),
       tags$span(\() paste("Threshold:", threshold()))
     )
@@ -173,13 +173,15 @@ tags$div(When(show, tags$p("Hello"), otherwise = tags$span("Bye")))  # structura
 
 ### Event Callbacks
 
-Event callbacks receive `(value, id)` — not a JavaScript event object. Define
-callbacks with 0, 1, or 2 parameters as needed:
+Event callbacks receive `(event)` or `(event, id)`. The `event` is a list of
+all primitive-valued properties from the browser event, plus element properties
+like `value`, `valueAsNumber`, and `checked`. Define callbacks with 0, 1, or 2
+parameters as needed:
 
 ```r
-onInput = \(value) threshold(as.numeric(value))  # just need value
-onClick = \(value, id) handle_click(id)           # need id
-onClick = \() count(count() + 1)                  # neither
+onInput = \(event) threshold(event$valueAsNumber)  # event object
+onClick = \(event, id) handle_click(id)             # event + element id
+onClick = \() count(count() + 1)                    # neither
 ```
 
 ### Controlled Inputs
@@ -192,7 +194,7 @@ threshold <- reactiveVal(0.5)
 tags$input(
   type = "range", min = 0, max = 1, step = 0.1,
   value = threshold,
-  onInput = \(value) threshold(as.numeric(value))
+  onInput = \(event) threshold(event$valueAsNumber)
 )
 ```
 
@@ -305,10 +307,10 @@ it.
 
 ```r
 # Debounce — wait for a pause (good for text input)
-onInput = event_debounce(\(value) name(value), 150)
+onInput = event_debounce(\(event) name(event$value), 150)
 
 # Throttle — fire at most every N ms (good for sliders)
-onInput = event_throttle(\(value) threshold(as.numeric(value)), 100)
+onInput = event_throttle(\(event) threshold(event$valueAsNumber), 100)
 ```
 
 Both support **adaptive coalescing** (`coalesce = TRUE`, the default): the
@@ -331,6 +333,7 @@ event, preventing queue buildup when the server is slow.
 | `DTOutput(expr)`                        | DT DataTable output shorthand         |
 | `Portal(target, content)`               | Render elsewhere in DOM _(stub)_      |
 | `Catch(content, fallback)`              | Error boundary _(stub)_               |
+| `event_immediate(fn)`                   | Explicit immediate event (default)    |
 | `event_debounce(fn, ms)`                | Debounce an event callback            |
 | `event_throttle(fn, ms)`                | Throttle an event callback            |
 

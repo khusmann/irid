@@ -29,6 +29,34 @@
     setTimeout(function() { Shiny.bindAll(el); }, 0);
   });
 
+  // --- Event payload construction ---
+
+  function buildPayload(e, el, id) {
+    var payload = {};
+    // Extract all primitive-valued properties from the event object
+    for (var key in e) {
+      try {
+        var val = e[key];
+        if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+          payload[key] = val;
+        }
+      } catch (err) {
+        // Some event properties may throw on access; skip them
+      }
+    }
+    // Element properties (override event props if same name)
+    payload.value = el.value;
+    if (typeof el.valueAsNumber === 'number') {
+      payload.valueAsNumber = el.valueAsNumber;
+    }
+    if (typeof el.checked === 'boolean') {
+      payload.checked = el.checked;
+    }
+    payload.id = id;
+    payload.nonce = Math.random();
+    return payload;
+  }
+
   // --- Rate limiting (throttle / debounce with optional coalesce) ---
   // NOTE: Shiny dispatches shiny:idle as a jQuery event, NOT a native DOM
   // event. All listeners must use $(document).one(), not addEventListener.
@@ -36,10 +64,8 @@
   var managed = {};  // inputId -> state object
   var idleListenerActive = false;
 
-  function sendEvent(inputId, value, id) {
-    Shiny.setInputValue(inputId, {
-      value: value, id: id, nonce: Math.random()
-    }, { priority: 'event' });
+  function sendPayload(inputId, payload) {
+    Shiny.setInputValue(inputId, payload, { priority: 'event' });
   }
 
   function onShinyIdle() {
@@ -68,7 +94,7 @@
 
   function setupThrottle(el, msg) {
     var s = {
-      value: null, id: null,
+      payload: null,
       timerRunning: false, timerReady: false,
       serverBusy: false,
       coalesce: msg.coalesce,
@@ -79,12 +105,12 @@
     s.maybeSend = function() {
       if (s.coalesce && s.serverBusy) return;
       if (!s.timerReady) return;
-      if (s.value === null) return;
-      var val = s.value; var id = s.id;
-      s.value = null; s.id = null;
+      if (s.payload === null) return;
+      var p = s.payload;
+      s.payload = null;
       s.timerReady = false;
       s.serverBusy = true;
-      sendEvent(msg.inputId, val, id);
+      sendPayload(msg.inputId, p);
       s.timerRunning = true;
       setTimeout(function() {
         s.timerRunning = false;
@@ -97,15 +123,15 @@
     managed[msg.inputId] = s;
 
     el.addEventListener(msg.event, function(e) {
-      s.value = el.value;
-      s.id = msg.id;
+      if (msg.preventDefault) e.preventDefault();
+      s.payload = buildPayload(e, el, msg.id);
       if (!s.timerRunning) {
         if (s.leading && !(s.coalesce && s.serverBusy)) {
           // Fire immediately, start cooldown timer
-          var val = s.value; var id = s.id;
-          s.value = null; s.id = null;
+          var p = s.payload;
+          s.payload = null;
           s.serverBusy = true;
-          sendEvent(msg.inputId, val, id);
+          sendPayload(msg.inputId, p);
           s.timerRunning = true;
           setTimeout(function() {
             s.timerRunning = false;
@@ -128,7 +154,7 @@
 
   function setupDebounce(el, msg) {
     var s = {
-      value: null, id: null,
+      payload: null,
       timerId: null, timerReady: false,
       serverBusy: false,
       coalesce: msg.coalesce,
@@ -138,20 +164,20 @@
     s.maybeSend = function() {
       if (s.coalesce && s.serverBusy) return;
       if (!s.timerReady) return;
-      if (s.value === null) return;
-      var val = s.value; var id = s.id;
-      s.value = null; s.id = null;
+      if (s.payload === null) return;
+      var p = s.payload;
+      s.payload = null;
       s.timerReady = false;
       s.serverBusy = true;
-      sendEvent(msg.inputId, val, id);
+      sendPayload(msg.inputId, p);
       if (s.coalesce) ensureIdleListener();
     };
 
     managed[msg.inputId] = s;
 
     el.addEventListener(msg.event, function(e) {
-      s.value = el.value;
-      s.id = msg.id;
+      if (msg.preventDefault) e.preventDefault();
+      s.payload = buildPayload(e, el, msg.id);
       s.timerReady = false;
       if (s.timerId !== null) clearTimeout(s.timerId);
       s.timerId = setTimeout(function() {
@@ -160,6 +186,40 @@
         s.maybeSend();
       }, msg.ms);
     });
+  }
+
+  function setupImmediate(el, msg) {
+    if (msg.coalesce) {
+      var s = {
+        payload: null,
+        serverBusy: false,
+        coalesce: true,
+        maybeSend: null
+      };
+
+      s.maybeSend = function() {
+        if (s.serverBusy) return;
+        if (s.payload === null) return;
+        var p = s.payload;
+        s.payload = null;
+        s.serverBusy = true;
+        sendPayload(msg.inputId, p);
+        ensureIdleListener();
+      };
+
+      managed[msg.inputId] = s;
+
+      el.addEventListener(msg.event, function(e) {
+        if (msg.preventDefault) e.preventDefault();
+        s.payload = buildPayload(e, el, msg.id);
+        s.maybeSend();
+      });
+    } else {
+      el.addEventListener(msg.event, function(e) {
+        if (msg.preventDefault) e.preventDefault();
+        sendPayload(msg.inputId, buildPayload(e, el, msg.id));
+      });
+    }
   }
 
   Shiny.addCustomMessageHandler('nacre-events', function(msgs) {
@@ -174,9 +234,7 @@
       } else if (msg.mode === 'debounce') {
         setupDebounce(el, msg);
       } else {
-        el.addEventListener(msg.event, function(e) {
-          sendEvent(msg.inputId, el.value, msg.id);
-        });
+        setupImmediate(el, msg);
       }
     });
   });

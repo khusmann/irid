@@ -25,12 +25,16 @@ nacre_mount_processed <- function(result, session) {
         latency <- getOption("nacre.debug.latency", 0)
         if (latency > 0) Sys.sleep(latency)
         ev_data <- session$input[[input_id]]
+        event_obj <- lapply(
+          ev_data[setdiff(names(ev_data), c("id", "nonce"))],
+          function(x) if (is.null(x)) NA else x
+        )
         if (nformals == 0L) {
           handler()
         } else if (nformals == 1L) {
-          handler(ev_data$value)
+          handler(event_obj)
         } else {
-          handler(ev_data$value, ev_data$id)
+          handler(event_obj, ev_data$id)
         }
       }, ignoreInit = TRUE)
       observers[[length(observers) + 1L]] <<- obs
@@ -42,7 +46,8 @@ nacre_mount_processed <- function(result, session) {
         mode = ev$mode,
         ms = ev$ms,
         leading = ev$leading,
-        coalesce = ev$coalesce
+        coalesce = ev$coalesce,
+        preventDefault = ev$prevent_default
       )
     })
     session$sendCustomMessage("nacre-events", event_msgs)

@@ -8,7 +8,7 @@
 #' @keywords internal
 is_nacre_reactive <- function(x) {
   is.function(x) && (identical(class(x), "function") || inherits(x, "reactive") ||
-    inherits(x, "nacre_rate_limited"))
+    inherits(x, "nacre_event"))
 }
 
 #' Create a local ID counter for use within a single `process_tags` call
@@ -118,21 +118,19 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
 
       if (is_event) {
         js_event <- tolower(sub("^on", "", name))
-        is_rate_limited <- inherits(val, "nacre_rate_limited")
-        if (is_rate_limited) {
-          handler <- structure(val, class = "function",
-                               mode = NULL, ms = NULL, leading = NULL,
-                               coalesce = NULL)
-          pending_events[[length(pending_events) + 1L]] <- list(
-            event = js_event, handler = handler,
-            mode = attr(val, "mode"), ms = attr(val, "ms"),
-            leading = attr(val, "leading"), coalesce = attr(val, "coalesce")
-          )
-        } else {
-          pending_events[[length(pending_events) + 1L]] <- list(
-            event = js_event, handler = val
-          )
+        # Wrap bare functions in event_immediate()
+        if (!inherits(val, "nacre_event")) {
+          val <- event_immediate(val)
         }
+        handler <- structure(val, class = "function",
+                             mode = NULL, ms = NULL, leading = NULL,
+                             coalesce = NULL, prevent_default = NULL)
+        pending_events[[length(pending_events) + 1L]] <- list(
+          event = js_event, handler = handler,
+          mode = attr(val, "mode"), ms = attr(val, "ms"),
+          leading = attr(val, "leading"), coalesce = attr(val, "coalesce"),
+          prevent_default = attr(val, "prevent_default")
+        )
       } else {
         pending_bindings[[length(pending_bindings) + 1L]] <- list(
           attr = name, fn = val

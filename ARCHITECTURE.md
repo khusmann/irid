@@ -6,7 +6,7 @@
 R/
   app.R           nacreApp, nacreOutput, renderNacre
   primitives.R    When, Each, Index, Match/Case/Default, Output
-  event.R         event_throttle, event_debounce
+  event.R         event_immediate, event_throttle, event_debounce
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   nacre-package.R Package-level imports
@@ -168,6 +168,15 @@ Needs `process_tags` handling and client-side support.
 
 Not yet implemented. Would provide error boundaries: if any `observe()` inside
 the content tree errors, tear it down and render a fallback.
+
+### Controlled input: programmatic update while focused
+
+The optimistic update logic in `nacre.js` skips setting `el.value` when the
+element is focused (`document.activeElement === el`) to prevent cursor jumping
+during typing. This also blocks programmatic clears — e.g. `new_text("")` after
+adding a todo doesn't visually clear the input because it's still focused. Needs
+a way to distinguish "server echoing back what the user typed" (skip) from
+"server is setting a new value" (apply).
 
 ### Reactive child validation
 
