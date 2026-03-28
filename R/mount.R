@@ -96,6 +96,7 @@ nacre_mount_processed <- function(result, session) {
     if (cf$type == "when") {
       local({
         current_mount <- NULL
+        last_active <- NULL
         cf_id <- cf$id
         cf_condition <- cf$condition
         cf_yes <- cf$yes
@@ -104,6 +105,11 @@ nacre_mount_processed <- function(result, session) {
 
         obs <- observe({
           active <- isTRUE(cf_condition())
+
+          # Short-circuit if the branch hasn't changed
+          if (identical(active, env$last_active)) return()
+          env$last_active <- active
+
           branch <- if (active) cf_yes else cf_otherwise
 
           # Destroy previous branch
@@ -137,41 +143,85 @@ nacre_mount_processed <- function(result, session) {
       })
     } else if (cf$type == "each") {
       local({
-        current_mount <- NULL
+        # Per-item state: named list keyed by item key.
+        # Each entry: list(mount, wrapper_id, index_rv)
+        item_mounts <- list()
+        current_keys <- character(0)
         cf_id <- cf$id
         cf_items <- cf$items
         cf_fn <- cf$fn
+        cf_by <- cf$by
         cf_nformals <- length(formals(cf_fn))
         env <- environment()
 
         obs <- observe({
           item_list <- cf_items()
+          new_keys <- vapply(item_list, function(x) as.character(cf_by(x)), character(1))
+          if (anyDuplicated(new_keys)) {
+            stop("Each() requires unique keys from the `by` function")
+          }
+          old_keys <- env$current_keys
 
-          # Destroy previous render
-          if (!is.null(env$current_mount)) {
-            env$current_mount$destroy()
-            env$current_mount <- NULL
+          removed_keys <- setdiff(old_keys, new_keys)
+          added_keys <- setdiff(new_keys, old_keys)
+          kept_keys <- intersect(new_keys, old_keys)
+
+          # Destroy removed items
+          removes <- character(0)
+          for (key in removed_keys) {
+            env$item_mounts[[key]]$mount$destroy()
+            removes <- c(removes, env$item_mounts[[key]]$wrapper_id)
+            env$item_mounts[[key]] <- NULL
           }
 
-          if (length(item_list) > 0L) {
-            # Build tag list by calling fn for each item
-            children <- lapply(seq_along(item_list), function(i) {
-              if (cf_nformals >= 2L) cf_fn(item_list[[i]], i) else cf_fn(item_list[[i]])
-            })
-            tag_list <- tagList(children)
-            processed <- process_tags(tag_list, counter = counter)
+          # Create new items (local() prevents for-loop closure capture)
+          inserts <- list()
+          for (key in added_keys) local({
+            k <- key
+            idx <- match(k, new_keys)
+            item <- item_list[[idx]]
+            wrapper_id <- counter()
 
-            session$sendCustomMessage("nacre-swap", list(
-              id = cf_id,
-              html = as.character(processed$tag)
-            ))
-            env$current_mount <- nacre_mount_processed(processed, session)
-          } else {
-            session$sendCustomMessage("nacre-swap", list(
-              id = cf_id,
-              html = ""
-            ))
+            index_rv <- reactiveVal(idx)
+            child <- if (cf_nformals >= 2L) cf_fn(item, index_rv) else cf_fn(item)
+            wrapped <- tags$div(id = wrapper_id, style = "display:contents", child)
+            processed <- process_tags(wrapped, counter = counter)
+
+            inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
+            env$item_mounts[[k]] <- list(
+              mount = NULL, wrapper_id = wrapper_id,
+              index_rv = index_rv, processed = processed
+            )
+          })
+
+          # Build order array
+          order <- vapply(new_keys, function(key) {
+            env$item_mounts[[key]]$wrapper_id
+          }, character(1), USE.NAMES = FALSE)
+
+          # Send DOM mutation
+          session$sendCustomMessage("nacre-mutate", list(
+            id = cf_id,
+            removes = as.list(removes),
+            inserts = inserts,
+            order = as.list(order)
+          ))
+
+          # Mount new items (after DOM exists)
+          for (key in added_keys) {
+            entry <- env$item_mounts[[key]]
+            entry$mount <- nacre_mount_processed(entry$processed, session)
+            entry$processed <- NULL
+            env$item_mounts[[key]] <- entry
           }
+
+          # Update index reactiveVals for kept items whose position changed
+          for (key in kept_keys) {
+            new_idx <- match(key, new_keys)
+            env$item_mounts[[key]]$index_rv(new_idx)
+          }
+
+          env$current_keys <- new_keys
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
@@ -179,8 +229,10 @@ nacre_mount_processed <- function(result, session) {
 
     } else if (cf$type == "index") {
       local({
-        current_mount <- NULL
-        slots <- list()  # list of reactiveVal, one per position
+        # Per-slot state: parallel lists
+        slots <- list()       # reactiveVal per position
+        slot_mounts <- list() # mount handle per position
+        slot_wrapper_ids <- character(0)
         cf_id <- cf$id
         cf_items <- cf$items
         cf_fn <- cf$fn
@@ -192,35 +244,62 @@ nacre_mount_processed <- function(result, session) {
           new_len <- length(item_list)
           old_len <- length(env$slots)
 
-          if (new_len != old_len) {
-            # Length changed — rebuild entirely
-            if (!is.null(env$current_mount)) {
-              env$current_mount$destroy()
-              env$current_mount <- NULL
+          if (new_len > old_len) {
+            # Grow — update existing slots, append new ones
+            for (i in seq_len(old_len)) {
+              env$slots[[i]](item_list[[i]])
             }
 
-            env$slots <- lapply(seq_len(new_len), function(i) {
-              reactiveVal(item_list[[i]])
+            # local() prevents for-loop closure capture
+            inserts <- list()
+            for (i in (old_len + 1L):new_len) local({
+              ii <- i
+              rv <- reactiveVal(item_list[[ii]])
+              wrapper_id <- counter()
+
+              child <- if (cf_nformals >= 2L) cf_fn(rv, ii) else cf_fn(rv)
+              wrapped <- tags$div(id = wrapper_id, style = "display:contents", child)
+              processed <- process_tags(wrapped, counter = counter)
+
+              inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
+              env$slots[[ii]] <- rv
+              env$slot_wrapper_ids[[ii]] <- wrapper_id
+              # Temporarily store processed for mounting after DOM update
+              env$slot_mounts[[ii]] <- processed
             })
 
-            if (new_len > 0L) {
-              children <- lapply(seq_along(env$slots), function(i) {
-                if (cf_nformals >= 2L) cf_fn(env$slots[[i]], i) else cf_fn(env$slots[[i]])
-              })
-              tag_list <- tagList(children)
-              processed <- process_tags(tag_list, counter = counter)
+            session$sendCustomMessage("nacre-mutate", list(
+              id = cf_id,
+              inserts = inserts
+            ))
 
-              session$sendCustomMessage("nacre-swap", list(
-                id = cf_id,
-                html = as.character(processed$tag)
-              ))
-              env$current_mount <- nacre_mount_processed(processed, session)
-            } else {
-              session$sendCustomMessage("nacre-swap", list(
-                id = cf_id,
-                html = ""
-              ))
+            # Mount new slots (after DOM exists)
+            for (i in (old_len + 1L):new_len) {
+              env$slot_mounts[[i]] <- nacre_mount_processed(
+                env$slot_mounts[[i]], session
+              )
             }
+
+          } else if (new_len < old_len) {
+            # Shrink — update kept slots, destroy trailing ones
+            for (i in seq_len(new_len)) {
+              env$slots[[i]](item_list[[i]])
+            }
+
+            removes <- env$slot_wrapper_ids[(new_len + 1L):old_len]
+            for (i in (new_len + 1L):old_len) {
+              env$slot_mounts[[i]]$destroy()
+            }
+
+            session$sendCustomMessage("nacre-mutate", list(
+              id = cf_id,
+              removes = as.list(removes)
+            ))
+
+            env$slots <- env$slots[seq_len(new_len)]
+            env$slot_mounts <- env$slot_mounts[seq_len(new_len)]
+            env$slot_wrapper_ids <- env$slot_wrapper_ids[seq_len(new_len)]
+
           } else {
             # Same length — update slots in place
             for (i in seq_len(new_len)) {
@@ -235,6 +314,7 @@ nacre_mount_processed <- function(result, session) {
     } else if (cf$type == "match") {
       local({
         current_mount <- NULL
+        last_branch <- NULL
         cf_id <- cf$id
         cf_cases <- cf$cases
         env <- environment()
@@ -248,6 +328,10 @@ nacre_mount_processed <- function(result, session) {
               break
             }
           }
+
+          # Short-circuit if the branch hasn't changed
+          if (identical(branch, env$last_branch)) return()
+          env$last_branch <- branch
 
           # Destroy previous branch
           if (!is.null(env$current_mount)) {
@@ -280,7 +364,16 @@ nacre_mount_processed <- function(result, session) {
     destroy = function() {
       for (obs in observers) obs$destroy()
       for (env in cf_envs) {
+        # When/Match: single current_mount
         if (!is.null(env$current_mount)) env$current_mount$destroy()
+        # Each: per-key mounts
+        if (!is.null(env$item_mounts)) {
+          for (m in env$item_mounts) m$mount$destroy()
+        }
+        # Index: per-slot mounts
+        if (!is.null(env$slot_mounts)) {
+          for (m in env$slot_mounts) m$destroy()
+        }
       }
     }
   )

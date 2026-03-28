@@ -11,7 +11,7 @@ Index(items, fn)
 
 \item{fn}{A function of \code{(item)} or \verb{(item, index)} where \code{item} is a
 \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} for the item at that position and \code{index} is its
-position. Should return a tag tree.}
+fixed position (plain integer). Should return a tag tree.}
 }
 \value{
 A nacre control-flow node.
@@ -19,5 +19,6 @@ A nacre control-flow node.
 \description{
 Like \code{\link[=Each]{Each()}}, but when list values change without a length change, each
 slot's reactive value is updated in place rather than recreating the DOM.
-A full rebuild occurs only when the list length changes.
+When the list grows, new slots are appended; when it shrinks, trailing
+slots are destroyed.
 }

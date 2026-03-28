@@ -38,6 +38,45 @@
     setTimeout(function() { Shiny.bindAll(el); }, 0);
   });
 
+  Shiny.addCustomMessageHandler('nacre-mutate', function(msg) {
+    var el = document.getElementById(msg.id);
+    if (!el) return;
+
+    // 1. Remove children
+    if (msg.removes) {
+      msg.removes.forEach(function(childId) {
+        var child = document.getElementById(childId);
+        if (child) {
+          Shiny.unbindAll(child);
+          child.remove();
+        }
+      });
+    }
+
+    // 2. Insert new children (append to end)
+    if (msg.inserts) {
+      msg.inserts.forEach(function(html) {
+        var temp = document.createElement('div');
+        temp.innerHTML = html;
+        while (temp.firstChild) {
+          el.appendChild(temp.firstChild);
+        }
+      });
+    }
+
+    // 3. Reorder children to match desired order (optional)
+    if (msg.order) {
+      msg.order.forEach(function(childId) {
+        var child = document.getElementById(childId);
+        if (child) el.appendChild(child);
+      });
+    }
+
+    // Defer bindAll so Shiny finishes processing all messages in the
+    // current flush before we ask it to discover new output bindings
+    setTimeout(function() { Shiny.bindAll(el); }, 0);
+  });
+
   // --- Event payload construction ---
 
   function buildPayload(e, el, id) {

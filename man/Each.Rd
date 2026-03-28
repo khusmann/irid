@@ -10,11 +10,11 @@ Each(items, fn, by = identity)
 \item{items}{A reactive expression that returns a list.}
 
 \item{fn}{A function of \code{(item)} or \verb{(item, index)} where \code{item} is the
-item value and \code{index} is its position. Should return a tag tree.}
+plain item value and \code{index} is a \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} that tracks the
+item's current position (updated on reorder). Should return a tag tree.}
 
 \item{by}{A function that extracts a comparable key from each item, used
-for keyed reordering. Not yet evaluated — currently all items are
-destroyed and recreated on any list change.}
+for keyed reordering. Keys must be unique. Defaults to \code{\link[=identity]{identity()}}.}
 }
 \value{
 A nacre control-flow node.

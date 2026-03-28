@@ -62,34 +62,39 @@ down all observers).
 
 ## Control Flow Lifecycle
 
-Each control-flow type manages a `current_mount` — a mount handle from a
-recursive `nacre_mount_processed` call.
+**When** and **Match** each manage a single `current_mount` — a mount handle from
+a recursive `nacre_mount_processed` call. Both short-circuit: the observer
+re-evaluates the condition on every reactive invalidation but only destroys and
+recreates the branch when the active branch actually changes. This is critical
+when wrapping `Each` or `Index` — without the short-circuit, any change to a
+reactive dependency shared with the condition would destroy the inner mount and
+lose per-item state. Match iterates cases to find the first truthy condition.
 
-**When** — Observes the condition. On change: destroys the current mount,
-processes the active branch, sends a `nacre-swap` message, mounts the new
-branch.
+**Each** and **Index** manage per-item mount handles and use `nacre-mutate` for
+granular DOM mutations. Each item/slot is wrapped in a
+`<div style="display:contents">` with a stable ID so the client can insert,
+remove, and reorder individual children.
 
-**Match** — Same pattern, but iterates cases to find the first truthy condition.
+The two primitives are symmetric: **Each** keys by identity (item is stable,
+index moves), **Index** keys by position (index is stable, item moves).
 
-**Each** — Keyed by identity (like Solid's `For`). The callback receives each
-item as a **plain value** and an optional index: `fn(item)` or `fn(item, i)`.
-Currently destroys and recreates all items on any list change. Future: the `by`
-argument will extract a comparable key from each item, enabling DOM node reuse —
-kept items have their nodes reordered, new items are mounted, removed items are
-destroyed. Needs a new client-side `nacre-reorder` message to insert, remove,
-and reorder individual child nodes by ID.
+**Each** — Like Solid's `For`. The callback receives each item as a **plain
+value** and an optional index: `fn(item)` or `fn(item, i)` where `i` is a
+`reactiveVal` that tracks the item's current position (updated on reorder). The
+`by` argument extracts a comparable key from each item (defaults to `identity`,
+must be unique). On list change, keys are diffed: kept items have their DOM nodes
+reordered (no recreation), new items are mounted, removed items are destroyed.
 
-**Index** — Keyed by position (like Solid's `Index`). The callback receives each
-item as a **reactive accessor** (`reactiveVal`) and an optional index:
-`fn(item)` or `fn(item, i)` where `i` is a fixed integer. If the length is
-stable, each slot's `reactiveVal` is updated in place so existing observers fire
-with the new values without DOM recreation. Currently does a full rebuild when
-list length changes. Future: incremental add/remove — grow by appending new
-slots, shrink by destroying trailing slots.
+**Index** — Like Solid's `Index`. The callback receives each item as a
+**reactive accessor** (`reactiveVal`) and an optional index: `fn(item)` or
+`fn(item, i)` where `i` is a fixed integer. If the length is stable, each slot's
+`reactiveVal` is updated in place so existing observers fire with the new values
+without DOM recreation. When the list grows, new slots are appended; when it
+shrinks, trailing slots are destroyed.
 
 ## Client-Side Protocol
 
-`nacre.js` registers three Shiny custom message handlers:
+`nacre.js` registers four Shiny custom message handlers:
 
 ### `nacre-attr`
 
@@ -110,6 +115,30 @@ is `value` (optimistic update).
 
 Calls `Shiny.unbindAll` on the element, replaces `innerHTML`, then calls
 `Shiny.bindAll` to initialize any Shiny outputs in the new content.
+
+### `nacre-mutate`
+
+```js
+{
+  id: "nacre-5",
+  removes: ["nacre-7", "nacre-9"],
+  inserts: ["<div id='nacre-12' ...>...</div>"],
+  order: ["nacre-6", "nacre-12", "nacre-8"]
+}
+```
+
+Performs granular child-node mutations on the container element. Used by `Each`
+and `Index` instead of `nacre-swap` to avoid destroying and recreating all
+children on every list change.
+
+1. **Removes** — Calls `Shiny.unbindAll` on each child, then removes it from the
+   DOM.
+2. **Inserts** — Appends new HTML fragments as children of the container.
+3. **Order** (optional) — Reorders children by calling `appendChild` in sequence,
+   which moves existing DOM nodes without cloning.
+
+After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
+initialize any new Shiny outputs.
 
 ### `nacre-events`
 
@@ -137,27 +166,6 @@ is true, the rate limiter also gates on server idle state (via
 process them.
 
 ## Remaining Work
-
-### `Each` — keyed reordering
-
-Currently destroys and recreates all items on any list change. The callback
-already receives plain values (not accessors), matching the target Solid `For`
-semantics. Needs:
-
-- `by` argument evaluation — extract comparable keys, diff old vs new.
-- Per-item mount handles instead of one mount for the whole list.
-- Diff old vs new keys to reorder, add, and remove individual items.
-- New `nacre-reorder` client-side message to insert, remove, and reorder child
-  nodes by ID (since `nacre-swap` replaces innerHTML wholesale).
-
-### `Index` — incremental add/remove
-
-Currently does a full rebuild when list length changes. Needs:
-
-- Per-slot mount handles instead of one mount for the whole list.
-- When list grows: append new slots, leave existing ones untouched.
-- When list shrinks: destroy trailing slots.
-- Same-length updates already work (reactiveVal in-place update).
 
 ### `Portal` (planned)
 

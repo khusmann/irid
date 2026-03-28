@@ -28,15 +28,13 @@ When <- function(condition, yes, otherwise = NULL) {
 #'
 #' @param items A reactive expression that returns a list.
 #' @param fn A function of `(item)` or `(item, index)` where `item` is the
-#'   item value and `index` is its position. Should return a tag tree.
+#'   plain item value and `index` is a [shiny::reactiveVal()] that tracks the
+#'   item's current position (updated on reorder). Should return a tag tree.
 #' @param by A function that extracts a comparable key from each item, used
-#'   for keyed reordering. Not yet evaluated — currently all items are
-#'   destroyed and recreated on any list change.
+#'   for keyed reordering. Keys must be unique. Defaults to [identity()].
 #' @return A nacre control-flow node.
 #' @export
 Each <- function(items, fn, by = identity) {
-  # TODO: implement keyed-by-identity rendering (reorder DOM nodes instead
-  # of recreating) to preserve per-item state across list mutations.
   structure(
     list(items = items, by = by, fn = fn),
     class = "nacre_each"
@@ -47,17 +45,16 @@ Each <- function(items, fn, by = identity) {
 #'
 #' Like [Each()], but when list values change without a length change, each
 #' slot's reactive value is updated in place rather than recreating the DOM.
-#' A full rebuild occurs only when the list length changes.
+#' When the list grows, new slots are appended; when it shrinks, trailing
+#' slots are destroyed.
 #'
 #' @param items A reactive expression that returns a list.
 #' @param fn A function of `(item)` or `(item, index)` where `item` is a
 #'   [shiny::reactiveVal()] for the item at that position and `index` is its
-#'   position. Should return a tag tree.
+#'   fixed position (plain integer). Should return a tag tree.
 #' @return A nacre control-flow node.
 #' @export
 Index <- function(items, fn) {
-  # TODO: implement incremental add/remove instead of full rebuild on
-  # length change, so existing slots keep their observers.
   structure(
     list(items = items, fn = fn),
     class = "nacre_index"
