@@ -165,19 +165,7 @@ is true, the rate limiter also gates on server idle state (via
 `Shiny.shinyapp.$idleTimeout`), so events never queue faster than the server can
 process them.
 
-## Remaining Work
-
-### `Portal` (planned)
-
-Not yet implemented. Would render content into a different DOM target. Needs
-`process_tags` handling and client-side support.
-
-### `Catch` (planned)
-
-Not yet implemented. Would provide error boundaries: if any `observe()` inside
-the content tree errors, tear it down and render a fallback.
-
-### Controlled input: optimistic updates
+## Controlled Input: Optimistic Updates
 
 When a user types into a focused input, the server echoes the value back through
 the reactive binding. Without care, this echo can cause cursor jumping or
@@ -222,6 +210,18 @@ Key design points:
 
 - **`__nacre_seq` is excluded** from the `event_obj` passed to user handlers, so
   it is an internal-only field.
+
+## Remaining Work
+
+### `Portal` (planned)
+
+Not yet implemented. Would render content into a different DOM target. Needs
+`process_tags` handling and client-side support.
+
+### `Catch` (planned)
+
+Not yet implemented. Would provide error boundaries: if any `observe()` inside
+the content tree errors, tear it down and render a fallback.
 
 ### Reactive child validation
 
