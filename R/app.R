@@ -1,3 +1,9 @@
+nacre_send_config <- function(session) {
+  session$sendCustomMessage("nacre-config", list(
+    staleTimeout = getOption("nacre.stale_timeout", default = 200)
+  ))
+}
+
 #' Create a nacre application
 #'
 #' Builds a Shiny app from a function that returns a nacre tag tree. The
@@ -21,6 +27,7 @@ nacreApp <- function(fn, ...) {
     )
   }
   server <- function(input, output, session) {
+    nacre_send_config(session)
     result <- process_tags(fn())
     nacre_mount_processed(result, session)
   }
@@ -63,6 +70,7 @@ renderNacre <- function(expr, env = parent.frame(), quoted = FALSE) {
     result <- process_tags(tag_tree)
 
     session$onFlushed(function() {
+      nacre_send_config(session)
       nacre_mount_processed(result, session)
     }, once = TRUE)
 

@@ -2,6 +2,57 @@
   var defined = new Set();
   var sequences = {};  // element id -> latest sent sequence number
   var PROP_ATTRS = { value: true, disabled: true, checked: true, selected: true };
+  var staleTimeout = null;  // ms before showing stale indicator (null = disabled)
+  var staleShowTimerId = null;
+  var staleClearTimerId = null;
+  var STALE_CLEAR_DELAY = 100;  // ms to wait after idle before removing overlay
+
+  function markStale() {
+    if (staleClearTimerId !== null) {
+      clearTimeout(staleClearTimerId);
+      staleClearTimerId = null;
+    }
+    document.documentElement.classList.add('nacre-stale');
+  }
+
+  function clearStale() {
+    if (staleShowTimerId !== null) {
+      clearTimeout(staleShowTimerId);
+      staleShowTimerId = null;
+    }
+    // Debounce the clear so rapid idle/busy cycles don't flicker
+    if (staleClearTimerId === null) {
+      staleClearTimerId = setTimeout(function() {
+        staleClearTimerId = null;
+        document.documentElement.classList.remove('nacre-stale');
+      }, STALE_CLEAR_DELAY);
+    }
+  }
+
+  function onEventSent() {
+    // Cancel any pending clear — we're busy again
+    if (staleClearTimerId !== null) {
+      clearTimeout(staleClearTimerId);
+      staleClearTimerId = null;
+    }
+    if (staleTimeout !== null && staleShowTimerId === null &&
+        !document.documentElement.classList.contains('nacre-stale')) {
+      staleShowTimerId = setTimeout(markStale, staleTimeout);
+    }
+  }
+
+  // Clear stale state when server finishes processing
+  $(document).on('shiny:idle', function() {
+    clearStale();
+  });
+
+  Shiny.addCustomMessageHandler('nacre-config', function(msg) {
+    if (msg.staleTimeout !== undefined && msg.staleTimeout !== null) {
+      staleTimeout = msg.staleTimeout;
+    } else {
+      staleTimeout = null;
+    }
+  });
 
   Shiny.addCustomMessageHandler('nacre-attr', function(msg) {
     var el = document.getElementById(msg.id);
@@ -116,6 +167,7 @@
 
   function sendPayload(inputId, payload) {
     Shiny.setInputValue(inputId, payload, { priority: 'event' });
+    onEventSent();
   }
 
   function onShinyIdle() {

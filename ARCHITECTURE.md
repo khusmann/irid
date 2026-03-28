@@ -211,6 +211,42 @@ Key design points:
 - **`__nacre_seq` is excluded** from the `event_obj` passed to user handlers, so
   it is an internal-only field.
 
+- **Force-send on no-op.** After running the user's event handler, the event
+  observer reads all bindings for the source element with `isolate()` and sends
+  `nacre-attr` messages tagged with the sequence. This covers the case where the
+  handler sets a `reactiveVal` to the same value it already holds (a no-op that
+  doesn't invalidate the binding observer). Without the force-send, the client
+  would receive no echo and could not apply a server transform. For example, a
+  handler that truncates `text(substr(event$value, 1, 10))` when `text()` is
+  already 10 characters — the reactive doesn't change, but the client still needs
+  the truncated value to replace what the user typed. When the reactive *does*
+  change, both the force-send and the binding observer fire with the same value;
+  the client handles the duplicate harmlessly.
+
+## Stale UI Indicator
+
+When the server takes too long to respond after an event, the UI goes grey
+(desaturated) to signal that displayed state may be stale. Elements remain
+interactive — this is a visual cue, not a disabled state.
+
+**Option:** `nacre.stale_timeout` — milliseconds to wait before showing the
+indicator. Default `200`. Set to `NULL` to disable.
+
+**Flow:**
+
+1. The session entry points (`nacreApp` server, `renderNacre` `onFlushed`) send
+   a `nacre-config` message with the timeout from `getOption("nacre.stale_timeout")`.
+2. On the client, every `sendPayload` call increments a pending-event counter
+   and starts a timer (if not already running).
+3. If `shiny:idle` fires before the timer, the counter and timer are reset.
+4. If the timer fires first, `nacre-stale` is added to `<body>`, which
+   activates `filter: saturate(0.3) brightness(0.95)` via `nacre.css`.
+5. When `shiny:idle` eventually fires, the class is removed with a short
+   CSS transition.
+
+**Debug:** `nacre.debug.latency` (seconds) adds a `Sys.sleep` to every event
+handler. The `optimistic_updates` example exposes this as a slider.
+
 ## Remaining Work
 
 ### `Portal` (planned)

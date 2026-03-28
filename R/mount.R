@@ -14,6 +14,13 @@ nacre_mount_processed <- function(result, session) {
   counter <- result$counter
   observers <- list()
 
+  # Index bindings by element ID so event handlers can force-send
+  # the authoritative value even when the reactive is a no-op.
+  bindings_by_id <- list()
+  for (b in result$bindings) {
+    bindings_by_id[[b$id]] <- c(bindings_by_id[[b$id]], list(b))
+  }
+
   # Set up event listeners
   if (length(result$events) > 0L) {
     event_msgs <- lapply(result$events, function(ev) {
@@ -52,6 +59,22 @@ nacre_mount_processed <- function(result, session) {
           handler(event_obj)
         } else {
           handler(event_obj, ev_data$id)
+        }
+
+        # Force-send current binding values for the source element.
+        # If the handler set a reactive to the same value (no-op), the
+        # binding observer won't fire and the client gets no echo. This
+        # ensures the client always receives the authoritative value so
+        # it can apply server transforms even on no-op updates.
+        source_id <- ev_data[["id"]]
+        source_bindings <- bindings_by_id[[source_id]]
+        if (!is.null(seq) && length(source_bindings) > 0L) {
+          for (sb in source_bindings) {
+            val <- isolate(sb$fn())
+            msg <- list(id = sb$id, attr = sb$attr, value = val,
+                        sequence = seq)
+            session$sendCustomMessage("nacre-attr", msg)
+          }
         }
       }, ignoreInit = TRUE)
       observers[[length(observers) + 1L]] <<- obs

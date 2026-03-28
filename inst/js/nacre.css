@@ -1,0 +1,7 @@
+html.nacre-stale {
+  filter: saturate(0.3) brightness(0.95);
+  transition: filter 0.15s ease-in;
+}
+html:not(.nacre-stale) {
+  transition: filter 0.15s ease-out;
+}
