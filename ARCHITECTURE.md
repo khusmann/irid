@@ -272,6 +272,4 @@ returns silently produce unexpected output.
 
 ### Testing
 
-No test suite yet. Key areas: `process_tags` extraction, observer lifecycle for
-each control-flow primitive, rate-limiting metadata propagation,
-`nacreOutput`/`renderNacre` integration, module scoping.
+See [TESTING.md](TESTING.md) for the full test plan.
