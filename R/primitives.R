@@ -144,7 +144,7 @@ Output <- function(render_fn, output_fn, expr, ...,
 #' @export
 PlotOutput <- function(expr, ..., env = parent.frame()) {
   expr_q <- substitute(expr)
-  Output(renderPlot, plotOutput, expr_q, ..., env = env, quoted = TRUE)
+  Output(shiny::renderPlot, shiny::plotOutput, expr_q, ..., env = env, quoted = TRUE)
 }
 
 #' Embed a table output in a nacre tag tree
@@ -158,7 +158,7 @@ PlotOutput <- function(expr, ..., env = parent.frame()) {
 #' @export
 TableOutput <- function(expr, ..., env = parent.frame()) {
   expr_q <- substitute(expr)
-  Output(renderTable, tableOutput, expr_q, ..., env = env, quoted = TRUE)
+  Output(shiny::renderTable, shiny::tableOutput, expr_q, ..., env = env, quoted = TRUE)
 }
 
 #' Embed a DT DataTable output in a nacre tag tree

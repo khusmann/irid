@@ -24,7 +24,7 @@ nacreApp <- function(fn, ...) {
     result <- process_tags(fn())
     nacre_mount_processed(result, session)
   }
-  shinyApp(ui, server, ...)
+  shiny::shinyApp(ui, server, ...)
 }
 
 #' Create a nacre UI output placeholder
@@ -38,7 +38,7 @@ nacreApp <- function(fn, ...) {
 #' @export
 nacreOutput <- function(id) {
   htmltools::attachDependencies(
-    uiOutput(id),
+    shiny::uiOutput(id),
     nacre_dependency()
   )
 }
@@ -57,8 +57,8 @@ nacreOutput <- function(id) {
 renderNacre <- function(expr, env = parent.frame(), quoted = FALSE) {
   func <- shiny::exprToFunction(expr, env, quoted)
 
-  renderUI({
-    session <- getDefaultReactiveDomain()
+  shiny::renderUI({
+    session <- shiny::getDefaultReactiveDomain()
     tag_tree <- isolate(func())
     result <- process_tags(tag_tree)
 

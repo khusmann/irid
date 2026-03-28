@@ -4,7 +4,7 @@
 \alias{process_tags}
 \title{Walk a tag tree and extract reactive bindings}
 \usage{
-process_tags(tag)
+process_tags(tag, counter = nacre_id_counter())
 }
 \arguments{
 \item{tag}{A Shiny tag, tag list, or nacre control-flow node.}
