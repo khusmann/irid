@@ -30,14 +30,16 @@ When <- function(condition, yes, otherwise = NULL) {
 #' @param fn A function of `(item, index)` where `item` is a zero-argument
 #'   accessor for the item value and `index` is its position. Should return a
 #'   tag tree.
+#' @param by A function that extracts a comparable key from each item, used
+#'   for keyed reordering. Not yet evaluated — currently all items are
+#'   destroyed and recreated on any list change.
 #' @return A nacre control-flow node.
 #' @export
-Each <- function(items, fn) {
+Each <- function(items, fn, by = identity) {
   # TODO: implement keyed-by-identity rendering (reorder DOM nodes instead
-
   # of recreating) to preserve per-item state across list mutations.
   structure(
-    list(items = items, fn = fn),
+    list(items = items, by = by, fn = fn),
     class = "nacre_each"
   )
 }

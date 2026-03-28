@@ -4,7 +4,7 @@
 \alias{Each}
 \title{Render a list by recreating all items}
 \usage{
-Each(items, fn)
+Each(items, fn, by = identity)
 }
 \arguments{
 \item{items}{A reactive expression that returns a list.}
@@ -12,6 +12,10 @@ Each(items, fn)
 \item{fn}{A function of \verb{(item, index)} where \code{item} is a zero-argument
 accessor for the item value and \code{index} is its position. Should return a
 tag tree.}
+
+\item{by}{A function that extracts a comparable key from each item, used
+for keyed reordering. Not yet evaluated — currently all items are
+destroyed and recreated on any list change.}
 }
 \value{
 A nacre control-flow node.

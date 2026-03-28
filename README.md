@@ -306,7 +306,7 @@ event, preventing queue buildup when the server is slow.
 | `nacreOutput(id)` / `renderNacre(expr)` | Drop nacre into an existing Shiny app |
 | `When(condition, yes, otherwise)`       | Conditional rendering                 |
 | `Match(Case(...), ..., Default(...))`   | Multi-branch conditional              |
-| `Each(items, fn)`                       | Dynamic lists (recreate on change)    |
+| `Each(items, fn, by)`                   | Dynamic lists (recreate on change)    |
 | `Index(items, fn)`                      | Dynamic lists (positional update)     |
 | `Output(render_fn, output_fn, expr)`    | Inline Shiny output                   |
 | `PlotOutput(expr)`                      | Plot output shorthand                 |
