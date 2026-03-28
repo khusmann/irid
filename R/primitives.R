@@ -27,9 +27,8 @@ When <- function(condition, yes, otherwise = NULL) {
 #' items in place, see [Index()].
 #'
 #' @param items A reactive expression that returns a list.
-#' @param fn A function of `(item, index)` where `item` is a zero-argument
-#'   accessor for the item value and `index` is its position. Should return a
-#'   tag tree.
+#' @param fn A function of `(item)` or `(item, index)` where `item` is the
+#'   item value and `index` is its position. Should return a tag tree.
 #' @param by A function that extracts a comparable key from each item, used
 #'   for keyed reordering. Not yet evaluated — currently all items are
 #'   destroyed and recreated on any list change.
@@ -51,7 +50,7 @@ Each <- function(items, fn, by = identity) {
 #' A full rebuild occurs only when the list length changes.
 #'
 #' @param items A reactive expression that returns a list.
-#' @param fn A function of `(item, index)` where `item` is a
+#' @param fn A function of `(item)` or `(item, index)` where `item` is a
 #'   [shiny::reactiveVal()] for the item at that position and `index` is its
 #'   position. Should return a tag tree.
 #' @return A nacre control-flow node.

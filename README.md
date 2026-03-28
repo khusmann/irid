@@ -237,28 +237,45 @@ Match(
 
 ### Each
 
-Dynamic lists. Replaces `renderUI(lapply(...))`:
+Dynamic lists. Replaces `renderUI(lapply(...))`. The callback receives each
+item as a **plain value** — when the list changes, all items are destroyed and
+recreated. (Future: keyed reordering via the `by` argument will move DOM nodes
+instead of recreating them.)
 
 ```r
 tags$ul(
-  Each(items, \(item, index) {
-    tags$li(\() item())
+  Each(items, \(item) {
+    tags$li(item$name)
   })
 )
+```
+
+The `index` parameter is optional:
+
+```r
+Each(items, \(item, index) {
+  tags$li(paste(index, item$name))
+})
 ```
 
 ### Index
 
-Like `Each`, but updates items in place when only values change (not list
-length):
+Like `Each`, but keyed by **position**. The callback receives each item as a
+**reactive accessor** (`item()` to read). When values change without a length
+change, each slot's `reactiveVal` is updated in place — existing observers
+re-fire without DOM recreation:
 
 ```r
 tags$ul(
-  Index(items, \(item, index) {
-    tags$li(\() item())
+  Index(items, \(item) {
+    tags$li(\() item()$name)
   })
 )
 ```
+
+**When to use which:** Use `Each` when items have a stable identity (todos,
+users, records). Use `Index` when you care about positions (ranking, slots,
+columns).
 
 ## Shiny Outputs
 

@@ -9,7 +9,7 @@ Index(items, fn)
 \arguments{
 \item{items}{A reactive expression that returns a list.}
 
-\item{fn}{A function of \verb{(item, index)} where \code{item} is a
+\item{fn}{A function of \code{(item)} or \verb{(item, index)} where \code{item} is a
 \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} for the item at that position and \code{index} is its
 position. Should return a tag tree.}
 }

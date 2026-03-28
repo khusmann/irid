@@ -2,12 +2,12 @@ library(shiny)
 library(bslib)
 library(nacre)
 
-SyncedInputs <- function() {
+ControlledInputs <- function() {
   name <- reactiveVal("")
 
   page_fluid(
     card(
-      card_header("Synced Textboxes"),
+      card_header("Controlled Inputs"),
       card_body(
         tags$p(class = "text-muted", "Type in any input — the others follow."),
         tags$input(type = "text", class = "form-control mb-2",
@@ -24,4 +24,4 @@ SyncedInputs <- function() {
   )
 }
 
-nacreApp(SyncedInputs)
+nacreApp(ControlledInputs)

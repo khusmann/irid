@@ -118,6 +118,7 @@ nacre_mount_processed <- function(result, session) {
         cf_id <- cf$id
         cf_items <- cf$items
         cf_fn <- cf$fn
+        cf_nformals <- length(formals(cf_fn))
         env <- environment()
 
         obs <- observe({
@@ -132,9 +133,7 @@ nacre_mount_processed <- function(result, session) {
           if (length(item_list) > 0L) {
             # Build tag list by calling fn for each item
             children <- lapply(seq_along(item_list), function(i) {
-              item_val <- item_list[[i]]
-              item_fn <- function() item_val
-              cf_fn(item_fn, i)
+              if (cf_nformals >= 2L) cf_fn(item_list[[i]], i) else cf_fn(item_list[[i]])
             })
             tag_list <- tagList(children)
             processed <- process_tags(tag_list, counter = counter)
@@ -162,6 +161,7 @@ nacre_mount_processed <- function(result, session) {
         cf_id <- cf$id
         cf_items <- cf$items
         cf_fn <- cf$fn
+        cf_nformals <- length(formals(cf_fn))
         env <- environment()
 
         obs <- observe({
@@ -182,7 +182,7 @@ nacre_mount_processed <- function(result, session) {
 
             if (new_len > 0L) {
               children <- lapply(seq_along(env$slots), function(i) {
-                cf_fn(env$slots[[i]], i)
+                if (cf_nformals >= 2L) cf_fn(env$slots[[i]], i) else cf_fn(env$slots[[i]])
               })
               tag_list <- tagList(children)
               processed <- process_tags(tag_list, counter = counter)

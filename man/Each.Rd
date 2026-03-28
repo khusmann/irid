@@ -9,9 +9,8 @@ Each(items, fn, by = identity)
 \arguments{
 \item{items}{A reactive expression that returns a list.}
 
-\item{fn}{A function of \verb{(item, index)} where \code{item} is a zero-argument
-accessor for the item value and \code{index} is its position. Should return a
-tag tree.}
+\item{fn}{A function of \code{(item)} or \verb{(item, index)} where \code{item} is the
+item value and \code{index} is its position. Should return a tag tree.}
 
 \item{by}{A function that extracts a comparable key from each item, used
 for keyed reordering. Not yet evaluated — currently all items are
