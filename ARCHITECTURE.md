@@ -270,6 +270,22 @@ the content tree errors, tear it down and render a fallback.
 Reactive children should return text only. Currently no validation — non-text
 returns silently produce unexpected output.
 
+### Client-side event filtering (planned)
+
+Add a `filter` argument to `event_immediate()`, `event_throttle()`, and
+`event_debounce()` that accepts a JS expression string. The expression is
+evaluated client-side with the DOM event object as `e` — if falsy, the event is
+never sent to the server (zero round-trips). This avoids flooding the server
+with events the handler doesn't care about (e.g. `onKeyDown` that only handles
+Enter).
+
+A `key_filter()` helper would generate the JS expression for common key
+matching:
+
+```r
+onKeyDown = event_immediate(\(e) submit(), filter = key_filter("Enter"))
+```
+
 ### Testing
 
 See [TESTING.md](TESTING.md) for the full test plan.
