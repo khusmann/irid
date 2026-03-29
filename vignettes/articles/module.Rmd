@@ -1,5 +1,9 @@
 ---
 title: "Shiny Modules"
+vignette: >
+  %\VignetteIndexEntry{Shiny Modules}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
 
 nacre components compose naturally with standard Shiny modules. Use `nacreOutput()` and `renderNacre()` to embed a nacre component tree inside a module's UI and server functions, exactly like any other Shiny output. The reactive state lives inside the module's server function, so each module instance is fully independent.

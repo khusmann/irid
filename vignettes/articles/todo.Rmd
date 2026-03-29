@@ -1,5 +1,9 @@
 ---
 title: "Todo List"
+vignette: >
+  %\VignetteIndexEntry{Todo List}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
 ---
 
 A [TodoMVC](https://todomvc.com/)-style application demonstrating reactive list management with nacre. Items are stored as a `reactiveVal` holding a plain R list; adding, toggling, and removing items are ordinary functions that update that list. The filter tabs and item count derive reactively from the same source, so everything stays consistent without any manual synchronization.
