@@ -47,7 +47,12 @@ jobs:
         shell: Rscript {0}
 
       - name: Install shinylive
-        run: install.packages("shinylive", repos = "https://posit-dev.r-universe.dev")
+        run: |
+          install.packages("shinylive",
+            repos = c("https://posit-dev.r-universe.dev", "https://cloud.r-project.org"),
+            type = "source"
+          )
+          stopifnot(requireNamespace("shinylive", quietly = TRUE))
         shell: Rscript {0}
 
       - name: Build nacre Wasm binary repo
