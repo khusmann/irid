@@ -50,21 +50,17 @@ jobs:
         run: install.packages("shinylive")
         shell: Rscript {0}
 
-      - name: Build nacre CRAN repo for WebR
-        run: |
-          contrib_dir <- file.path("docs", "r-repo", "src", "contrib")
-          dir.create(contrib_dir, recursive = TRUE)
-          system2("R", c("CMD", "build", "--no-manual", "."), stdout = TRUE)
-          tarballs <- list.files(".", pattern = "\\.tar\\.gz$")
-          file.rename(tarballs, file.path(contrib_dir, tarballs))
-          tools::write_PACKAGES(contrib_dir, type = "source")
-        shell: Rscript {0}
+      - name: Build nacre Wasm binary repo
+        uses: r-wasm/actions/build-rwasm@v2
+        with:
+          packages: "local::."
+          repo-path: "docs/r-repo"
 
       - name: Export shinylive apps
         run: |
           nacre_repo <- "https://nacre.kylehusmann.com/r-repo/"
           webr_install <- paste0(
-            'webr::install("nacre", repos = c("', nacre_repo, '", "https://repo.r-wasm.org"), type = "source")\n'
+            'webr::install("nacre", repos = c("', nacre_repo, '", "https://repo.r-wasm.org"))\n'
           )
           examples <- c(
             "controlled-inputs"  = "controlled_inputs",
