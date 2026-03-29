@@ -8,7 +8,7 @@ navbar:
       text: Examples
       menu:
       - text: Controlled Inputs
-        href: articles/controlled-inputs.html
+        href: articles/controlled_inputs.html
       - text: Temperature Converter
         href: articles/temperature.html
       - text: Todo List
@@ -16,15 +16,15 @@ navbar:
       - text: Shiny Modules
         href: articles/module.html
       - text: Optimistic Updates
-        href: articles/optimistic-updates.html
+        href: articles/optimistic_updates.html
   structure:
     left: [intro, reference, examples, news]
 
 articles:
 - title: Examples
   contents:
-  - "controlled-inputs"
+  - controlled_inputs
   - temperature
   - todo
   - module
-  - "optimistic-updates"
+  - optimistic_updates
