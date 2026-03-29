@@ -47,7 +47,7 @@ jobs:
         shell: Rscript {0}
 
       - name: Install shinylive
-        run: install.packages("shinylive")
+        run: install.packages("shinylive", repos = "https://posit-dev.r-universe.dev")
         shell: Rscript {0}
 
       - name: Build nacre Wasm binary repo
@@ -55,7 +55,6 @@ jobs:
         with:
           packages: "local::."
           repo-path: "docs/r-repo"
-          webr-image: "ghcr.io/r-wasm/webr:v0.4.4"
 
       - name: Export shinylive apps
         run: |
