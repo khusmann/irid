@@ -55,6 +55,7 @@ jobs:
         with:
           packages: "local::."
           repo-path: "docs/r-repo"
+          webr-image: "ghcr.io/r-wasm/webr:v0.4.4"
 
       - name: Export shinylive apps
         run: |
