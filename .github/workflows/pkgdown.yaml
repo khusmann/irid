@@ -46,9 +46,14 @@ jobs:
         run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)
         shell: Rscript {0}
 
+      # TODO: CRAN shinylive still bundles WebR with R 4.4, but build-rwasm
+      # defaults to R 4.5. Once CRAN shinylive is updated to R 4.5, switch
+      # this to install.packages("shinylive") and remove the r-universe repo.
       - name: Install shinylive
         run: |
-          install.packages("shinylive")
+          install.packages("shinylive",
+            repos = c("https://posit-dev.r-universe.dev", "https://cloud.r-project.org") # TODO: remove r-universe once CRAN shinylive supports R 4.5
+          )
           stopifnot(requireNamespace("shinylive", quietly = TRUE))
         shell: Rscript {0}
 
@@ -57,7 +62,6 @@ jobs:
         with:
           packages: "local::."
           repo-path: "docs/r-repo"
-          webr-image: "ghcr.io/r-wasm/webr:v0.4.4"
 
       - name: Export shinylive apps
         run: |
