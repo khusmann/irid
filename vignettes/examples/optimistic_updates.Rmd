@@ -15,7 +15,7 @@ This example lets you explore three scenarios and dial in a simulated server del
 3. **Mirror** — a read-only input always shows the confirmed server value, useful for verifying what the server actually holds.
 
 <iframe
-  src="../../apps/optimistic-updates/"
+  src="../../apps/optimistic-updates/index.html?appMode=editor-viewer&appOptions.layout=vertical"
   width="100%"
   height="600px"
   style="border: 1px solid #dee2e6; border-radius: 4px;"

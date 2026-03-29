@@ -11,7 +11,7 @@ nacre components compose naturally with standard Shiny modules. Use `nacreOutput
 This example instantiates two counter modules side by side. Each has its own slider, reset button, and a `verbatimTextOutput` showing the server-side value — confirming that state is isolated per instance.
 
 <iframe
-  src="../../apps/module/"
+  src="../../apps/module/index.html?appMode=editor-viewer&appOptions.layout=vertical"
   width="100%"
   height="380px"
   style="border: 1px solid #dee2e6; border-radius: 4px;"
