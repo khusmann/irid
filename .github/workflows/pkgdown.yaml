@@ -62,9 +62,9 @@ jobs:
 
       - name: Export shinylive apps
         run: |
-          nacre_repo <- "https://khusmann.github.io/nacre/r-repo/"
+          nacre_repo <- "https://nacre.kylehusmann.com/r-repo/"
           webr_install <- paste0(
-            'webr::install("nacre", repos = c("', nacre_repo, '", "https://repo.r-wasm.org"))\n'
+            'webr::install("nacre", repos = c("', nacre_repo, '", "https://repo.r-wasm.org"), type = "source")\n'
           )
           examples <- c(
             "controlled-inputs"  = "controlled_inputs",
