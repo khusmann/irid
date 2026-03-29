@@ -23,8 +23,8 @@ navbar:
 articles:
 - title: Examples
   contents:
-  - controlled-inputs
+  - "controlled-inputs"
   - temperature
   - todo
   - module
-  - optimistic-updates
+  - "optimistic-updates"
