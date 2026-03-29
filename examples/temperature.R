@@ -1,3 +1,13 @@
+# Temperature Converter
+#
+# A classic reactive UI challenge: two inputs representing the same value in
+# different units, where editing either one should update the other. In
+# traditional Shiny this requires careful coordination to avoid feedback loops.
+# With nacre's controlled inputs, the solution is straightforward — one
+# `reactiveVal` holds the canonical Celsius value, and the Fahrenheit input
+# derives from it via a `reactive()`. Both the number inputs and the vertical
+# sliders stay in sync automatically.
+
 library(shiny)
 library(bslib)
 library(nacre)

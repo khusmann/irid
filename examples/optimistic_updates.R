@@ -1,7 +1,25 @@
+# Optimistic Updates
+#
+# When a user types into a controlled input, nacre applies the change
+# immediately in the browser before the server round-trip completes — an
+# *optimistic update*. If the server responds with a different value (e.g. it
+# truncates the input), the browser reconciles to the server's version. This
+# keeps the UI feeling instant while still letting the server be the authority
+# on state.
+#
+# This example lets you explore three scenarios and dial in a simulated server
+# delay to make the reconciliation visible:
+#
+# 1. Programmatic clear — a button sets the value to "" server-side; the input
+#    should empty immediately.
+# 2. Server transform — the server enforces a 10-character limit; typing past
+#    it snaps back.
+# 3. Mirror — a read-only input always shows the confirmed server value, useful
+#    for verifying what the server actually holds.
+
 library(shiny)
 library(bslib)
 library(nacre)
-
 
 OptimisticUpdates <- function() {
   text <- reactiveVal("")

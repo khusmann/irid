@@ -8,23 +8,14 @@ navbar:
       text: Examples
       menu:
       - text: Controlled Inputs
-        href: articles/examples/controlled_inputs.html
+        href: apps/controlled-inputs/index.html?_shinylive-mode=editor-terminal-viewer
       - text: Temperature Converter
-        href: articles/examples/temperature.html
+        href: apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer
       - text: Todo List
-        href: articles/examples/todo.html
+        href: apps/todo/index.html?_shinylive-mode=editor-terminal-viewer
       - text: Shiny Modules
-        href: articles/examples/module.html
+        href: apps/module/index.html?_shinylive-mode=editor-terminal-viewer
       - text: Optimistic Updates
-        href: articles/examples/optimistic_updates.html
+        href: apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer
   structure:
     left: [intro, reference, examples, news]
-
-articles:
-- title: Examples
-  contents:
-  - examples/controlled_inputs
-  - examples/temperature
-  - examples/todo
-  - examples/module
-  - examples/optimistic_updates

@@ -1,3 +1,11 @@
+# Todo List
+#
+# A TodoMVC-style application demonstrating reactive list management with nacre.
+# Items are stored as a `reactiveVal` holding a plain R list; adding, toggling,
+# and removing items are ordinary functions that update that list. The filter
+# tabs and item count derive reactively from the same source, so everything
+# stays consistent without any manual synchronization.
+
 library(shiny)
 library(bslib)
 library(nacre)

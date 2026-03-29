@@ -1,3 +1,15 @@
+# Shiny Modules
+#
+# nacre components compose naturally with standard Shiny modules. Use
+# `nacreOutput()` and `renderNacre()` to embed a nacre component tree inside a
+# module's UI and server functions, exactly like any other Shiny output. The
+# reactive state lives inside the module's server function, so each module
+# instance is fully independent.
+#
+# This example instantiates two counter modules side by side. Each has its own
+# slider, reset button, and a `verbatimTextOutput` showing the server-side
+# value — confirming that state is isolated per instance.
+
 library(shiny)
 library(bslib)
 library(nacre)
