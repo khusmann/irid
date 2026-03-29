@@ -39,6 +39,12 @@ Walks the tag tree recursively and produces:
   `Index`, or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
 
+Bare functions are wrapped with a default event mode: `onInput` uses
+`event_debounce(ms = 200)` (since intermediate values during typing are
+noise), all other events use `event_immediate()`. Explicit wrappers
+(`event_immediate()`, `event_throttle()`, `event_debounce()`) override the
+default.
+
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.
 

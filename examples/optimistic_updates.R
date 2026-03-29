@@ -19,7 +19,7 @@ OptimisticUpdates <- function() {
           tags$input(type = "text", class = "form-control",
             placeholder = "Type here...",
             value = text,
-            onInput = event_throttle(\(event) text(event$value), ms = 100)),
+            onInput = \(event) text(event$value)),
           tags$button(class = "btn btn-outline-secondary",
             onClick = \() text(""), "Clear")
         ),
@@ -28,7 +28,7 @@ OptimisticUpdates <- function() {
         tags$p(class = "text-muted", "Type past the limit. Server truncates to 10 chars."),
         tags$input(type = "text", class = "form-control mb-3",
           value = \() substr(text(), 1, max_chars),
-          onInput = event_throttle(\(event) text(substr(event$value, 1, max_chars)), ms = 100)),
+          onInput = \(event) text(substr(event$value, 1, max_chars))),
 
         tags$h6("3. Server echo (mirror)"),
         tags$p(class = "text-muted", "Read-only mirror. Should always match server state."),
@@ -49,11 +49,11 @@ OptimisticUpdates <- function() {
         tags$input(id = "delay-slider", type = "range",
           class = "form-range", min = "0", max = "3000", step = "50",
           value = delay_ms,
-          onInput = event_debounce(\(event) {
+          onInput = \(event) {
             val <- as.integer(event$value)
             delay_ms(val)
             options(nacre.debug.latency = val / 1000)
-          }, ms = 200))
+          })
       )
     )
   )

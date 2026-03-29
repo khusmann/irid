@@ -117,9 +117,13 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
 
       if (is_event) {
         js_event <- tolower(sub("^on", "", name))
-        # Wrap bare functions in event_immediate()
+        # Wrap bare functions: onInput defaults to debounce, others to immediate
         if (!inherits(val, "nacre_event")) {
-          val <- event_immediate(val)
+          val <- if (js_event == "input") {
+            event_debounce(val, ms = 200)
+          } else {
+            event_immediate(val)
+          }
         }
         handler <- structure(val, class = "function",
                              mode = NULL, ms = NULL, leading = NULL,

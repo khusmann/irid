@@ -4,7 +4,8 @@
 #'
 #' - `event_immediate()`: Fires on every event with no rate limiting. Bare
 #'   functions passed as event handlers are implicitly wrapped with
-#'   `event_immediate()`.
+#'   `event_immediate()`, except for `onInput` which defaults to
+#'   `event_debounce(ms = 200)`.
 #' - `event_throttle()`: Fires at most every `ms` milliseconds while the
 #'   event is active.
 #' - `event_debounce()`: Waits until the user pauses for `ms` milliseconds
