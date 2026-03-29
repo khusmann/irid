@@ -1,4 +1,4 @@
-url: https://khusmann.github.io/nacre/
+url: https://nacre.kylehusmann.com
 template:
   bootstrap: 5
 
@@ -8,23 +8,23 @@ navbar:
       text: Examples
       menu:
       - text: Controlled Inputs
-        href: articles/controlled_inputs.html
+        href: articles/examples/controlled_inputs.html
       - text: Temperature Converter
-        href: articles/temperature.html
+        href: articles/examples/temperature.html
       - text: Todo List
-        href: articles/todo.html
+        href: articles/examples/todo.html
       - text: Shiny Modules
-        href: articles/module.html
+        href: articles/examples/module.html
       - text: Optimistic Updates
-        href: articles/optimistic_updates.html
+        href: articles/examples/optimistic_updates.html
   structure:
     left: [intro, reference, examples, news]
 
 articles:
 - title: Examples
   contents:
-  - controlled_inputs
-  - temperature
-  - todo
-  - module
-  - optimistic_updates
+  - examples/controlled_inputs
+  - examples/temperature
+  - examples/todo
+  - examples/module
+  - examples/optimistic_updates

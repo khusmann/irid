@@ -9,7 +9,7 @@ vignette: >
 A [TodoMVC](https://todomvc.com/)-style application demonstrating reactive list management with nacre. Items are stored as a `reactiveVal` holding a plain R list; adding, toggling, and removing items are ordinary functions that update that list. The filter tabs and item count derive reactively from the same source, so everything stays consistent without any manual synchronization.
 
 <iframe
-  src="../apps/todo/"
+  src="../../apps/todo/"
   width="100%"
   height="620px"
   style="border: 1px solid #dee2e6; border-radius: 4px;"
@@ -18,7 +18,7 @@ A [TodoMVC](https://todomvc.com/)-style application demonstrating reactive list 
 <details><summary>Show source</summary>
 
 ```{r echo=FALSE, results='asis'}
-knitr::asis_output(paste0("```r\n", paste(readLines("examples/todo.R"), collapse = "\n"), "\n```"))
+knitr::asis_output(paste0("```r\n", paste(readLines("../../examples/todo.R"), collapse = "\n"), "\n```"))
 ```
 
 </details>
