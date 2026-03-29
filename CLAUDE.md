@@ -14,3 +14,4 @@
 ## Build
 
 - Run `devtools::document()` after changing exports or roxygen comments
+- Edit `README.Rmd`, not `README.md`. Run `devtools::build_readme()` after changes to regenerate the md.
