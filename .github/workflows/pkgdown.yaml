@@ -60,18 +60,38 @@ jobs:
           stopifnot(requireNamespace("shinylive", quietly = TRUE))
         shell: Rscript {0}
 
-      - name: Build nacre Wasm binary repo
+      - name: Build nacre Wasm binary
         uses: r-wasm/actions/build-rwasm@v2
         with:
           packages: "local::."
-          repo-path: "docs/r-repo"
+          repo-path: "_rwasm"
 
       - name: Export shinylive apps
         run: |
-          nacre_repo <- "https://nacre.kylehusmann.com/r-repo/"
-          webr_install <- paste0(
-            'webr::install("nacre", repos = c("', nacre_repo, '", "https://repo.r-wasm.org"))\n'
-          )
+          inject_local_wasm <- function(destdir, rwasm_repo, pkg) {
+            r_short <- gsub("\\.[^.]+$", "", as.character(getRversion()))
+            contrib <- file.path(rwasm_repo, "bin", "emscripten", "contrib", r_short)
+            tgz <- list.files(contrib, pattern = paste0("^", pkg, "_.*\\.tgz$"), full.names = TRUE)[[1]]
+            tgz_name <- basename(tgz)
+
+            pkg_dir <- file.path(destdir, "shinylive", "webr", "packages", pkg)
+            dir.create(pkg_dir, recursive = TRUE, showWarnings = FALSE)
+            file.copy(tgz, file.path(pkg_dir, tgz_name))
+
+            meta_file <- file.path(destdir, "shinylive", "webr", "packages", "metadata.rds")
+            metadata <- if (file.exists(meta_file)) readRDS(meta_file) else list()
+            metadata[[pkg]] <- list(
+              name = pkg,
+              version = as.character(packageVersion(pkg)),
+              ref = paste0(pkg, "@", packageVersion(pkg)),
+              type = "library",
+              cached = TRUE,
+              assets = list(list(filename = tgz_name, url = "")),
+              path = paste0("packages/", pkg, "/", tgz_name)
+            )
+            saveRDS(metadata, meta_file)
+          }
+
           examples <- c(
             "controlled-inputs"  = "controlled_inputs",
             "temperature"        = "temperature",
@@ -80,14 +100,15 @@ jobs:
             "optimistic-updates" = "optimistic_updates"
           )
           for (slug in names(examples)) {
-            app_dir <- file.path(tempdir(), slug)
-            dir.create(app_dir)
-            app_code <- readLines(file.path("examples", paste0(examples[[slug]], ".R")))
-            writeLines(c(webr_install, app_code), file.path(app_dir, "app.R"))
-            shinylive::export(
-              appdir  = app_dir,
-              destdir = file.path("docs", "apps", slug)
-            )
+            app_dir <- file.path("examples", paste0(examples[[slug]], ".R"))
+            dest_dir <- file.path("docs", "apps", slug)
+
+            tmp_dir <- file.path(tempdir(), slug)
+            dir.create(tmp_dir)
+            file.copy(app_dir, file.path(tmp_dir, "app.R"))
+
+            shinylive::export(appdir = tmp_dir, destdir = dest_dir)
+            inject_local_wasm(dest_dir, "_rwasm", "nacre")
           }
         shell: Rscript {0}
 
