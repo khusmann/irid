@@ -7,6 +7,9 @@ Description: A thin rendering layer on top of Shiny that replaces renderUI
     with Solid-style fine-grained DOM bindings. Pass a function instead of a
     value to make any tag attribute reactive.
 License: MIT + file LICENSE
+URL: https://nacre.kylehusmann.com,
+    https://github.com/khusmann/nacre
+BugReports: https://github.com/khusmann/nacre/issues
 Depends:
     R (>= 4.1.0)
 Imports:
@@ -20,4 +23,3 @@ VignetteBuilder: knitr
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
-URL: https://khusmann.github.io/nacre/
