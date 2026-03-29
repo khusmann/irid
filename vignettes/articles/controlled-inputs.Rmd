@@ -1,0 +1,22 @@
+---
+title: "Controlled Inputs"
+---
+
+In most UI frameworks, inputs and state are kept in sync by making the input *controlled* — the input's displayed value is always derived from application state, not managed independently by the browser. nacre brings this pattern to Shiny: you bind a reactive value directly to an input's `value` attribute, and every update flows through that single source of truth.
+
+This example shows three text inputs all bound to the same `reactiveVal`. Type in any one of them and the others instantly reflect the change — there's no extra synchronization logic, just one shared value.
+
+<iframe
+  src="../apps/controlled-inputs/"
+  width="100%"
+  height="280px"
+  style="border: 1px solid #dee2e6; border-radius: 4px;"
+></iframe>
+
+<details><summary>Show source</summary>
+
+```{r echo=FALSE, results='asis'}
+knitr::asis_output(paste0("```r\n", paste(readLines("examples/controlled_inputs.R"), collapse = "\n"), "\n```"))
+```
+
+</details>

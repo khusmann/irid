@@ -46,6 +46,33 @@ jobs:
         run: pkgdown::build_site_github_pages(new_process = FALSE, install = FALSE)
         shell: Rscript {0}
 
+      - name: Install shinylive
+        run: install.packages("shinylive")
+        shell: Rscript {0}
+
+      - name: Export shinylive apps
+        run: |
+          examples <- c(
+            "controlled-inputs" = "controlled_inputs",
+            "temperature"       = "temperature",
+            "todo"              = "todo",
+            "module"            = "module",
+            "optimistic-updates" = "optimistic_updates"
+          )
+          for (slug in names(examples)) {
+            app_dir <- file.path(tempdir(), slug)
+            dir.create(app_dir)
+            file.copy(
+              file.path("examples", paste0(examples[[slug]], ".R")),
+              file.path(app_dir, "app.R")
+            )
+            shinylive::export(
+              app_dir  = app_dir,
+              dest_dir = file.path("docs", "apps", slug)
+            )
+          }
+        shell: Rscript {0}
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
