@@ -6,9 +6,9 @@ Each example below opens in a live [Shinylive](https://shinylive.io/) editor whe
 
 <div class="examples-list" style="margin-top: 1.5rem;">
 
-### [Controlled Inputs](../apps/controlled-inputs/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-In most UI frameworks, inputs and state are kept in sync by making the input *controlled* — the input's displayed value is always derived from application state, not managed independently by the browser. nacre brings this pattern to Shiny: bind a reactive value directly to an input's `value` attribute, and every update flows through a single source of truth. This example shows three text inputs all bound to the same `reactiveVal`.
+The classic Shiny demo, rebuilt with nacre. A controlled range slider sets the number of bins in a histogram of eruption wait times from the Old Faithful geyser dataset. The slider is bound to a `reactiveVal`, and the plot is rendered with `PlotOutput` — nacre's wrapper around Shiny's `renderPlot`/`plotOutput`.
 
 ### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 

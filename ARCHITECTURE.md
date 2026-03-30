@@ -15,7 +15,7 @@ inst/js/
   nacre.js        Client-side message handlers (vanilla JS, no build step)
 
 examples/
-  controlled_inputs.R  Controlled inputs bound to one reactiveVal
+  old_faithful.R       Old Faithful geyser histogram with PlotOutput
   todo.R               Todo app (Each, Index, When, dynamic lists)
   temperature.R        Bidirectional temperature converter (controlled inputs)
   module.R             Shiny module integration
