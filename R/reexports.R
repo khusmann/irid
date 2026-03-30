@@ -8,6 +8,23 @@
 # NAMESPACE directives (importFrom + export) without creating local
 # copies, so R resolves the functions directly from shiny's namespace.
 
+#' Shiny reactive primitives
+#'
+#' These functions are re-exported from \pkg{shiny} for convenience, so you
+#' can use them in nacre apps without loading shiny explicitly.
+#'
+#' - [reactiveVal()]: Create a reactive value
+#' - [reactive()]: Create a reactive expression
+#' - [observe()]: Create an observer
+#' - [observeEvent()]: Create an event-driven observer
+#' - [isolate()]: Run an expression without reactive dependencies
+#' - [tags]: HTML tag builder
+#' - [tagList()]: Combine tags into a list
+#'
+#' See the \pkg{shiny} documentation for full details.
+#'
+#' @name shiny-reexports
+#' @aliases reactiveVal reactive observe observeEvent isolate tags tagList
 #' @rawNamespace
 #'   importFrom(shiny, reactiveVal)
 #'   export(reactiveVal)

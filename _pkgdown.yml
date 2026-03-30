@@ -38,13 +38,7 @@ reference:
   - title: Reactive Basics
     desc: Re-exported Shiny reactive primitives
     contents:
-      - reactiveVal
-      - reactive
-      - observe
-      - observeEvent
-      - isolate
-      - tags
-      - tagList
+      - shiny-reexports
 
 navbar:
   components:
