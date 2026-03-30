@@ -44,16 +44,17 @@ nacreApp(App)
 No `ui`/`server` split. No fragile input IDs to wire together. Just
 component functions with reactive state and DOM in the same scope.
 
-See more examples: [Todo
-List](https://nacre.kylehusmann.com/articles/examples.html#todo-list),
-[Old
-Faithful](https://nacre.kylehusmann.com/articles/examples.html#old-faithful),
-[Temperature
-Converter](https://nacre.kylehusmann.com/articles/examples.html#temperature-converter),
-[Shiny
-Modules](https://nacre.kylehusmann.com/articles/examples.html#shiny-modules),
-[Optimistic
-Updates](https://nacre.kylehusmann.com/articles/examples.html#optimistic-updates)
+See more examples:
+<a href="https://nacre.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
+List</a>,
+<a href="https://nacre.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Old
+Faithful</a>,
+<a href="https://nacre.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature
+Converter</a>,
+<a href="https://nacre.kylehusmann.com/apps/module/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
+Modules</a>,
+<a href="https://nacre.kylehusmann.com/apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Optimistic
+Updates</a>
 
 ## 100% backward compatible
 
