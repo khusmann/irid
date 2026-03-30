@@ -6,16 +6,6 @@ navbar:
   components:
     examples:
       text: Examples
-      menu:
-      - text: Controlled Inputs
-        href: apps/controlled-inputs/index.html?_shinylive-mode=editor-terminal-viewer
-      - text: Temperature Converter
-        href: apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer
-      - text: Todo List
-        href: apps/todo/index.html?_shinylive-mode=editor-terminal-viewer
-      - text: Shiny Modules
-        href: apps/module/index.html?_shinylive-mode=editor-terminal-viewer
-      - text: Optimistic Updates
-        href: apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer
+      href: articles/examples.html
   structure:
     left: [intro, reference, examples, news]
