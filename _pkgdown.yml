@@ -1,6 +1,10 @@
 url: https://nacre.kylehusmann.com
+repo:
+  url:
+    home: https://github.com/khusmann/nacre
 template:
   bootstrap: 5
+  light-switch: true
 
 reference:
   - title: App Entry Points
