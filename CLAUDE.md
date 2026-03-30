@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+## Orientation
+
+- Read `ARCHITECTURE.md` before searching through the project
+- Read `TESTING.md` when orienting yourself on testing
+
 ## Project status
 
 - Greenfield project — no backwards compatibility constraints
