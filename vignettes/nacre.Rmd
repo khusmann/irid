@@ -1,0 +1,262 @@
+---
+title: "Getting Started with nacre"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with nacre}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+nacre is a thin rendering layer on top of Shiny that replaces `renderUI` with
+fine-grained DOM bindings. You keep using `reactiveVal` and `reactive` as
+usual — nacre just changes how reactivity connects to the DOM.
+
+The core idea is one simple rule: **pass a function instead of a value to make
+any tag attribute reactive.**
+
+## Installation
+
+Install from GitHub:
+
+```r
+# install.packages("pak")
+pak::pak("khusmann/nacre")
+```
+
+## Your first nacre app
+
+```r
+library(shiny)
+library(nacre)
+
+App <- function() {
+  count <- reactiveVal(0)
+
+  fluidPage(
+    tags$h1(\() paste("Count:", count())),
+    tags$input(
+      type = "range", min = 0, max = 100,
+      value = count,
+      onInput = \(event) count(event$valueAsNumber)
+    ),
+    tags$button(
+      disabled = \() count() == 0,
+      onClick = \() count(0),
+      "Reset"
+    )
+  )
+}
+
+nacreApp(App)
+```
+
+A nacre app is a single function that returns a tag tree. Inside the function
+you create `reactiveVal`s for state and wire them to the DOM with functions.
+The function runs **once** — nacre processes the tag tree, extracts the
+reactive functions, and sets up observers that surgically update individual DOM
+attributes when values change. No VDOM, no diffing, no DOM destruction.
+
+`nacreApp()` returns a `shinyApp` object, so it works with `runApp()`,
+`shinytest2`, and deployment tools.
+
+## Reactive attributes
+
+Any tag attribute can be static or reactive. Pass a function to make it
+reactive:
+
+```r
+# Static
+tags$div(class = "panel")
+
+# Reactive
+tags$div(class = \() if (is_active()) "panel active" else "panel")
+```
+
+Since `reactiveVal` and `reactive` are both functions, they work directly as
+attribute values:
+
+```r
+name <- reactiveVal("hello")
+upper_name <- reactive(toupper(name()))
+
+tags$span(upper_name)   # reactive is a function
+tags$span(name)         # reactiveVal is a function
+tags$span(\() name())   # anonymous function works too
+```
+
+## Reactive children
+
+Tag children can also be reactive functions, but they must return **text
+only** — not tag trees. Use control flow primitives (below) for structural
+changes:
+
+```r
+tags$span(\() paste("Count:", count()))   # text — works
+```
+
+## Event callbacks
+
+Event callbacks receive `(event)` or `(event, id)`. The `event` is a list of
+primitive-valued properties from the browser event, plus element properties
+like `value`, `valueAsNumber`, and `checked`:
+
+```r
+onInput = \(event) threshold(event$valueAsNumber)  # event object
+onClick = \(event, id) handle_click(id)             # event + element id
+onClick = \() count(count() + 1)                    # neither
+```
+
+Bare `onInput` callbacks are automatically debounced (200 ms). All other
+events fire immediately. Override with explicit wrappers:
+
+```r
+onInput = event_immediate(\(event) name(event$value))
+onInput = event_throttle(\(event) threshold(event$valueAsNumber), 100)
+onInput = event_debounce(\(event) name(event$value), 500)
+```
+
+## Controlled inputs
+
+Inputs are controlled by binding their `value` attribute to a `reactiveVal`.
+The reactive is the single source of truth — setting it from anywhere updates
+every input bound to it:
+
+```r
+name <- reactiveVal("")
+
+tags$input(
+  type = "text",
+  value = name,
+  onInput = \(event) name(event$value)
+)
+```
+
+Multiple inputs can share the same `reactiveVal`. Type in one, the others
+update. No `updateTextInput`. No `freezeReactiveValue`.
+
+## Control flow
+
+Because the component function runs once, you can't use plain `if`/`else` for
+conditional rendering. nacre provides control flow primitives instead.
+
+### When
+
+```r
+When(logged_in,
+  Dashboard(),
+  otherwise = LoginPanel()
+)
+```
+
+When the condition changes, the old content is torn down and the new content is
+mounted.
+
+### Match / Case / Default
+
+```r
+Match(
+  Case(\() tab() == "home",     HomePage()),
+  Case(\() tab() == "settings", SettingsPage()),
+  Default(NotFoundPage())
+)
+```
+
+### Each
+
+Dynamic lists. The callback receives each item as a plain value — when the
+list changes, items are diffed by key and DOM nodes are reused where possible:
+
+```r
+tags$ul(
+  Each(items, \(item) {
+    tags$li(item$name)
+  })
+)
+```
+
+### Index
+
+Like `Each`, but keyed by position. The callback receives each item as a
+reactive accessor (`item()` to read). When values change without a length
+change, existing observers re-fire without DOM recreation:
+
+```r
+tags$ul(
+  Index(items, \(item) {
+    tags$li(\() item()$name)
+  })
+)
+```
+
+Use `Each` when items have a stable identity (todos, records). Use `Index`
+when you care about positions (rankings, slots).
+
+## Shiny outputs
+
+Plots, tables, and other binary outputs use Shiny's existing render
+infrastructure via `Output`, or convenience wrappers:
+
+```r
+PlotOutput({ ggplot(mtcars, aes(wt, mpg)) + geom_point() })
+TableOutput({ head(mtcars) })
+DTOutput({ mtcars })
+```
+
+For any render/output pair, pass both functions explicitly:
+
+```r
+Output(renderPlot, plotOutput, {
+  ggplot(mtcars, aes(wt, mpg)) + geom_point()
+})
+```
+
+## Incremental adoption
+
+You don't have to go all-in. Drop nacre into an existing Shiny app with
+`nacreOutput` / `renderNacre`:
+
+```r
+ui <- fluidPage(
+  sliderInput("n", "N", 1, 100, 50),
+  nacreOutput("filters"),
+  plotOutput("plot")
+)
+
+server <- function(input, output, session) {
+  threshold <- reactiveVal(0.5)
+
+  output$filters <- renderNacre(
+    tags$div(
+      tags$input(
+        type = "range", min = 0, max = 1, step = 0.1,
+        value = threshold,
+        onInput = \(event) threshold(event$valueAsNumber)
+      ),
+      tags$span(\() paste("Threshold:", threshold()))
+    )
+  )
+
+  output$plot <- renderPlot({
+    mtcars |> head(input$n) |>
+      dplyr::filter(mpg > threshold() * 30) |>
+      ggplot2::ggplot(ggplot2::aes(wt, mpg)) + ggplot2::geom_point()
+  })
+}
+
+shinyApp(ui, server)
+```
+
+The migration path:
+
+1. Start with a normal Shiny app
+2. Drop in one `nacreOutput`/`renderNacre` for a painful `renderUI`
+3. Gradually convert more components
+4. Eventually switch to `nacreApp` when the whole app is nacre
+5. Old `sliderInput` etc. still work at every stage
