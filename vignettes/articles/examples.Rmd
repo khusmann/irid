@@ -8,22 +8,22 @@ Each example below opens in a live [Shinylive](https://shinylive.io/) editor whe
 
 ### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-The classic Shiny demo, rebuilt with nacre. A controlled range slider sets the number of bins in a histogram of eruption wait times from the Old Faithful geyser dataset. The slider is bound to a `reactiveVal`, and the plot is rendered with `PlotOutput` — nacre's wrapper around Shiny's `renderPlot`/`plotOutput`.
-
-### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
-
-A classic reactive UI challenge: two inputs representing the same value in different units, where editing either one should update the other. With nacre's controlled inputs, one `reactiveVal` holds the canonical Celsius value and the Fahrenheit input derives from it via a `reactive()`. Both the number inputs and the vertical sliders stay in sync automatically.
-
-### [Todo List](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
-
-A TodoMVC-style application demonstrating reactive list management with nacre. Items are stored as a `reactiveVal` holding a plain R list; adding, toggling, and removing items are ordinary functions that update that list. The filter tabs and item count derive reactively from the same source, so everything stays consistent without any manual synchronization.
+The classic Shiny demo, rebuilt with nacre. A controlled slider drives a histogram of Old Faithful eruption wait times.
 
 ### [Shiny Modules](../apps/module/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-nacre components compose naturally with standard Shiny modules. Use `nacreOutput()` and `renderNacre()` to embed a nacre component tree inside a module's UI and server functions, exactly like any other Shiny output. This example instantiates two counter modules side by side, each with fully independent state.
+nacre components compose naturally with standard Shiny modules. This example embeds two independent counter modules side by side using `nacreOutput()` and `renderNacre()`.
+
+### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+Two inputs representing the same value in different units, where editing either one updates the other. Demonstrates how controlled inputs and `reactive()` keep multiple views of the same state in sync.
+
+### [Todo List](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R list. Adding, toggling, filtering, and removing items are ordinary functions that update that list.
 
 ### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-When a user types into a controlled input, nacre applies the change immediately in the browser before the server round-trip completes — an *optimistic update*. If the server responds with a different value, the browser reconciles to the server's version. This keeps the UI feeling instant while still letting the server be the authority on state.
+nacre applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
 
 </div>
