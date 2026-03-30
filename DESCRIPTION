@@ -1,11 +1,11 @@
 Package: nacre
-Title: Fine-Grained Reactive DOM Bindings for Shiny
+Title: Component-Based Shiny UI with Fine-Grained Reactivity
 Version: 0.0.0.9000
 Authors@R: person("Kyle", "Husmann", role = c("aut", "cre"),
     email = "khusmann@gmail.com")
-Description: A thin rendering layer on top of Shiny that replaces renderUI
-    with Solid-style fine-grained DOM bindings. Pass a function instead of a
-    value to make any tag attribute reactive.
+Description: A component-based reactive UI framework for Shiny that binds
+    reactive values directly to DOM attributes, enabling fine-grained updates
+    without re-rendering or 'update*Input' callbacks.
 License: MIT + file LICENSE
 URL: https://nacre.kylehusmann.com,
     https://github.com/khusmann/nacre
