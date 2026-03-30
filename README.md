@@ -59,7 +59,8 @@ Updates</a>
 ## 100% backward compatible
 
 You don’t have to go all-in. Drop nacre components into an existing
-Shiny app with `nacreOutput`/`renderNacre`:
+Shiny app to handle complex interactivity with
+`nacreOutput`/`renderNacre`:
 
 ``` r
 Greeting <- function() {
