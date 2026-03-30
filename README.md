@@ -58,9 +58,35 @@ Updates](https://nacre.kylehusmann.com/articles/examples.html#optimistic-updates
 ## 100% backward compatible
 
 You don’t have to go all-in. Drop nacre components into an existing
-Shiny app with `nacreOutput`/`renderNacre` — old Shiny inputs and nacre
-components coexist in the same server scope. Migrate one `renderUI` at a
-time, or switch to `nacreApp` when you’re ready.
+Shiny app with `nacreOutput`/`renderNacre`:
+
+``` r
+Greeting <- function() {
+  name <- reactiveVal("")
+  tags$div(
+    tags$input(type = "text", value = name,
+      onInput = \(event) name(event$value)
+    ),
+    tags$p(\() paste("Hello,", name()))
+  )
+}
+
+ui <- fluidPage(
+  nacreOutput("greeting"),
+  plotOutput("plot")
+)
+
+server <- function(input, output, session) {
+  output$greeting <- renderNacre(Greeting())  # nacre component
+  output$plot <- renderPlot(plot(1:10))
+}
+
+shinyApp(ui, server)
+```
+
+Old Shiny inputs and nacre components coexist in the same server scope.
+Migrate one `renderUI` at a time, or switch to `nacreApp` when you’re
+ready.
 
 ## Installation
 
