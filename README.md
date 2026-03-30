@@ -52,8 +52,6 @@ See more examples:
   Faithful</a>
 - <a href="https://nacre.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature
   Converter</a>
-- <a href="https://nacre.kylehusmann.com/apps/module/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
-  Modules</a>
 - <a href="https://nacre.kylehusmann.com/apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Optimistic
   Updates</a>
 
@@ -90,6 +88,10 @@ shinyApp(ui, server)
 Old Shiny inputs and nacre components coexist in the same server scope.
 Migrate one `renderUI` at a time, or switch to `nacreApp` when you’re
 ready.
+
+See also:
+<a href="https://nacre.kylehusmann.com/apps/module/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
+Modules</a> example.
 
 ## Installation
 
