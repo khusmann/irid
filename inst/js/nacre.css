@@ -1,20 +1,12 @@
-html.nacre-stale {
-  filter: saturate(0) brightness(0.85);
-  transition: filter 0.15s ease-in;
-}
-html:not(.nacre-stale) {
-  transition: filter 0.15s ease-out;
-}
-
 html.nacre-stale::before {
   content: "";
   position: fixed;
   top: 0;
   left: 0;
-  height: 3px;
+  height: 8px;
   width: 100%;
   z-index: 99999;
-  background: linear-gradient(90deg, transparent, var(--nacre-stale-color, #6c757d) 50%, transparent);
+  background: linear-gradient(90deg, transparent, var(--nacre-stale-color, #0d6efd) 50%, transparent);
   animation: nacre-progress 1.2s ease-in-out infinite;
 }
 

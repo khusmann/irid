@@ -231,9 +231,10 @@ Key design points:
 
 ## Stale UI Indicator
 
-When the server takes too long to respond after an event, the UI goes grey
-(desaturated) to signal that displayed state may be stale. Elements remain
-interactive — this is a visual cue, not a disabled state.
+When the server takes too long to respond after an event, an animated progress
+bar appears fixed at the top of the viewport to signal that displayed state may
+be stale. Elements remain fully interactive — this is a visual cue, not a
+disabled state.
 
 **Option:** `nacre.stale_timeout` — milliseconds to wait before showing the
 indicator. Default `200`. Set to `NULL` to disable.
@@ -247,8 +248,7 @@ indicator. Default `200`. Set to `NULL` to disable.
    new event fires shortly after the server goes idle.
 3. If `shiny:idle` fires before the show timer, the timer is reset.
 4. If the show timer fires first, `nacre-stale` is added to `<html>`, which
-   activates `filter: saturate(0) brightness(0.85)` (full grayscale + dim) and
-   shows an animated progress bar at the top of the viewport, both via
+   shows an animated progress bar fixed at the top of the viewport via
    `nacre.css`. The progress bar color is customizable with the
    `--nacre-stale-color` CSS variable (defaults to Bootstrap gray).
 5. When `shiny:idle` fires, a debounced clear is scheduled (100ms). If
