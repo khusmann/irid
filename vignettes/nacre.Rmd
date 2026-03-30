@@ -66,6 +66,55 @@ attributes when values change. No VDOM, no diffing, no DOM destruction.
 `nacreApp()` returns a `shinyApp` object, so it works with `runApp()`,
 `shinytest2`, and deployment tools.
 
+## Components compose
+
+Because a component is just a function that returns a tag tree, you build
+larger UIs by calling smaller ones. Pass `reactiveVal`s as arguments to share
+state between them:
+
+```r
+BinsSlider <- function(bins) {
+  tags$div(
+    tags$label("for" = "bins-slider", class = "form-label",
+      \() paste0("Number of bins: ", bins())),
+    tags$input(id = "bins-slider", type = "range",
+      class = "form-range", min = "1", max = "50",
+      value = bins,
+      onInput = \(event) bins(as.integer(event$value)))
+  )
+}
+
+OldFaithful <- function() {
+  bins <- reactiveVal(30L)
+
+  page_fluid(
+    card(
+      card_body(
+        BinsSlider(bins),
+        PlotOutput({
+          x <- faithful$waiting
+          b <- seq(min(x), max(x), length.out = bins() + 1)
+          hist(x, breaks = b, col = "darkgray", border = "white",
+            xlab = "Waiting time to next eruption (in mins)",
+            main = "Histogram of waiting times")
+        })
+      )
+    )
+  )
+}
+```
+
+`bins` is created once in `OldFaithful` and passed down to `BinsSlider`.
+There are no string IDs to keep in sync — if you use `BinsSlider` twice,
+each instance gets its own independent state:
+
+```r
+page_fluid(
+  BinsSlider(bins1),
+  BinsSlider(bins2)
+)
+```
+
 ## Reactive attributes
 
 Any tag attribute can be static or reactive. Pass a function to make it
