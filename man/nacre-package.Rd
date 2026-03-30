@@ -13,7 +13,9 @@ A thin rendering layer on top of Shiny that replaces renderUI with Solid-style f
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://khusmann.github.io/nacre/}
+  \item \url{https://nacre.kylehusmann.com}
+  \item \url{https://github.com/khusmann/nacre}
+  \item Report bugs at \url{https://github.com/khusmann/nacre/issues}
 }
 
 }
