@@ -11,7 +11,6 @@
 # The app is composed from two reusable components: `Thermometer` (a labeled
 # vertical slider) and `TemperatureDisplay` (a readout with a zone badge).
 
-library(shiny)
 library(bslib)
 library(nacre)
 

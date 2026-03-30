@@ -1,8 +1,2 @@
-#' @importFrom shiny
-#'   isolate
-#'   observe
-#'   observeEvent
-#'   reactiveVal
-#'   tagList
-#'   tags
+#' @keywords internal
 "_PACKAGE"

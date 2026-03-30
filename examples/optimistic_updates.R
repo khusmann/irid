@@ -17,7 +17,6 @@
 # 3. Mirror — a read-only input always shows the confirmed server value, useful
 #    for verifying what the server actually holds.
 
-library(shiny)
 library(bslib)
 library(nacre)
 

@@ -33,13 +33,13 @@ pak::pak("khusmann/nacre")
 ## Your first nacre app
 
 ```r
-library(shiny)
+library(bslib)
 library(nacre)
 
 App <- function() {
   count <- reactiveVal(0)
 
-  fluidPage(
+  page_fluid(
     tags$h1(\() paste("Count:", count())),
     tags$input(
       type = "range", min = 0, max = 100,

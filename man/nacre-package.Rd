@@ -23,3 +23,4 @@ Useful links:
 \strong{Maintainer}: Kyle Husmann \email{khusmann@gmail.com}
 
 }
+\keyword{internal}

@@ -6,7 +6,6 @@
 # tabs and item count derive reactively from the same source, so everything
 # stays consistent without any manual synchronization.
 
-library(shiny)
 library(bslib)
 library(nacre)
 
