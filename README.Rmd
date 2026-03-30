@@ -23,41 +23,55 @@ If you've ever fought `updateSliderInput`, wrestled `freezeReactiveValue`, or
 watched `renderUI` destroy your DOM on every change — nacre is for you.
 
 nacre lets you bind a `reactiveVal` directly to any DOM attribute. One reactive
-changes, one attribute updates. No re-rendering, no flicker, no `update*Input`
-callbacks.
+changes, one attribute updates. No `ui`/`server` split. No fragile input IDs to
+wire together. Just component functions with reactive state and DOM in the same
+scope.
+
 
 ```r
 library(nacre)
 library(bslib)
 
-App <- function() {
-  count <- reactiveVal(0)
+OldFaithful <- function() {
+  bins <- reactiveVal(30L)
 
   page_fluid(
-    tags$h1(\() paste("Count:", count())),
-    tags$input(
-      type = "range", min = 0, max = 100,
-      value = count,
-      onInput = \(event) count(event$valueAsNumber)
-    ),
-    tags$button(
-      disabled = \() count() == 0,
-      onClick = \() count(0),
-      "Reset"
+    tags$div(
+      class = "mx-auto",
+      style = "max-width: 700px;",
+
+      tags$h2(class = "mt-4 mb-3", "Old Faithful Geyser Data"),
+
+      card(
+        card_body(
+          tags$label("for" = "bins-slider", class = "form-label",
+            \() paste0("Number of bins: ", bins())),
+          tags$input(id = "bins-slider", type = "range",
+            class = "form-range", min = "1", max = "50",
+            value = bins,
+            onInput = \(event) bins(as.integer(event$value))),
+
+          PlotOutput({
+            x <- faithful$waiting
+            b <- seq(min(x), max(x), length.out = bins() + 1)
+            hist(x, breaks = b, col = "darkgray", border = "white",
+              xlab = "Waiting time to next eruption (in mins)",
+              main = "Histogram of waiting times")
+          })
+        )
+      )
     )
   )
 }
 
-nacreApp(App)
+nacreApp(OldFaithful)
 ```
 
-No `ui`/`server` split. No fragile input IDs to wire together. Just component
-functions with reactive state and DOM in the same scope.
+<a href="https://nacre.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Try it live</a>
 
 See more examples:
 
 - <a href="https://nacre.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo List</a>
-- <a href="https://nacre.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Old Faithful</a>
 - <a href="https://nacre.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature Converter</a>
 - <a href="https://nacre.kylehusmann.com/apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Optimistic Updates</a>
 
@@ -67,24 +81,14 @@ You don't have to go all-in. Drop nacre components into an existing Shiny app
 to handle complex interactivity with `nacreOutput`/`renderNacre`:
 
 ```r
-Greeting <- function() {
-  name <- reactiveVal("")
-  tags$div(
-    tags$input(type = "text", value = name,
-      onInput = \(event) name(event$value)
-    ),
-    tags$p(\() paste("Hello,", name()))
-  )
-}
-
 ui <- fluidPage(
-  nacreOutput("greeting"),
-  plotOutput("plot")
+  nacreOutput("oldFaithful"),
+  tableOutput("summary")
 )
 
 server <- function(input, output, session) {
-  output$greeting <- renderNacre(Greeting())  # nacre component
-  output$plot <- renderPlot(plot(1:10))
+  output$oldFaithful <- renderNacre(OldFaithful())  # nacre component
+  output$summary <- renderTable(summary(faithful))   # classic Shiny
 }
 
 shinyApp(ui, server)
