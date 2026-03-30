@@ -17,8 +17,8 @@ reactive changes, one attribute updates. No re-rendering, no flicker, no
 `update*Input` callbacks.
 
 ``` r
-library(bslib)
 library(nacre)
+library(bslib)
 
 App <- function() {
   count <- reactiveVal(0)

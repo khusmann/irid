@@ -10,9 +10,9 @@
 # slider, reset button, and a `verbatimTextOutput` showing the server-side
 # value — confirming that state is isolated per instance.
 
+library(nacre)
 library(shiny)
 library(bslib)
-library(nacre)
 
 Counter <- function(count) {
   tags$div(

@@ -5,8 +5,8 @@
 # dataset. The slider is a controlled input bound to a `reactiveVal`, and the
 # plot is rendered with `PlotOutput`.
 
-library(bslib)
 library(nacre)
+library(bslib)
 
 OldFaithful <- function() {
   bins <- reactiveVal(30L)

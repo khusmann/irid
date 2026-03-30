@@ -11,8 +11,8 @@
 # The app is composed from two reusable components: `Thermometer` (a labeled
 # vertical slider) and `TemperatureDisplay` (a readout with a zone badge).
 
-library(bslib)
 library(nacre)
+library(bslib)
 
 c_to_f <- function(c) round(c * 9 / 5 + 32, 1)
 f_to_c <- function(f) round((f - 32) * 5 / 9, 1)

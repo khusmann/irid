@@ -17,8 +17,8 @@
 # 3. Mirror — a read-only input always shows the confirmed server value, useful
 #    for verifying what the server actually holds.
 
-library(bslib)
 library(nacre)
+library(bslib)
 
 OptimisticUpdates <- function() {
   text <- reactiveVal("")

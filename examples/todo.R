@@ -6,8 +6,8 @@
 # tabs and item count derive reactively from the same source, so everything
 # stays consistent without any manual synchronization.
 
-library(bslib)
 library(nacre)
+library(bslib)
 
 TodoItem <- function(todo, on_toggle, on_remove) {
   tags$li(
