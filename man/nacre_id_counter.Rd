@@ -4,7 +4,7 @@
 \alias{nacre_id_counter}
 \title{Create a local ID counter for use within a single \code{process_tags} call}
 \usage{
-nacre_id_counter()
+nacre_id_counter(prefix = "nacre")
 }
 \value{
 A function that returns the next ID each time it is called.

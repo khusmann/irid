@@ -67,7 +67,8 @@ renderNacre <- function(expr, env = parent.frame(), quoted = FALSE) {
   shiny::renderUI({
     session <- shiny::getDefaultReactiveDomain()
     tag_tree <- isolate(func())
-    result <- process_tags(tag_tree)
+    output_name <- shiny::getCurrentOutputInfo()$name
+    result <- process_tags(tag_tree, counter = nacre_id_counter(output_name))
 
     session$onFlushed(function() {
       nacre_send_config(session)

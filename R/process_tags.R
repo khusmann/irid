@@ -15,11 +15,11 @@ is_nacre_reactive <- function(x) {
 #'
 #' @return A function that returns the next ID each time it is called.
 #' @keywords internal
-nacre_id_counter <- function() {
+nacre_id_counter <- function(prefix = "nacre") {
   value <- 0L
   function() {
     value <<- value + 1L
-    paste0("nacre-", value)
+    paste0(prefix, "-", value)
   }
 }
 
