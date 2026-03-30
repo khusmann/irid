@@ -2,6 +2,50 @@ url: https://nacre.kylehusmann.com
 template:
   bootstrap: 5
 
+reference:
+  - title: App Entry Points
+    desc: Create and embed nacre applications
+    contents:
+      - nacreApp
+      - nacreOutput
+      - renderNacre
+
+  - title: Control Flow
+    desc: Reactive control flow for conditional and list rendering
+    contents:
+      - When
+      - Each
+      - Index
+      - Match
+      - Case
+      - Default
+
+  - title: Outputs
+    desc: Embed Shiny render/output pairs in nacre tag trees
+    contents:
+      - Output
+      - PlotOutput
+      - TableOutput
+      - DTOutput
+
+  - title: Events
+    desc: Control event dispatch rate limiting
+    contents:
+      - event_immediate
+      - event_throttle
+      - event_debounce
+
+  - title: Reactive Basics
+    desc: Re-exported Shiny reactive primitives
+    contents:
+      - reactiveVal
+      - reactive
+      - observe
+      - observeEvent
+      - isolate
+      - tags
+      - tagList
+
 navbar:
   components:
     examples:
