@@ -44,6 +44,24 @@ nacreApp(App)
 No `ui`/`server` split. No fragile input IDs to wire together. Just
 component functions with reactive state and DOM in the same scope.
 
+See more examples: [Todo
+List](https://nacre.kylehusmann.com/articles/examples.html#todo-list),
+[Old
+Faithful](https://nacre.kylehusmann.com/articles/examples.html#old-faithful),
+[Temperature
+Converter](https://nacre.kylehusmann.com/articles/examples.html#temperature-converter),
+[Shiny
+Modules](https://nacre.kylehusmann.com/articles/examples.html#shiny-modules),
+[Optimistic
+Updates](https://nacre.kylehusmann.com/articles/examples.html#optimistic-updates)
+
+## 100% backward compatible
+
+You don’t have to go all-in. Drop nacre components into an existing
+Shiny app with `nacreOutput`/`renderNacre` — old Shiny inputs and nacre
+components coexist in the same server scope. Migrate one `renderUI` at a
+time, or switch to `nacreApp` when you’re ready.
+
 ## Installation
 
 ``` r
