@@ -94,10 +94,11 @@ jobs:
 
           examples <- c(
             "old-faithful"       = "old_faithful",
+            "composing"          = "composing",
             "temperature"        = "temperature",
             "todo"               = "todo",
-            "module"             = "module",
-            "optimistic-updates" = "optimistic_updates"
+            "optimistic-updates" = "optimistic_updates",
+            "shiny-interop"      = "shiny_interop"
           )
           for (slug in names(examples)) {
             app_dir <- file.path("examples", paste0(examples[[slug]], ".R"))
