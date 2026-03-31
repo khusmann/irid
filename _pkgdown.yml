@@ -2,6 +2,9 @@ url: https://nacre.kylehusmann.com
 repo:
   url:
     home: https://github.com/khusmann/nacre
+    source: https://github.com/khusmann/nacre/blob/HEAD/
+    issue: https://github.com/khusmann/nacre/issues/
+    user: https://github.com/
 template:
   bootstrap: 5
   light-switch: true
