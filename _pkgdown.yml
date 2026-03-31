@@ -45,7 +45,7 @@ reference:
   - title: Reactive Basics
     desc: Re-exported Shiny reactive primitives
     contents:
-      - shiny-reexports
+      - reactiveVal
 
 navbar:
   components:

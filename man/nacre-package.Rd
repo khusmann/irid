@@ -4,11 +4,11 @@
 \name{nacre-package}
 \alias{nacre}
 \alias{nacre-package}
-\title{nacre: Fine-Grained Reactive DOM Bindings for Shiny}
+\title{nacre: Component-Based Shiny UI with Fine-Grained Reactivity}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-A thin rendering layer on top of Shiny that replaces renderUI with Solid-style fine-grained DOM bindings. Pass a function instead of a value to make any tag attribute reactive.
+A component-based reactive UI framework for Shiny that binds reactive values directly to DOM attributes, enabling fine-grained updates without re-rendering or 'update*Input' callbacks.
 }
 \seealso{
 Useful links:

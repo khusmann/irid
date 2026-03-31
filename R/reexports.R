@@ -23,8 +23,8 @@
 #'
 #' See the \pkg{shiny} documentation for full details.
 #'
-#' @name shiny-reexports
-#' @aliases reactiveVal reactive observe observeEvent isolate tags tagList
+#' @name reactiveVal
+#' @aliases reactive observe observeEvent isolate tags tagList
 #' @rawNamespace
 #'   importFrom(shiny, reactiveVal)
 #'   export(reactiveVal)
