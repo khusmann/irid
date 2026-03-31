@@ -4,6 +4,7 @@
 
 - Read `ARCHITECTURE.md` before searching through the project
 - Read `TESTING.md` when orienting yourself on testing
+- Examples live in `examples/*` and `vignettes/articles/examples.Rmd`
 
 ## Project status
 
