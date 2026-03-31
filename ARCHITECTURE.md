@@ -292,6 +292,8 @@ matching:
 onKeyDown = event_immediate(\(e) submit(), filter = key_filter("Enter"))
 ```
 
+Once `filter` is available, the todo example's `onKeyDown = \(event) if (event$key == "Enter") add_todo()` can be restored. It was removed in the interim because without client-side filtering, every keydown is sent to the server — which, combined with the missing event queue ordering (see `dev/client-event-queue-design.md`), causes Enter to race ahead of the pending `onInput` debounce and submit an incomplete value.
+
 ### Testing
 
 See [TESTING.md](TESTING.md) for the full test plan.
