@@ -101,7 +101,9 @@ pak::pak("khusmann/nacre")
 
 ## Learn more
 
-See `vignette("nacre")` to get started.
+See the [Getting
+Started](https://nacre.kylehusmann.com/articles/nacre.html) vignette to
+get started.
 
 ## Why nacre?
 
