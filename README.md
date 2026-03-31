@@ -33,7 +33,6 @@ OldFaithful <- function() {
           value = bins,
           onInput = \(event) bins(as.integer(event$value))
         ),
-
         PlotOutput({
           x <- faithful$waiting
           b <- seq(min(x), max(x), length.out = bins() + 1)
@@ -51,11 +50,13 @@ OldFaithful <- function() {
 nacreApp(OldFaithful)
 ```
 
-<a href="https://nacre.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Try
-it live</a>
+<a href="https://nacre.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank"><strong>Try
+it live</strong></a>
 
 See more examples:
 
+- <a href="https://nacre.kylehusmann.com/apps/composing/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Composing
+  Components</a>
 - <a href="https://nacre.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
   List</a>
 - <a href="https://nacre.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature
@@ -112,8 +113,8 @@ shiny, for Shiny.
 
 nacre brings ideas from modern JavaScript component frameworks to Shiny
 — especially [Solid.js](https://www.solidjs.com/), which pioneered
-fine-grained reactivity without a virtual DOM. Shiny’s reactive engine
-(`reactiveVal`, `reactive`, `observe`) was already close to this model;
-nacre closes the gap by connecting it directly to the DOM the way Solid
-does. React’s component model and controlled input patterns were also an
-influence.
+fine-grained reactivity where each change updates only the specific DOM
+node it’s bound to. Shiny’s reactive engine (`reactiveVal`, `reactive`,
+`observe`) was already close to this model; nacre closes the gap by
+connecting it directly to the DOM the way Solid does. React’s component
+model and controlled input patterns were also an influence.

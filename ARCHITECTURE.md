@@ -20,7 +20,7 @@ examples/
   temperature.R        Bidirectional temperature converter (controlled inputs)
   todo.R               Todo app (Each, Index, When, dynamic lists)
   optimistic_updates.R Controlled inputs with simulated server latency
-  shiny_interop.R      nacre inside a Shiny module (incremental adoption)
+  shiny_interop.R      nacre components inside a standard Shiny module
 ```
 
 ## Two-Phase Rendering

@@ -12,7 +12,7 @@ The classic Shiny demo, rebuilt with nacre. A controlled slider drives a histogr
 
 ### [Composing Components](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-A nacre component is just a function. Each call creates its own closure, so independent instances come for free — no namespacing or module boilerplate. This example calls `Counter()` twice to produce two fully isolated counters.
+Two counter components sharing state with a parent `App`. `reactiveVal`s are created in the parent and passed down as arguments — no string IDs, no module namespacing. A derived `total` reactive shows how shared state flows naturally across the tree.
 
 ### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
