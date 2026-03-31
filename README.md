@@ -25,29 +25,24 @@ OldFaithful <- function() {
   bins <- reactiveVal(30L)
 
   page_fluid(
-    tags$div(
-      class = "mx-auto",
-      style = "max-width: 700px;",
+    card(
+      card_body(
+        tags$label(\() paste0("Number of bins: ", bins())),
+        tags$input(
+          type = "range", min = "1", max = "50",
+          value = bins,
+          onInput = \(event) bins(as.integer(event$value))
+        ),
 
-      tags$h2(class = "mt-4 mb-3", "Old Faithful Geyser Data"),
-
-      card(
-        card_body(
-          tags$label("for" = "bins-slider", class = "form-label",
-            \() paste0("Number of bins: ", bins())),
-          tags$input(id = "bins-slider", type = "range",
-            class = "form-range", min = "1", max = "50",
-            value = bins,
-            onInput = \(event) bins(as.integer(event$value))),
-
-          PlotOutput({
-            x <- faithful$waiting
-            b <- seq(min(x), max(x), length.out = bins() + 1)
-            hist(x, breaks = b, col = "darkgray", border = "white",
-              xlab = "Waiting time to next eruption (in mins)",
-              main = "Histogram of waiting times")
-          })
-        )
+        PlotOutput({
+          x <- faithful$waiting
+          b <- seq(min(x), max(x), length.out = bins() + 1)
+          hist(
+            x, breaks = b,
+            xlab = "Waiting time to next eruption (in mins)",
+            main = "Histogram of waiting times"
+          )
+        })
       )
     )
   )

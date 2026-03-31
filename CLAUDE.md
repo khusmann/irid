@@ -16,6 +16,17 @@
 
 - If there are uncommitted changes and the user asks for something unrelated to the current work, suggest committing first before switching directions
 
+## Code style
+
+- Multi-line R function calls: opening args on a new line after the function name
+
+```r
+hist(
+  foo,
+  bar
+)
+```
+
 ## Build
 
 - Run `devtools::document()` after changing exports or roxygen comments

@@ -38,10 +38,10 @@ Thermometer <- function(label, value, on_change, min, max) {
 TemperatureDisplay <- function(celsius, fahrenheit) {
   temp_zone <- function(c) {
     zones <- list(
-      list(max = 0, label = "Freezing", color = "info", emoji = "\u2744\uFE0F"),
-      list(max = 15, label = "Cold", color = "primary", emoji = "\U0001F327\uFE0F"),
-      list(max = 30, label = "Comfortable", color = "success", emoji = "\u2600\uFE0F"),
-      list(max = Inf, label = "Hot", color = "danger", emoji = "\U0001F525")
+      list(max = 0, label = "Freezing", color = "info"),
+      list(max = 15, label = "Cold", color = "primary"),
+      list(max = 30, label = "Comfortable", color = "success"),
+      list(max = Inf, label = "Hot", color = "danger")
     )
     Find(\(z) c <= z$max, zones)
   }
@@ -70,21 +70,14 @@ TemperatureApp <- function() {
   fahrenheit <- reactive(c_to_f(celsius()))
 
   page_fluid(
-    tags$div(
-      class = "mx-auto",
-      style = "max-width: 500px;",
+    card(
+      card_body(
+        TemperatureDisplay(celsius, fahrenheit),
 
-      tags$h2(class = "mt-4 mb-3", "Temperature Converter"),
-
-      card(
-        card_body(
-          TemperatureDisplay(celsius, fahrenheit),
-
-          tags$div(
-            class = "d-flex justify-content-evenly align-items-center",
-            Thermometer("Celsius", celsius, celsius, -40, 60),
-            Thermometer("Fahrenheit", fahrenheit, \(f) celsius(f_to_c(f)), -40, 140)
-          )
+        tags$div(
+          class = "d-flex justify-content-evenly align-items-center",
+          Thermometer("Celsius", celsius, celsius, -40, 60),
+          Thermometer("Fahrenheit", fahrenheit, \(f) celsius(f_to_c(f)), -40, 140)
         )
       )
     )

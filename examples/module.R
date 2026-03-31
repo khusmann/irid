@@ -22,7 +22,6 @@ Counter <- function(count) {
     ),
     tags$input(
       type = "range", min = 0, max = 100,
-      class = "form-range",
       value = count,
       onInput = \(event) count(event$valueAsNumber)
     ),
