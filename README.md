@@ -88,8 +88,8 @@ Migrate one `renderUI` at a time, or switch to `nacreApp` when you’re
 ready.
 
 See also:
-<a href="https://nacre.kylehusmann.com/apps/module/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
-Modules</a> example.
+<a href="https://nacre.kylehusmann.com/apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
+Interop</a> example.
 
 ## Installation
 

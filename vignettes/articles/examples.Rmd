@@ -10,9 +10,9 @@ Each example below opens in a live [Shinylive](https://shinylive.io/) editor whe
 
 The classic Shiny demo, rebuilt with nacre. A controlled slider drives a histogram of Old Faithful eruption wait times.
 
-### [Shiny Modules](../apps/module/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Composing Components](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-nacre components compose naturally with standard Shiny modules. This example embeds two independent counter modules side by side using `nacreOutput()` and `renderNacre()`.
+A nacre component is just a function. Each call creates its own closure, so independent instances come for free — no namespacing or module boilerplate. This example calls `Counter()` twice to produce two fully isolated counters.
 
 ### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
@@ -25,5 +25,9 @@ A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R 
 ### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 nacre applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
+
+### [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+nacre components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `nacreOutput()` and `renderNacre()`.
 
 </div>

@@ -16,9 +16,11 @@ inst/js/
 
 examples/
   old_faithful.R       Old Faithful geyser histogram with PlotOutput
-  todo.R               Todo app (Each, Index, When, dynamic lists)
+  composing.R          Two Counter instances showing closure-based isolation
   temperature.R        Bidirectional temperature converter (controlled inputs)
-  module.R             Shiny module integration
+  todo.R               Todo app (Each, Index, When, dynamic lists)
+  optimistic_updates.R Controlled inputs with simulated server latency
+  shiny_interop.R      nacre inside a Shiny module (incremental adoption)
 ```
 
 ## Two-Phase Rendering
