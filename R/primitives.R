@@ -117,7 +117,7 @@ Match <- function(...) {
 #' @return A nacre output node.
 #' @export
 Output <- function(render_fn, output_fn, fn, ...) {
-  render_call <- render_fn(fn)
+  render_call <- render_fn({ fn() })
   result <- list(
     output_fn = output_fn,
     output_fn_args = list(...),
