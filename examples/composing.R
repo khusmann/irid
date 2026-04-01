@@ -8,7 +8,6 @@
 # total displayed above them.
 
 library(nacre)
-library(shiny)
 library(bslib)
 
 Counter <- function(label, count) {
