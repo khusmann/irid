@@ -4,14 +4,12 @@
 \alias{TableOutput}
 \title{Embed a table output in a nacre tag tree}
 \usage{
-TableOutput(expr, ..., env = parent.frame())
+TableOutput(fn, ...)
 }
 \arguments{
-\item{expr}{An expression that produces a table.}
+\item{fn}{A function that produces a table.}
 
 \item{...}{Additional arguments passed to \code{\link[shiny:renderTable]{shiny::tableOutput()}}.}
-
-\item{env}{The environment in which to evaluate \code{expr}.}
 }
 \value{
 A nacre output node.

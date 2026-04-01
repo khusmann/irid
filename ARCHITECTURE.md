@@ -23,6 +23,16 @@ examples/
   shiny_interop.R      nacre components inside a standard Shiny module
 ```
 
+## Design Principles
+
+**Functions, not expressions.** nacre's core rule is: pass a function to make
+something reactive. This applies uniformly across tag attributes, tag children,
+and `Output`/`PlotOutput`/`TableOutput`/`DTOutput`. Shiny's render functions
+use expression-based NSE (`renderPlot({ ... })`), but nacre wraps them with a
+function interface for two reasons: (1) consistency — users never need an
+exception for outputs; (2) composability — a named function can be passed
+directly (`PlotOutput(my_plot_fn)`), which expressions cannot support.
+
 ## Two-Phase Rendering
 
 nacre splits rendering into two phases: **process** and **mount**.

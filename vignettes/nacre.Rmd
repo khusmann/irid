@@ -49,7 +49,7 @@ OldFaithful <- function() {
           value = bins,
           onInput = \(event) bins(as.integer(event$value))
         ),
-        PlotOutput({
+        PlotOutput(\() {
           x <- faithful$waiting
           b <- seq(min(x), max(x), length.out = bins() + 1)
           hist(
@@ -273,17 +273,15 @@ Plots, tables, and other binary outputs use Shiny's existing render
 infrastructure via `Output`, or convenience wrappers:
 
 ```r
-PlotOutput({ ggplot(mtcars, aes(wt, mpg)) + geom_point() })
-TableOutput({ head(mtcars) })
-DTOutput({ mtcars })
+PlotOutput(\() ggplot(mtcars, aes(wt, mpg)) + geom_point())
+TableOutput(\() head(mtcars))
+DTOutput(\() mtcars)
 ```
 
 For any render/output pair, pass both functions explicitly:
 
 ```r
-Output(renderPlot, plotOutput, {
-  ggplot(mtcars, aes(wt, mpg)) + geom_point()
-})
+Output(renderPlot, plotOutput, \() ggplot(mtcars, aes(wt, mpg)) + geom_point())
 ```
 
 ## Incremental adoption

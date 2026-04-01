@@ -112,16 +112,12 @@ Match <- function(...) {
 #'
 #' @param render_fn A Shiny render function (e.g. `renderPlot`).
 #' @param output_fn A Shiny output function (e.g. `plotOutput`).
-#' @param expr An expression passed to `render_fn`.
+#' @param fn A function passed to `render_fn`.
 #' @param ... Additional arguments passed to `output_fn`.
-#' @param env The environment in which to evaluate `expr`.
-#' @param quoted If `TRUE`, `expr` is already a quoted expression.
 #' @return A nacre output node.
 #' @export
-Output <- function(render_fn, output_fn, expr, ...,
-                   env = parent.frame(), quoted = FALSE) {
-  expr_q <- if (quoted) expr else substitute(expr)
-  render_call <- eval(as.call(list(substitute(render_fn), expr_q)), env)
+Output <- function(render_fn, output_fn, fn, ...) {
+  render_call <- render_fn(fn)
   result <- list(
     output_fn = output_fn,
     output_fn_args = list(...),
@@ -135,28 +131,24 @@ Output <- function(render_fn, output_fn, expr, ...,
 #'
 #' Shorthand for `Output(renderPlot, plotOutput, ...)`.
 #'
-#' @param expr An expression that produces a plot.
+#' @param fn A function that produces a plot.
 #' @param ... Additional arguments passed to [shiny::plotOutput()].
-#' @param env The environment in which to evaluate `expr`.
 #' @return A nacre output node.
 #' @export
-PlotOutput <- function(expr, ..., env = parent.frame()) {
-  expr_q <- substitute(expr)
-  Output(shiny::renderPlot, shiny::plotOutput, expr_q, ..., env = env, quoted = TRUE)
+PlotOutput <- function(fn, ...) {
+  Output(shiny::renderPlot, shiny::plotOutput, fn, ...)
 }
 
 #' Embed a table output in a nacre tag tree
 #'
 #' Shorthand for `Output(renderTable, tableOutput, ...)`.
 #'
-#' @param expr An expression that produces a table.
+#' @param fn A function that produces a table.
 #' @param ... Additional arguments passed to [shiny::tableOutput()].
-#' @param env The environment in which to evaluate `expr`.
 #' @return A nacre output node.
 #' @export
-TableOutput <- function(expr, ..., env = parent.frame()) {
-  expr_q <- substitute(expr)
-  Output(shiny::renderTable, shiny::tableOutput, expr_q, ..., env = env, quoted = TRUE)
+TableOutput <- function(fn, ...) {
+  Output(shiny::renderTable, shiny::tableOutput, fn, ...)
 }
 
 #' Embed a DT DataTable output in a nacre tag tree
@@ -164,15 +156,13 @@ TableOutput <- function(expr, ..., env = parent.frame()) {
 #' Shorthand for `Output(DT::renderDT, DT::DTOutput, ...)`. Requires the
 #' **DT** package.
 #'
-#' @param expr An expression that produces a DataTable.
+#' @param fn A function that produces a DataTable.
 #' @param ... Additional arguments passed to `DT::DTOutput()`.
-#' @param env The environment in which to evaluate `expr`.
 #' @return A nacre output node.
 #' @export
-DTOutput <- function(expr, ..., env = parent.frame()) {
+DTOutput <- function(fn, ...) {
   if (!requireNamespace("DT", quietly = TRUE)) {
     stop("Package 'DT' is required for DTOutput(). Install it with install.packages('DT').")
   }
-  expr_q <- substitute(expr)
-  Output(DT::renderDT, DT::DTOutput, expr_q, ..., env = env, quoted = TRUE)
+  Output(DT::renderDT, DT::DTOutput, fn, ...)
 }

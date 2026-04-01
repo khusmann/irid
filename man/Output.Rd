@@ -4,20 +4,16 @@
 \alias{Output}
 \title{Embed a Shiny render/output pair in a nacre tag tree}
 \usage{
-Output(render_fn, output_fn, expr, ..., env = parent.frame(), quoted = FALSE)
+Output(render_fn, output_fn, fn, ...)
 }
 \arguments{
 \item{render_fn}{A Shiny render function (e.g. \code{renderPlot}).}
 
 \item{output_fn}{A Shiny output function (e.g. \code{plotOutput}).}
 
-\item{expr}{An expression passed to \code{render_fn}.}
+\item{fn}{A function passed to \code{render_fn}.}
 
 \item{...}{Additional arguments passed to \code{output_fn}.}
-
-\item{env}{The environment in which to evaluate \code{expr}.}
-
-\item{quoted}{If \code{TRUE}, \code{expr} is already a quoted expression.}
 }
 \value{
 A nacre output node.

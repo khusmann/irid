@@ -4,14 +4,12 @@
 \alias{PlotOutput}
 \title{Embed a plot output in a nacre tag tree}
 \usage{
-PlotOutput(expr, ..., env = parent.frame())
+PlotOutput(fn, ...)
 }
 \arguments{
-\item{expr}{An expression that produces a plot.}
+\item{fn}{A function that produces a plot.}
 
 \item{...}{Additional arguments passed to \code{\link[shiny:plotOutput]{shiny::plotOutput()}}.}
-
-\item{env}{The environment in which to evaluate \code{expr}.}
 }
 \value{
 A nacre output node.

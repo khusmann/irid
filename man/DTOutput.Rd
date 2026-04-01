@@ -4,14 +4,12 @@
 \alias{DTOutput}
 \title{Embed a DT DataTable output in a nacre tag tree}
 \usage{
-DTOutput(expr, ..., env = parent.frame())
+DTOutput(fn, ...)
 }
 \arguments{
-\item{expr}{An expression that produces a DataTable.}
+\item{fn}{A function that produces a DataTable.}
 
 \item{...}{Additional arguments passed to \code{DT::DTOutput()}.}
-
-\item{env}{The environment in which to evaluate \code{expr}.}
 }
 \value{
 A nacre output node.

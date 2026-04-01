@@ -33,7 +33,7 @@ OldFaithful <- function() {
           value = bins,
           onInput = \(event) bins(as.integer(event$value))
         ),
-        PlotOutput({
+        PlotOutput(\() {
           x <- faithful$waiting
           b <- seq(min(x), max(x), length.out = bins() + 1)
           hist(
