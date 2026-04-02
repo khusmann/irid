@@ -8,6 +8,10 @@ repo:
 template:
   bootstrap: 5
   light-switch: true
+  includes:
+    in_header: |
+      <script data-goatcounter="https://nacre.goatcounter.com/count"
+              async src="//gc.zgo.at/count.js"></script>
 
 reference:
   - title: App Entry Points
