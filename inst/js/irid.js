@@ -2,6 +2,8 @@
   var defined = new Set();
   var sequences = {};  // element id -> latest sent sequence number
   var PROP_ATTRS = { value: true, disabled: true, checked: true, selected: true };
+  var anchors = new Map();  // id -> { start: CommentNode, end: CommentNode }
+  var ANCHOR_RE = /^irid:(s|e):(.+)$/;
   var staleTimeout = null;  // ms before showing stale indicator (null = disabled)
   var staleShowTimerId = null;
   var staleClearTimerId = null;
@@ -55,6 +57,92 @@
     clearStale();
   });
 
+  // --- Comment-anchor registry ---
+  // Control-flow nodes are represented in the DOM as a pair of comment
+  // markers (<!--irid:s:ID--> ... <!--irid:e:ID-->) rather than a wrapper
+  // element. This keeps them valid inside restricted parents like
+  // <select>, <table>, and <ul>. We maintain a Map from id -> {start, end}
+  // that we populate on initial load and keep in sync as content is
+  // inserted or removed.
+
+  function indexAnchors(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+    var starts = {};
+    var node;
+    while ((node = walker.nextNode())) {
+      var m = node.data.match(ANCHOR_RE);
+      if (!m) continue;
+      var kind = m[1], id = m[2];
+      if (kind === 's') {
+        starts[id] = node;
+      } else if (starts[id]) {
+        anchors.set(id, { start: starts[id], end: node });
+        delete starts[id];
+      }
+    }
+  }
+
+  function unregisterAnchorsIn(root) {
+    // root may be a DocumentFragment, Element, or a detached Comment.
+    if (root.nodeType === 8) {
+      var m = root.data.match(ANCHOR_RE);
+      if (m) anchors.delete(m[2]);
+      return;
+    }
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+    var n;
+    while ((n = walker.nextNode())) {
+      var m2 = n.data.match(ANCHOR_RE);
+      if (m2) anchors.delete(m2[2]);
+    }
+  }
+
+  // Parse HTML into a fragment using the anchor's parent as the parsing
+  // context, so restricted-content elements (<option>, <tr>, etc.) parse
+  // correctly.
+  function parseFragment(html, contextNode) {
+    var range = document.createRange();
+    range.selectNodeContents(contextNode);
+    return range.createContextualFragment(html);
+  }
+
+  // Move the full range [start..end] (inclusive) into a detached
+  // DocumentFragment. Runs Shiny.unbindAll on element nodes in the range.
+  function detachRange(startNode, endNode) {
+    var frag = document.createDocumentFragment();
+    var n = startNode;
+    while (n && n !== endNode) {
+      var next = n.nextSibling;
+      if (n.nodeType === 1) Shiny.unbindAll(n);
+      frag.appendChild(n);
+      n = next;
+    }
+    frag.appendChild(endNode);
+    return frag;
+  }
+
+  // Look up anchors with a lazy re-scan fallback. Dynamic content
+  // delivered via renderUI/iridOutput (renderIrid) arrives as a Shiny
+  // output binding update — not a irid custom message — so we need to
+  // index its anchors before the subsequent irid-swap/irid-mutate
+  // messages fire.
+  function lookupAnchors(id) {
+    var a = anchors.get(id);
+    if (a) return a;
+    indexAnchors(document.body);
+    return anchors.get(id);
+  }
+
+  // Initial scan — comment anchors in the static page must be registered
+  // before any irid-swap/irid-mutate message arrives.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      indexAnchors(document.body);
+    });
+  } else {
+    indexAnchors(document.body);
+  }
+
   Shiny.addCustomMessageHandler('irid-config', function(msg) {
     if (msg.staleTimeout !== undefined && msg.staleTimeout !== null) {
       staleTimeout = msg.staleTimeout;
@@ -89,52 +177,81 @@
   });
 
   Shiny.addCustomMessageHandler('irid-swap', function(msg) {
-    var el = document.getElementById(msg.id);
-    if (!el) return;
-    Shiny.unbindAll(el);
-    el.innerHTML = msg.html;
+    var a = lookupAnchors(msg.id);
+    if (!a) return;
+    var parent = a.start.parentNode;
+
+    // Detach everything between start and end (exclusive). unbindAll runs
+    // on each removed element inside detachRange.
+    var detached = document.createDocumentFragment();
+    var n = a.start.nextSibling;
+    while (n && n !== a.end) {
+      var next = n.nextSibling;
+      if (n.nodeType === 1) Shiny.unbindAll(n);
+      detached.appendChild(n);
+      n = next;
+    }
+    unregisterAnchorsIn(detached);
+
+    if (msg.html) {
+      var fragment = parseFragment(msg.html, parent);
+      indexAnchors(fragment);
+      parent.insertBefore(fragment, a.end);
+    }
+
     // Defer bindAll so Shiny finishes processing all messages in the
     // current flush before we ask it to discover new output bindings
-    setTimeout(function() { Shiny.bindAll(el); }, 0);
+    setTimeout(function() { Shiny.bindAll(parent); }, 0);
   });
 
   Shiny.addCustomMessageHandler('irid-mutate', function(msg) {
-    var el = document.getElementById(msg.id);
-    if (!el) return;
+    var a = lookupAnchors(msg.id);
+    if (!a) return;
+    var parent = a.start.parentNode;
 
-    // 1. Remove children
+    // 1. Remove children — each child is itself an anchored range
     if (msg.removes) {
       msg.removes.forEach(function(childId) {
-        var child = document.getElementById(childId);
-        if (child) {
-          Shiny.unbindAll(child);
-          child.remove();
-        }
+        var child = anchors.get(childId);
+        if (!child) return;
+        var detached = detachRange(child.start, child.end);
+        unregisterAnchorsIn(detached);
       });
     }
 
-    // 2. Insert new children (append to end)
+    // 2. Insert new children (parsed in the container's parent context,
+    // appended immediately before the container's end anchor)
     if (msg.inserts) {
       msg.inserts.forEach(function(html) {
-        var temp = document.createElement('div');
-        temp.innerHTML = html;
-        while (temp.firstChild) {
-          el.appendChild(temp.firstChild);
-        }
+        var fragment = parseFragment(html, parent);
+        indexAnchors(fragment);
+        parent.insertBefore(fragment, a.end);
       });
     }
 
-    // 3. Reorder children to match desired order (optional)
+    // 3. Reorder children — lift each child's [start..end] range into a
+    // fragment, then insert the fragment before the container's end
+    // anchor in the desired order. Moving nodes via insertBefore keeps
+    // element identity (no recreation) and preserves anchor references.
     if (msg.order) {
       msg.order.forEach(function(childId) {
-        var child = document.getElementById(childId);
-        if (child) el.appendChild(child);
+        var child = anchors.get(childId);
+        if (!child) return;
+        var frag = document.createDocumentFragment();
+        var node = child.start;
+        while (node && node !== child.end) {
+          var next = node.nextSibling;
+          frag.appendChild(node);
+          node = next;
+        }
+        frag.appendChild(child.end);
+        parent.insertBefore(frag, a.end);
       });
     }
 
     // Defer bindAll so Shiny finishes processing all messages in the
     // current flush before we ask it to discover new output bindings
-    setTimeout(function() { Shiny.bindAll(el); }, 0);
+    setTimeout(function() { Shiny.bindAll(parent); }, 0);
   });
 
   // --- Event payload construction ---

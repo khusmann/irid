@@ -43,7 +43,9 @@ Walks the tag tree recursively and produces:
 
 - **`tag`** — A clean HTML tag tree with all functions removed. Reactive
   attributes are replaced by stable auto-generated element IDs. Control-flow
-  nodes become `<div style="display:contents">` placeholders.
+  nodes become a pair of HTML **comment anchors**
+  (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
+  should be inserted.
 - **`bindings`** — List of `{id, attr, fn}` for each reactive attribute.
 - **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce}` for
   each event callback.
@@ -89,9 +91,8 @@ reactive dependency shared with the condition would destroy the inner mount and
 lose per-item state. Match iterates cases to find the first truthy condition.
 
 **Each** and **Index** manage per-item mount handles and use `irid-mutate` for
-granular DOM mutations. Each item/slot is wrapped in a
-`<div style="display:contents">` with a stable ID so the client can insert,
-remove, and reorder individual children.
+granular DOM mutations. Each item/slot is bracketed by its own pair of comment
+anchors so the client can insert, remove, and reorder individual children.
 
 The two primitives are symmetric: **Each** keys by identity (item is stable,
 index moves), **Index** keys by position (index is stable, item moves).
@@ -109,6 +110,39 @@ reordered (no recreation), new items are mounted, removed items are destroyed.
 `reactiveVal` is updated in place so existing observers fire with the new values
 without DOM recreation. When the list grows, new slots are appended; when it
 shrinks, trailing slots are destroyed.
+
+## Comment-Anchor Range Protocol
+
+Control-flow containers and `Each`/`Index` items are represented in the DOM as
+pairs of HTML comment markers rather than wrapper elements. This keeps them
+valid children of any parent — including restricted-content elements like
+`<select>`, `<table>`, `<tbody>`, and `<ul>` — where a wrapper `<div>` would
+be dropped or hoisted by the browser's HTML parser.
+
+```html
+<select>
+  <!--irid:s:irid-5-->
+  <!--irid:s:irid-7--><option>Foo</option><!--irid:e:irid-7-->
+  <!--irid:s:irid-8--><option>Bar</option><!--irid:e:irid-8-->
+  <!--irid:e:irid-5-->
+</select>
+```
+
+The client maintains a `Map` from anchor ID to `{start, end}` comment-node
+references (`anchors` in `irid.js`). It is populated on initial page load by
+walking `document.body` for comment nodes and lazily refreshed on cache miss
+to handle dynamic content delivered via `renderIrid` (which arrives as a
+Shiny output binding update, not a irid custom message).
+
+Inserted HTML is parsed via `Range.createContextualFragment` using the
+anchor's parent as the parsing context, so content like `<option>` or `<tr>`
+parses correctly against its surrounding element.
+
+Removed ranges are moved into a detached `DocumentFragment` and their nested
+anchors are deregistered from the `Map` via a `TreeWalker` over the fragment.
+Reordering moves ranges by lifting each `[start..end]` range into a fragment
+and reinserting it before the container's end anchor — element identity and
+anchor references are preserved across moves.
 
 ## Client-Side Protocol
 
@@ -131,8 +165,11 @@ is `value` (optimistic update).
 {id: "irid-5", html: "<li>new content</li>"}
 ```
 
-Calls `Shiny.unbindAll` on the element, replaces `innerHTML`, then calls
-`Shiny.bindAll` to initialize any Shiny outputs in the new content.
+Looks up the anchor pair for `id`, detaches everything between the start
+and end anchors (running `Shiny.unbindAll` on each removed element), parses
+`html` as a contextual fragment, registers nested anchors, inserts the
+fragment before the end anchor, then defers `Shiny.bindAll` on the parent
+to initialize any Shiny outputs in the new content.
 
 ### `irid-mutate`
 
@@ -145,15 +182,18 @@ Calls `Shiny.unbindAll` on the element, replaces `innerHTML`, then calls
 }
 ```
 
-Performs granular child-node mutations on the container element. Used by `Each`
-and `Index` instead of `irid-swap` to avoid destroying and recreating all
-children on every list change.
+Performs granular range mutations between the container's anchors. Used by
+`Each` and `Index` instead of `irid-swap` to avoid destroying and recreating
+all children on every list change.
 
-1. **Removes** — Calls `Shiny.unbindAll` on each child, then removes it from the
-   DOM.
-2. **Inserts** — Appends new HTML fragments as children of the container.
-3. **Order** (optional) — Reorders children by calling `appendChild` in sequence,
-   which moves existing DOM nodes without cloning.
+1. **Removes** — For each child ID, looks up its anchor pair and moves the
+   entire `[start..end]` range into a detached fragment (unbinding elements
+   and deregistering nested anchors).
+2. **Inserts** — Parses each HTML fragment in the container's parent context,
+   registers its anchors, and inserts it before the container's end anchor.
+3. **Order** (optional) — Reorders children by lifting each child's range
+   into a fragment and reinserting it before the container's end anchor in
+   the desired order. Moves preserve element identity and anchor references.
 
 After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
 initialize any new Shiny outputs.

@@ -11,6 +11,20 @@ is_irid_reactive <- function(x) {
     inherits(x, "irid_event"))
 }
 
+#' Create a pair of HTML comment anchors bracketing a control-flow range
+#'
+#' Comment nodes are legal children of any element (including `<select>`,
+#' `<table>`, `<tbody>`, etc.) so they serve as invisible range markers
+#' that the client can use to locate and mutate content without needing a
+#' wrapper element.
+#'
+#' @param id The control-flow node ID.
+#' @return An [htmltools::HTML()] fragment containing the start/end markers.
+#' @keywords internal
+anchor_pair <- function(id) {
+  htmltools::HTML(paste0("<!--irid:s:", id, "--><!--irid:e:", id, "-->"))
+}
+
 #' Create a local ID counter for use within a single `process_tags` call
 #'
 #' @return A function that returns the next ID each time it is called.
@@ -59,7 +73,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       cf_entry <- list(type = type, id = id, items = node$items, fn = node$fn)
       if (type == "each") cf_entry$by <- node$by
       control_flows[[length(control_flows) + 1L]] <<- cf_entry
-      return(tags$div(id = id, style = "display:contents"))
+      return(anchor_pair(id))
     }
 
     if (inherits(node, "irid_match")) {
@@ -68,7 +82,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         type = "match", id = id,
         cases = node$cases
       )
-      return(tags$div(id = id, style = "display:contents"))
+      return(anchor_pair(id))
     }
 
     if (inherits(node, "irid_when")) {
@@ -79,7 +93,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         yes = node$yes,
         otherwise = node$otherwise
       )
-      return(tags$div(id = id, style = "display:contents"))
+      return(anchor_pair(id))
     }
 
     if (is.function(node) && is_irid_reactive(node)) {

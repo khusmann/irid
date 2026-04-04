@@ -207,7 +207,11 @@ irid_mount_processed <- function(result, session) {
 
             index_rv <- reactiveVal(idx)
             child <- if (cf_nformals >= 2L) cf_fn(item, index_rv) else cf_fn(item)
-            wrapped <- tags$div(id = wrapper_id, style = "display:contents", child)
+            wrapped <- tagList(
+              HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
+              child,
+              HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+            )
             processed <- process_tags(wrapped, counter = counter)
 
             inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
@@ -281,7 +285,11 @@ irid_mount_processed <- function(result, session) {
               wrapper_id <- counter()
 
               child <- if (cf_nformals >= 2L) cf_fn(rv, ii) else cf_fn(rv)
-              wrapped <- tags$div(id = wrapper_id, style = "display:contents", child)
+              wrapped <- tagList(
+                HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
+                child,
+                HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+              )
               processed <- process_tags(wrapped, counter = counter)
 
               inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
