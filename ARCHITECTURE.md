@@ -21,6 +21,7 @@ examples/
   todo.R               Todo app (Each, Index, When, dynamic lists)
   optimistic_updates.R Controlled inputs with simulated server latency
   shiny_interop.R      irid components inside a standard Shiny module
+  cards.R              Dynamic column cards (Each, keyed by column name)
 ```
 
 ## Design Principles

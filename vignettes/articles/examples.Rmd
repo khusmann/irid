@@ -22,6 +22,10 @@ Two inputs representing the same value in different units, where editing either 
 
 A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R list. Adding, toggling, filtering, and removing items are ordinary functions that update that list.
 
+### [Dynamic Column Cards](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+Rebuilds the scenario from [Shiny's dynamic-observers problem](https://www.kylehusmann.com/posts/2025/shiny-dynamic-observers/): pick a dataset, pick columns from it, each column becomes a card with a close button, and removing a card puts the column back in the dropdown. In Shiny this required nested observers, ghost-input workarounds, and a memory leak fix. Here the parent owns a `reactiveVal` and the dropdown and close buttons both read and write it directly.
+
 ### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 irid applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.

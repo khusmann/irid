@@ -92,16 +92,13 @@ jobs:
             saveRDS(metadata, meta_file)
           }
 
-          examples <- c(
-            "old-faithful"       = "old_faithful",
-            "composing"          = "composing",
-            "temperature"        = "temperature",
-            "todo"               = "todo",
-            "optimistic-updates" = "optimistic_updates",
-            "shiny-interop"      = "shiny_interop"
-          )
-          for (slug in names(examples)) {
-            app_dir <- file.path("examples", paste0(examples[[slug]], ".R"))
+          # Auto-discover examples from examples/*.R. The filename stem
+          # (with underscores) is the R script; the slug (with hyphens)
+          # becomes the URL path under docs/apps/.
+          example_files <- list.files("examples", pattern = "\\.R$", full.names = TRUE)
+          for (app_dir in example_files) {
+            stem <- tools::file_path_sans_ext(basename(app_dir))
+            slug <- gsub("_", "-", stem)
             dest_dir <- file.path("docs", "apps", slug)
 
             tmp_dir <- file.path(tempdir(), slug)
