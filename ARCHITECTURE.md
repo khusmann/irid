@@ -4,15 +4,15 @@
 
 ```
 R/
-  app.R           nacreApp, nacreOutput, renderNacre
+  app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Index, Match/Case/Default, Output
   event.R         event_immediate, event_throttle, event_debounce
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
-  nacre-package.R Package-level imports
+  irid-package.R Package-level imports
 
 inst/js/
-  nacre.js        Client-side message handlers (vanilla JS, no build step)
+  irid.js        Client-side message handlers (vanilla JS, no build step)
 
 examples/
   old_faithful.R       Old Faithful geyser histogram with PlotOutput
@@ -20,22 +20,22 @@ examples/
   temperature.R        Bidirectional temperature converter (controlled inputs)
   todo.R               Todo app (Each, Index, When, dynamic lists)
   optimistic_updates.R Controlled inputs with simulated server latency
-  shiny_interop.R      nacre components inside a standard Shiny module
+  shiny_interop.R      irid components inside a standard Shiny module
 ```
 
 ## Design Principles
 
-**Functions, not expressions.** nacre's core rule is: pass a function to make
+**Functions, not expressions.** irid's core rule is: pass a function to make
 something reactive. This applies uniformly across tag attributes, tag children,
 and `Output`/`PlotOutput`/`TableOutput`/`DTOutput`. Shiny's render functions
-use expression-based NSE (`renderPlot({ ... })`), but nacre wraps them with a
+use expression-based NSE (`renderPlot({ ... })`), but irid wraps them with a
 function interface for two reasons: (1) consistency — users never need an
 exception for outputs; (2) composability — a named function can be passed
 directly (`PlotOutput(my_plot_fn)`), which expressions cannot support.
 
 ## Two-Phase Rendering
 
-nacre splits rendering into two phases: **process** and **mount**.
+irid splits rendering into two phases: **process** and **mount**.
 
 ### Phase 1: `process_tags`
 
@@ -60,16 +60,16 @@ default.
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.
 
-### Phase 2: `nacre_mount_processed`
+### Phase 2: `irid_mount_processed`
 
 Takes the output of `process_tags` and a Shiny `session`, then wires up:
 
 1. **Reactive bindings** — Each binding gets an `observe()` that sends
-   `nacre-attr` messages when the reactive value changes.
+   `irid-attr` messages when the reactive value changes.
 2. **Event handlers** — Each event gets an `observeEvent()` on a namespaced
-   input ID (`nacre_ev_{id}_{event}`). The handler is dispatched based on its
+   input ID (`irid_ev_{id}_{event}`). The handler is dispatched based on its
    formal argument count (0, 1, or 2 args). Event registration is sent to the
-   client as a `nacre-events` message.
+   client as a `irid-events` message.
 3. **Shiny outputs** — Each output's render call is assigned to
    `session$output[[id]]`.
 4. **Control-flow nodes** — Each node gets an `observe()` that manages its
@@ -81,14 +81,14 @@ down all observers).
 ## Control Flow Lifecycle
 
 **When** and **Match** each manage a single `current_mount` — a mount handle from
-a recursive `nacre_mount_processed` call. Both short-circuit: the observer
+a recursive `irid_mount_processed` call. Both short-circuit: the observer
 re-evaluates the condition on every reactive invalidation but only destroys and
 recreates the branch when the active branch actually changes. This is critical
 when wrapping `Each` or `Index` — without the short-circuit, any change to a
 reactive dependency shared with the condition would destroy the inner mount and
 lose per-item state. Match iterates cases to find the first truthy condition.
 
-**Each** and **Index** manage per-item mount handles and use `nacre-mutate` for
+**Each** and **Index** manage per-item mount handles and use `irid-mutate` for
 granular DOM mutations. Each item/slot is wrapped in a
 `<div style="display:contents">` with a stable ID so the client can insert,
 remove, and reorder individual children.
@@ -112,12 +112,12 @@ shrinks, trailing slots are destroyed.
 
 ## Client-Side Protocol
 
-`nacre.js` registers four Shiny custom message handlers:
+`irid.js` registers four Shiny custom message handlers:
 
-### `nacre-attr`
+### `irid-attr`
 
 ```js
-{id: "nacre-3", attr: "textContent", value: "Count: 42"}
+{id: "irid-3", attr: "textContent", value: "Count: 42"}
 ```
 
 Sets a DOM property or attribute. Special-cased properties: `value`, `disabled`,
@@ -125,28 +125,28 @@ Sets a DOM property or attribute. Special-cased properties: `value`, `disabled`,
 attributes). Skips the update if the target element has focus and the attribute
 is `value` (optimistic update).
 
-### `nacre-swap`
+### `irid-swap`
 
 ```js
-{id: "nacre-5", html: "<li>new content</li>"}
+{id: "irid-5", html: "<li>new content</li>"}
 ```
 
 Calls `Shiny.unbindAll` on the element, replaces `innerHTML`, then calls
 `Shiny.bindAll` to initialize any Shiny outputs in the new content.
 
-### `nacre-mutate`
+### `irid-mutate`
 
 ```js
 {
-  id: "nacre-5",
-  removes: ["nacre-7", "nacre-9"],
-  inserts: ["<div id='nacre-12' ...>...</div>"],
-  order: ["nacre-6", "nacre-12", "nacre-8"]
+  id: "irid-5",
+  removes: ["irid-7", "irid-9"],
+  inserts: ["<div id='irid-12' ...>...</div>"],
+  order: ["irid-6", "irid-12", "irid-8"]
 }
 ```
 
 Performs granular child-node mutations on the container element. Used by `Each`
-and `Index` instead of `nacre-swap` to avoid destroying and recreating all
+and `Index` instead of `irid-swap` to avoid destroying and recreating all
 children on every list change.
 
 1. **Removes** — Calls `Shiny.unbindAll` on each child, then removes it from the
@@ -158,14 +158,14 @@ children on every list change.
 After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
 initialize any new Shiny outputs.
 
-### `nacre-events`
+### `irid-events`
 
 ```js
 [
   {
-    id: "nacre-2",
+    id: "irid-2",
     event: "input",
-    inputId: "nacre_ev_nacre-2_input",
+    inputId: "irid_ev_irid-2_input",
     mode: "throttle",
     ms: 100,
     leading: true,
@@ -192,10 +192,10 @@ programmatic updates (e.g. clearing an input after form submission) must always
 apply, even while the element is focused.
 
 **Sequence numbers** solve this. Each event payload includes an incrementing
-`__nacre_seq`. The R event observer stores it on
-`session$userData$nacre_current_sequence` and registers `session$onFlushed` to
+`__irid_seq`. The R event observer stores it on
+`session$userData$irid_current_sequence` and registers `session$onFlushed` to
 clear it after the flush completes. Binding observers attach the sequence to
-`nacre-attr` messages when present. On the client, `nacre-attr` for `value` on a
+`irid-attr` messages when present. On the client, `irid-attr` for `value` on a
 focused element uses the sequence to decide:
 
 - **Stale echo** (sequence < client's latest sent) → skip.
@@ -226,12 +226,12 @@ Key design points:
   bindings in that flush are tagged with the latest sequence, which is the most
   conservative (least likely to be considered stale).
 
-- **`__nacre_seq` is excluded** from the `event_obj` passed to user handlers, so
+- **`__irid_seq` is excluded** from the `event_obj` passed to user handlers, so
   it is an internal-only field.
 
 - **Force-send on no-op.** After running the user's event handler, the event
   observer reads all bindings for the source element with `isolate()` and sends
-  `nacre-attr` messages tagged with the sequence. This covers the case where the
+  `irid-attr` messages tagged with the sequence. This covers the case where the
   handler sets a `reactiveVal` to the same value it already holds (a no-op that
   doesn't invalidate the binding observer). Without the force-send, the client
   would receive no echo and could not apply a server transform. For example, a
@@ -248,27 +248,27 @@ bar appears fixed at the top of the viewport to signal that displayed state may
 be stale. Elements remain fully interactive — this is a visual cue, not a
 disabled state.
 
-**Option:** `nacre.stale_timeout` — milliseconds to wait before showing the
+**Option:** `irid.stale_timeout` — milliseconds to wait before showing the
 indicator. Default `200`. Set to `NULL` to disable.
 
 **Flow:**
 
-1. The session entry points (`nacreApp` server, `renderNacre` `onFlushed`) send
-   a `nacre-config` message with the timeout from `getOption("nacre.stale_timeout")`.
+1. The session entry points (`iridApp` server, `renderIrid` `onFlushed`) send
+   a `irid-config` message with the timeout from `getOption("irid.stale_timeout")`.
 2. On the client, every `sendPayload` call starts a show timer (if not already
    running). It also cancels any pending clear, keeping the indicator up if a
    new event fires shortly after the server goes idle.
 3. If `shiny:idle` fires before the show timer, the timer is reset.
-4. If the show timer fires first, `nacre-stale` is added to `<html>`, which
+4. If the show timer fires first, `irid-stale` is added to `<html>`, which
    shows an animated progress bar fixed at the top of the viewport via
-   `nacre.css`. The progress bar color is customizable with the
-   `--nacre-stale-color` CSS variable (defaults to Bootstrap gray).
+   `irid.css`. The progress bar color is customizable with the
+   `--irid-stale-color` CSS variable (defaults to Bootstrap gray).
 5. When `shiny:idle` fires, a debounced clear is scheduled (100ms). If
    `shiny:busy` fires before the clear executes (e.g. a reactive chain
    triggers a follow-up flush), the clear is cancelled. The indicator only
    removes once the server is truly idle for the full debounce window.
 
-**Debug:** `nacre.debug.latency` (seconds) adds a `Sys.sleep` to every event
+**Debug:** `irid.debug.latency` (seconds) adds a `Sys.sleep` to every event
 handler. The `optimistic_updates` example exposes this as a slider.
 
 ## Remaining Work

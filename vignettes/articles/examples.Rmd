@@ -8,7 +8,7 @@ Each example below opens in a live [Shinylive](https://shinylive.io/) editor whe
 
 ### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-The classic Shiny demo, rebuilt with nacre. A controlled slider drives a histogram of Old Faithful eruption wait times.
+The classic Shiny demo, rebuilt with irid. A controlled slider drives a histogram of Old Faithful eruption wait times.
 
 ### [Composing Components](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
@@ -24,10 +24,10 @@ A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R 
 
 ### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-nacre applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
+irid applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
 
 ### [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
-nacre components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `nacreOutput()` and `renderNacre()`.
+irid components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `iridOutput()` and `renderIrid()`.
 
 </div>

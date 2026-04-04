@@ -2,7 +2,7 @@
 % Please edit documentation in R/primitives.R
 \name{Output}
 \alias{Output}
-\title{Embed a Shiny render/output pair in a nacre tag tree}
+\title{Embed a Shiny render/output pair in a irid tag tree}
 \usage{
 Output(render_fn, output_fn, fn, ...)
 }
@@ -16,7 +16,7 @@ Output(render_fn, output_fn, fn, ...)
 \item{...}{Additional arguments passed to \code{output_fn}.}
 }
 \value{
-A nacre output node.
+A irid output node.
 }
 \description{
 A generic wrapper that pairs a Shiny render function with its

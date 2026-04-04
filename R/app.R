@@ -1,21 +1,21 @@
-nacre_send_config <- function(session) {
-  session$sendCustomMessage("nacre-config", list(
-    staleTimeout = getOption("nacre.stale_timeout", default = 200)
+irid_send_config <- function(session) {
+  session$sendCustomMessage("irid-config", list(
+    staleTimeout = getOption("irid.stale_timeout", default = 200)
   ))
 }
 
-#' Create a nacre application
+#' Create a irid application
 #'
-#' Builds a Shiny app from a function that returns a nacre tag tree. The
+#' Builds a Shiny app from a function that returns a irid tag tree. The
 #' function is called once per session so that each client gets its own
 #' reactive state.
 #'
-#' @param fn A zero-argument function that returns a nacre tag tree (e.g. a
+#' @param fn A zero-argument function that returns a irid tag tree (e.g. a
 #'   `page_sidebar()` call containing reactive attributes and event handlers).
 #' @param ... Additional arguments passed to [shiny::shinyApp()].
 #' @return A Shiny app object.
 #' @export
-nacreApp <- function(fn, ...) {
+iridApp <- function(fn, ...) {
   # We avoid uiOutput/renderUI here so the app's tag tree is the top-level
   # document (no wrapper div). Instead, ui() and server both call fn() +
   # process_tags() independently — the local ID counter in process_tags
@@ -23,56 +23,56 @@ nacreApp <- function(fn, ...) {
   ui <- function(req) {
     htmltools::attachDependencies(
       process_tags(fn())$tag,
-      nacre_dependency()
+      irid_dependency()
     )
   }
   server <- function(input, output, session) {
-    nacre_send_config(session)
+    irid_send_config(session)
     result <- process_tags(fn())
-    nacre_mount_processed(result, session)
+    irid_mount_processed(result, session)
   }
   shiny::shinyApp(ui, server, ...)
 }
 
-#' Create a nacre UI output placeholder
+#' Create a irid UI output placeholder
 #'
-#' Creates a [shiny::uiOutput()] with the nacre JavaScript dependency
-#' attached. Use this in a standard Shiny UI to mark where [renderNacre()]
+#' Creates a [shiny::uiOutput()] with the irid JavaScript dependency
+#' attached. Use this in a standard Shiny UI to mark where [renderIrid()]
 #' should inject its content.
 #'
-#' @param id The output ID, matching the corresponding `renderNacre` call.
-#' @return An HTML tag with the nacre dependency.
+#' @param id The output ID, matching the corresponding `renderIrid` call.
+#' @return An HTML tag with the irid dependency.
 #' @export
-nacreOutput <- function(id) {
+iridOutput <- function(id) {
   htmltools::attachDependencies(
     shiny::uiOutput(id),
-    nacre_dependency()
+    irid_dependency()
   )
 }
 
-#' Render nacre content inside a Shiny app
+#' Render irid content inside a Shiny app
 #'
-#' A render function for use with [nacreOutput()]. Evaluates `expr` to
-#' produce a nacre tag tree, processes it, and mounts reactive bindings and
+#' A render function for use with [iridOutput()]. Evaluates `expr` to
+#' produce a irid tag tree, processes it, and mounts reactive bindings and
 #' event handlers after the UI is flushed.
 #'
-#' @param expr An expression that returns a nacre tag tree.
+#' @param expr An expression that returns a irid tag tree.
 #' @param env The environment in which to evaluate `expr`.
 #' @param quoted If `TRUE`, `expr` is already a quoted expression.
 #' @return A [shiny::renderUI()] result.
 #' @export
-renderNacre <- function(expr, env = parent.frame(), quoted = FALSE) {
+renderIrid <- function(expr, env = parent.frame(), quoted = FALSE) {
   func <- shiny::exprToFunction(expr, env, quoted)
 
   shiny::renderUI({
     session <- shiny::getDefaultReactiveDomain()
     tag_tree <- isolate(func())
     output_name <- shiny::getCurrentOutputInfo()$name
-    result <- process_tags(tag_tree, counter = nacre_id_counter(output_name))
+    result <- process_tags(tag_tree, counter = irid_id_counter(output_name))
 
     session$onFlushed(function() {
-      nacre_send_config(session)
-      nacre_mount_processed(result, session)
+      irid_send_config(session)
+      irid_mount_processed(result, session)
     }, once = TRUE)
 
     result$tag

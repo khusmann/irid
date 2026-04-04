@@ -1,13 +1,13 @@
 # Composing Components
 #
-# A nacre component is just a function that returns a tag tree. Pass
+# A irid component is just a function that returns a tag tree. Pass
 # reactiveVals as arguments to share state between components — the parent
 # owns the state, children read and write it.
 #
 # This example creates two independent counters whose values feed a shared
 # total displayed above them.
 
-library(nacre)
+library(irid)
 library(bslib)
 
 Counter <- function(label, count) {
@@ -50,4 +50,4 @@ App <- function() {
   )
 }
 
-nacreApp(App)
+iridApp(App)

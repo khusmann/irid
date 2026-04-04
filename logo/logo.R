@@ -7,7 +7,7 @@ showtext_auto()
 
 sticker(
   subplot = "logo/abalone.png",
-  package = "nacre",
+  package = "irid",
   p_size = 22,
   p_color = "#E0F2F1",
   p_family = "montserrat",

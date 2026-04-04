@@ -11,7 +11,7 @@
 \title{Shiny reactive primitives}
 \description{
 These functions are re-exported from \pkg{shiny} for convenience, so you
-can use them in nacre apps without loading shiny explicitly.
+can use them in irid apps without loading shiny explicitly.
 }
 \details{
 \itemize{

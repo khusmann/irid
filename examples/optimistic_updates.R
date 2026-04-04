@@ -1,6 +1,6 @@
 # Optimistic Updates
 #
-# When a user types into a controlled input, nacre applies the change
+# When a user types into a controlled input, irid applies the change
 # immediately in the browser before the server round-trip completes — an
 # *optimistic update*. If the server responds with a different value (e.g. it
 # truncates the input), the browser reconciles to the server's version. This
@@ -17,7 +17,7 @@
 # 3. Mirror — a read-only input always shows the confirmed server value, useful
 #    for verifying what the server actually holds.
 
-library(nacre)
+library(irid)
 library(bslib)
 
 OptimisticUpdates <- function() {
@@ -77,7 +77,7 @@ OptimisticUpdates <- function() {
           onInput = \(event) {
             val <- as.integer(event$value)
             delay_ms(val)
-            options(nacre.debug.latency = val / 1000)
+            options(irid.debug.latency = val / 1000)
           }
         )
       )
@@ -85,4 +85,4 @@ OptimisticUpdates <- function() {
   )
 }
 
-nacreApp(OptimisticUpdates)
+iridApp(OptimisticUpdates)

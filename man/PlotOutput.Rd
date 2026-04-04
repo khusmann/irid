@@ -2,7 +2,7 @@
 % Please edit documentation in R/primitives.R
 \name{PlotOutput}
 \alias{PlotOutput}
-\title{Embed a plot output in a nacre tag tree}
+\title{Embed a plot output in a irid tag tree}
 \usage{
 PlotOutput(fn, ...)
 }
@@ -12,7 +12,7 @@ PlotOutput(fn, ...)
 \item{...}{Additional arguments passed to \code{\link[shiny:plotOutput]{shiny::plotOutput()}}.}
 }
 \value{
-A nacre output node.
+A irid output node.
 }
 \description{
 Shorthand for \code{Output(renderPlot, plotOutput, ...)}.

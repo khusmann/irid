@@ -12,7 +12,7 @@
       clearTimeout(staleClearTimerId);
       staleClearTimerId = null;
     }
-    document.documentElement.classList.add('nacre-stale');
+    document.documentElement.classList.add('irid-stale');
   }
 
   function clearStale() {
@@ -24,7 +24,7 @@
     if (staleClearTimerId === null) {
       staleClearTimerId = setTimeout(function() {
         staleClearTimerId = null;
-        document.documentElement.classList.remove('nacre-stale');
+        document.documentElement.classList.remove('irid-stale');
       }, STALE_CLEAR_DELAY);
     }
   }
@@ -36,7 +36,7 @@
       staleClearTimerId = null;
     }
     if (staleTimeout !== null && staleShowTimerId === null &&
-        !document.documentElement.classList.contains('nacre-stale')) {
+        !document.documentElement.classList.contains('irid-stale')) {
       staleShowTimerId = setTimeout(markStale, staleTimeout);
     }
   }
@@ -55,7 +55,7 @@
     clearStale();
   });
 
-  Shiny.addCustomMessageHandler('nacre-config', function(msg) {
+  Shiny.addCustomMessageHandler('irid-config', function(msg) {
     if (msg.staleTimeout !== undefined && msg.staleTimeout !== null) {
       staleTimeout = msg.staleTimeout;
     } else {
@@ -63,7 +63,7 @@
     }
   });
 
-  Shiny.addCustomMessageHandler('nacre-attr', function(msg) {
+  Shiny.addCustomMessageHandler('irid-attr', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
     if (msg.attr === 'value' && document.activeElement === el) {
@@ -88,7 +88,7 @@
     }
   });
 
-  Shiny.addCustomMessageHandler('nacre-swap', function(msg) {
+  Shiny.addCustomMessageHandler('irid-swap', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
     Shiny.unbindAll(el);
@@ -98,7 +98,7 @@
     setTimeout(function() { Shiny.bindAll(el); }, 0);
   });
 
-  Shiny.addCustomMessageHandler('nacre-mutate', function(msg) {
+  Shiny.addCustomMessageHandler('irid-mutate', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
 
@@ -163,7 +163,7 @@
     payload.id = id;
     payload.nonce = Math.random();
     if (!sequences[id]) sequences[id] = 0;
-    payload.__nacre_seq = ++sequences[id];
+    payload.__irid_seq = ++sequences[id];
     return payload;
   }
 
@@ -333,7 +333,7 @@
     }
   }
 
-  Shiny.addCustomMessageHandler('nacre-events', function(msgs) {
+  Shiny.addCustomMessageHandler('irid-events', function(msgs) {
     msgs.forEach(function(msg) {
       var el = document.getElementById(msg.id);
       if (!el) return;

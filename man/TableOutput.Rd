@@ -2,7 +2,7 @@
 % Please edit documentation in R/primitives.R
 \name{TableOutput}
 \alias{TableOutput}
-\title{Embed a table output in a nacre tag tree}
+\title{Embed a table output in a irid tag tree}
 \usage{
 TableOutput(fn, ...)
 }
@@ -12,7 +12,7 @@ TableOutput(fn, ...)
 \item{...}{Additional arguments passed to \code{\link[shiny:renderTable]{shiny::tableOutput()}}.}
 }
 \value{
-A nacre output node.
+A irid output node.
 }
 \description{
 Shorthand for \code{Output(renderTable, tableOutput, ...)}.

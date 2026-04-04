@@ -7,7 +7,7 @@
 
 ## 1. Motivation
 
-nacre attaches independent event listeners to DOM elements — one per `(element, event)` pair. Each listener has its own rate-limiting state: an `onInput` listener might be mid-debounce while an `onKeyDown` listener fires immediately. Because these streams are independent, an immediate event can overtake a pending debounced one and reach the server first.
+irid attaches independent event listeners to DOM elements — one per `(element, event)` pair. Each listener has its own rate-limiting state: an `onInput` listener might be mid-debounce while an `onKeyDown` listener fires immediately. Because these streams are independent, an immediate event can overtake a pending debounced one and reach the server first.
 
 **Concrete bug:** In the todo example, typing quickly then pressing Enter sends the `onKeyDown` (Enter → `add_todo()`) before the debounced `onInput` (→ `new_text(...)`) has flushed. The server calls `add_todo()` while `new_text()` still holds an outdated value, producing an incomplete or empty todo item.
 
@@ -69,7 +69,7 @@ This is the correct semantics for a UI event system and should be documented exp
 
 ## 4. Implementation Sketch
 
-In `nacre.js`, alongside the existing `managed` map (keyed by `inputId`), add:
+In `irid.js`, alongside the existing `managed` map (keyed by `inputId`), add:
 
 ```js
 var elementQueues = {};  // elementId -> [{payload, flush}]
@@ -102,7 +102,7 @@ Each `setup*` function claims a slot at DOM event time and calls `drainQueue` wh
 
 ## 5. Alternatives Considered
 
-**Global queue:** All nacre events share one queue. Rejected — unrelated elements would block each other, degrading responsiveness.
+**Global queue:** All irid events share one queue. Rejected — unrelated elements would block each other, degrading responsiveness.
 
 **Flush-only (no slots):** When an immediate event fires, cancel pending timers for the same element and send their payloads, then send the immediate. Simpler, but doesn't handle cases where two debounced events on the same element need ordering, or where the immediate event was registered before the debounce fired.
 

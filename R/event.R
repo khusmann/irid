@@ -43,7 +43,7 @@ NULL
 #' @rdname event-wrappers
 #' @export
 event_immediate <- function(fn, coalesce = FALSE, prevent_default = FALSE) {
-  structure(fn, class = c("nacre_event", "function"),
+  structure(fn, class = c("irid_event", "function"),
             mode = "immediate", coalesce = coalesce,
             prevent_default = prevent_default)
 }
@@ -51,7 +51,7 @@ event_immediate <- function(fn, coalesce = FALSE, prevent_default = FALSE) {
 #' @rdname event-wrappers
 #' @export
 event_throttle <- function(fn, ms, leading = TRUE, coalesce = TRUE, prevent_default = FALSE) {
-  structure(fn, class = c("nacre_event", "function"),
+  structure(fn, class = c("irid_event", "function"),
             mode = "throttle", ms = ms, leading = leading,
             coalesce = coalesce, prevent_default = prevent_default)
 }
@@ -59,7 +59,7 @@ event_throttle <- function(fn, ms, leading = TRUE, coalesce = TRUE, prevent_defa
 #' @rdname event-wrappers
 #' @export
 event_debounce <- function(fn, ms, coalesce = TRUE, prevent_default = FALSE) {
-  structure(fn, class = c("nacre_event", "function"),
+  structure(fn, class = c("irid_event", "function"),
             mode = "debounce", ms = ms, coalesce = coalesce,
             prevent_default = prevent_default)
 }

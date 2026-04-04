@@ -1,7 +1,7 @@
 # Shiny Modules
 #
-# nacre components work naturally inside standard Shiny modules. Use
-# nacreOutput() and renderNacre() to embed a nacre component tree inside a
+# irid components work naturally inside standard Shiny modules. Use
+# iridOutput() and renderIrid() to embed a irid component tree inside a
 # module's UI and server functions, exactly like any other Shiny output. The
 # reactive state lives inside the module's server function, so each module
 # instance is fully independent.
@@ -9,11 +9,11 @@
 # This example instantiates two counter modules side by side, each with a
 # display component and a controls component that share the same reactiveVal.
 
-library(nacre)
+library(irid)
 library(shiny)
 library(bslib)
 
-# nacre components -----------------------------------------------------------
+# irid components -----------------------------------------------------------
 
 CountDisplay <- function(count) {
   tags$h2(
@@ -45,8 +45,8 @@ counter_ui <- function(id) {
   card(
     card_header(id),
     card_body(
-      nacreOutput(ns("display")),
-      nacreOutput(ns("controls"))
+      iridOutput(ns("display")),
+      iridOutput(ns("controls"))
     )
   )
 }
@@ -54,15 +54,15 @@ counter_ui <- function(id) {
 counter_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     count <- reactiveVal(0)
-    output$display <- renderNacre(CountDisplay(count))
-    output$controls <- renderNacre(CountControls(count))
+    output$display <- renderIrid(CountDisplay(count))
+    output$controls <- renderIrid(CountControls(count))
   })
 }
 
 # shiny app ------------------------------------------------------------------
 
 ui <- page_fluid(
-  tags$h3("Nacre + Shiny Modules"),
+  tags$h3("Irid + Shiny Modules"),
   layout_columns(
     counter_ui("A"),
     counter_ui("B")

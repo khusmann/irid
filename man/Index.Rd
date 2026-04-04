@@ -14,7 +14,7 @@ Index(items, fn)
 fixed position (plain integer). Should return a tag tree.}
 }
 \value{
-A nacre control-flow node.
+A irid control-flow node.
 }
 \description{
 Like \code{\link[=Each]{Each()}}, but when list values change without a length change, each

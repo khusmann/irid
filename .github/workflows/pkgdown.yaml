@@ -60,7 +60,7 @@ jobs:
           stopifnot(requireNamespace("shinylive", quietly = TRUE))
         shell: Rscript {0}
 
-      - name: Build nacre Wasm binary
+      - name: Build irid Wasm binary
         uses: r-wasm/actions/build-rwasm@v2
         with:
           packages: "local::."
@@ -109,7 +109,7 @@ jobs:
             file.copy(app_dir, file.path(tmp_dir, "app.R"))
 
             shinylive::export(appdir = tmp_dir, destdir = dest_dir)
-            inject_local_wasm(dest_dir, "_rwasm", "nacre")
+            inject_local_wasm(dest_dir, "_rwasm", "irid")
           }
         shell: Rscript {0}
 

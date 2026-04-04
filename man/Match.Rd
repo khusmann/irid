@@ -10,7 +10,7 @@ Match(...)
 \item{...}{One or more \code{\link[=Case]{Case()}} or \code{\link[=Default]{Default()}} values.}
 }
 \value{
-A nacre control-flow node.
+A irid control-flow node.
 }
 \description{
 Evaluates cases in order and renders the content of the first case whose

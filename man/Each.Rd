@@ -17,7 +17,7 @@ item's current position (updated on reorder). Should return a tag tree.}
 for keyed reordering. Keys must be unique. Defaults to \code{\link[=identity]{identity()}}.}
 }
 \value{
-A nacre control-flow node.
+A irid control-flow node.
 }
 \description{
 Iterates over a reactive list and calls \code{fn} for each item. When the list

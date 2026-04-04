@@ -3,7 +3,7 @@
 # A classic reactive UI challenge: two inputs representing the same value in
 # different units, where editing either one should update the other. In
 # traditional Shiny this requires careful coordination to avoid feedback loops.
-# With nacre's controlled inputs, the solution is straightforward — one
+# With irid's controlled inputs, the solution is straightforward — one
 # `reactiveVal` holds the canonical Celsius value, and the Fahrenheit
 # thermometer derives from it via a `reactive()`. Both thermometers stay in
 # sync automatically.
@@ -11,7 +11,7 @@
 # The app is composed from two reusable components: `Thermometer` (a labeled
 # vertical slider) and `TemperatureDisplay` (a readout with a zone badge).
 
-library(nacre)
+library(irid)
 library(bslib)
 
 c_to_f <- function(c) round(c * 9 / 5 + 32, 1)
@@ -84,4 +84,4 @@ TemperatureApp <- function() {
   )
 }
 
-nacreApp(TemperatureApp)
+iridApp(TemperatureApp)

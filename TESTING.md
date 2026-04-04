@@ -98,7 +98,7 @@ formal argument count, and that event data is properly cleaned.
 - [ ] 1-arg handler: `handler(event)` receives the event object
 - [ ] 2-arg handler: `handler(event, id)` receives event object and source element ID
 - [ ] `NULL` values in event data are converted to `NA`
-- [ ] `__nacre_seq`, `id`, and `nonce` are excluded from the event object passed to handlers
+- [ ] `__irid_seq`, `id`, and `nonce` are excluded from the event object passed to handlers
 
 ## Rate-limiting metadata propagation
 
@@ -111,20 +111,20 @@ is correctly propagated from R to the client.
 - [ ] `prevent_default` flag is forwarded to the client
 - [ ] Bare function defaults to `event_immediate(coalesce = FALSE)`
 
-## `nacreApp` rendering
+## `iridApp` rendering
 
-- [ ] `nacreApp` calls `fn()` twice (UI pass and server pass) with shared counter
+- [ ] `iridApp` calls `fn()` twice (UI pass and server pass) with shared counter
       so element IDs match between the static HTML and the reactive wiring
 - [ ] Config message is sent synchronously in server function before mounting
 
-## `nacreOutput`/`renderNacre` integration
+## `iridOutput`/`renderIrid` integration
 
-- [ ] `nacreOutput` attaches the nacre JS/CSS dependency
-- [ ] `renderNacre` processes the tag tree and mounts after flush
-- [ ] `renderNacre` uses `isolate()` on `func()` so the UI expression itself
+- [ ] `iridOutput` attaches the irid JS/CSS dependency
+- [ ] `renderIrid` processes the tag tree and mounts after flush
+- [ ] `renderIrid` uses `isolate()` on `func()` so the UI expression itself
       does not create a reactive dependency
-- [ ] Reactive invalidation of `renderNacre` re-renders the content
-- [ ] `nacre_send_config` is called in the `onFlushed` callback
+- [ ] Reactive invalidation of `renderIrid` re-renders the content
+- [ ] `irid_send_config` is called in the `onFlushed` callback
 
 ## Module scoping
 
@@ -138,18 +138,18 @@ Verify the sequence-based optimistic update system for controlled inputs.
 
 ### Sequence tracking
 
-- [ ] Each event payload includes an incrementing `__nacre_seq`
-- [ ] `__nacre_seq` is excluded from the `event_obj` passed to user handlers
-- [ ] Event observer stores `nacre_current_sequence` on `session$userData`
-- [ ] `onFlushed` clears `nacre_current_sequence` after the flush completes
-- [ ] Binding observers attach `sequence` to `nacre-attr` only when `b$id` matches source
+- [ ] Each event payload includes an incrementing `__irid_seq`
+- [ ] `__irid_seq` is excluded from the `event_obj` passed to user handlers
+- [ ] Event observer stores `irid_current_sequence` on `session$userData`
+- [ ] `onFlushed` clears `irid_current_sequence` after the flush completes
+- [ ] Binding observers attach `sequence` to `irid-attr` only when `b$id` matches source
 
 ### Client-side echo handling
 
-- [ ] **Stale echo** — `nacre-attr` with `sequence < latest sent` is skipped
+- [ ] **Stale echo** — `irid-attr` with `sequence < latest sent` is skipped
 - [ ] **Current echo, same value** — `sequence >= latest sent` and `el.value === msg.value` is skipped (avoids cursor reset)
 - [ ] **Server transform** — `sequence >= latest sent` and different value is applied (e.g. server truncates input)
-- [ ] **Programmatic update** — `nacre-attr` with no sequence always applies, even on focused element
+- [ ] **Programmatic update** — `irid-attr` with no sequence always applies, even on focused element
 - [ ] **Non-value attributes** — optimistic logic only gates `value` on focused
       elements; other attrs (`disabled`, `class`, etc.) always apply immediately
 - [ ] **Element loses focus before response** — user types, tabs away, server
@@ -171,7 +171,7 @@ Verify the sequence-based optimistic update system for controlled inputs.
 ### Force-send on no-op
 
 - [ ] Handler sets `reactiveVal` to the same value it already holds (no-op):
-      force-send still delivers `nacre-attr` with the sequence so the client
+      force-send still delivers `irid-attr` with the sequence so the client
       can apply the server transform
 - [ ] Handler sets `reactiveVal` to a new value: both force-send and binding
       observer fire; client handles the duplicate harmlessly (second is no-op)
@@ -192,7 +192,7 @@ Verify the sequence-based optimistic update system for controlled inputs.
 - [ ] With `coalesce = FALSE` (default for `event_immediate`): events fire on
       every input without waiting for server — events pile up under high latency
 - [ ] Multiple events in one flush: later sequence overwrites earlier on
-      `session$userData$nacre_current_sequence`, so all bindings in that flush
+      `session$userData$irid_current_sequence`, so all bindings in that flush
       are tagged with the most recent sequence
 
 ## Stale UI indicator
@@ -204,10 +204,10 @@ disappears at the correct times.
 
 - [ ] Indicator does not appear on initial page load (server is busy rendering
       but no events have been sent)
-- [ ] Indicator does not appear when server responds within `nacre.stale_timeout`
-- [ ] Indicator appears after `nacre.stale_timeout` ms when server is slow
+- [ ] Indicator does not appear when server responds within `irid.stale_timeout`
+- [ ] Indicator appears after `irid.stale_timeout` ms when server is slow
 - [ ] Indicator clears when `shiny:idle` fires (after debounce delay)
-- [ ] `nacre.stale_timeout = NULL` disables the indicator entirely
+- [ ] `irid.stale_timeout = NULL` disables the indicator entirely
 - [ ] Custom timeout value (e.g. `500`) delays the indicator accordingly
 
 ### Debounced clear
@@ -227,18 +227,18 @@ disappears at the correct times.
 
 ### Config delivery
 
-- [ ] `nacre-config` message arrives before `nacre-events` in the initial flush
-- [ ] `nacreApp` sends config synchronously in the server function
-- [ ] `renderNacre` sends config in the `onFlushed` callback
-- [ ] Repeated `nacre-config` messages (e.g. `renderNacre` re-renders) update
+- [ ] `irid-config` message arrives before `irid-events` in the initial flush
+- [ ] `iridApp` sends config synchronously in the server function
+- [ ] `renderIrid` sends config in the `onFlushed` callback
+- [ ] Repeated `irid-config` messages (e.g. `renderIrid` re-renders) update
       the client-side timeout without side effects
 - [ ] App with no event handlers: stale indicator never appears
 
 ### Visual
 
-- [ ] `nacre-stale` class is added to `<html>`, not `<body>`
+- [ ] `irid-stale` class is added to `<html>`, not `<body>`
 - [ ] CSS filter and progress bar activate when class is present
-- [ ] `--nacre-stale-color` CSS variable customizes the progress bar color
+- [ ] `--irid-stale-color` CSS variable customizes the progress bar color
 - [ ] Transition animates smoothly on both show and hide (0.15s)
 
 ## Client-side message handling
@@ -246,24 +246,24 @@ disappears at the correct times.
 Verify that the JS message handlers correctly manipulate the DOM and
 coordinate with Shiny's binding lifecycle.
 
-### `nacre-attr` property vs attribute dispatch
+### `irid-attr` property vs attribute dispatch
 
 - [ ] `value`, `disabled`, `checked`, `selected` are set as JS properties (not `setAttribute`)
 - [ ] `textContent` is set via `.textContent` property
 - [ ] Other attributes use `setAttribute()`
 - [ ] `false`/`null` attribute values call `removeAttribute()`
 
-### `nacre-swap` binding lifecycle
+### `irid-swap` binding lifecycle
 
 - [ ] `Shiny.unbindAll(el)` is called before replacing `innerHTML`
 - [ ] `Shiny.bindAll(el)` is deferred via `setTimeout(0)` after replacement
 
-### `nacre-mutate` binding lifecycle
+### `irid-mutate` binding lifecycle
 
 - [ ] `Shiny.unbindAll` is called on each removed child before DOM removal
 - [ ] `Shiny.bindAll` is deferred via `setTimeout(0)` after all mutations complete
 
-### `nacre-events` registration
+### `irid-events` registration
 
 - [ ] Duplicate registration for same `id:event` pair is prevented (no double listeners)
 - [ ] `prevent_default` flag calls `event.preventDefault()` in the listener
@@ -277,5 +277,5 @@ coordinate with Shiny's binding lifecycle.
 
 ## Debug latency
 
-- [ ] `nacre.debug.latency` option (in seconds) adds `Sys.sleep()` to every event handler
+- [ ] `irid.debug.latency` option (in seconds) adds `Sys.sleep()` to every event handler
 - [ ] Default value of `0` adds no delay

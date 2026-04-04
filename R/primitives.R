@@ -9,12 +9,12 @@
 #' @param condition A reactive expression that returns a logical value.
 #' @param yes Tag tree to render when the condition is `TRUE`.
 #' @param otherwise Optional tag tree to render when the condition is `FALSE`.
-#' @return A nacre control-flow node.
+#' @return A irid control-flow node.
 #' @export
 When <- function(condition, yes, otherwise = NULL) {
   structure(
     list(condition = condition, yes = yes, otherwise = otherwise),
-    class = "nacre_when"
+    class = "irid_when"
   )
 }
 
@@ -32,12 +32,12 @@ When <- function(condition, yes, otherwise = NULL) {
 #'   item's current position (updated on reorder). Should return a tag tree.
 #' @param by A function that extracts a comparable key from each item, used
 #'   for keyed reordering. Keys must be unique. Defaults to [identity()].
-#' @return A nacre control-flow node.
+#' @return A irid control-flow node.
 #' @export
 Each <- function(items, fn, by = identity) {
   structure(
     list(items = items, by = by, fn = fn),
-    class = "nacre_each"
+    class = "irid_each"
   )
 }
 
@@ -52,12 +52,12 @@ Each <- function(items, fn, by = identity) {
 #' @param fn A function of `(item)` or `(item, index)` where `item` is a
 #'   [shiny::reactiveVal()] for the item at that position and `index` is its
 #'   fixed position (plain integer). Should return a tag tree.
-#' @return A nacre control-flow node.
+#' @return A irid control-flow node.
 #' @export
 Index <- function(items, fn) {
   structure(
     list(items = items, fn = fn),
-    class = "nacre_index"
+    class = "irid_index"
   )
 }
 
@@ -92,19 +92,19 @@ Default <- function(content) {
 #' a fallback.
 #'
 #' @param ... One or more [Case()] or [Default()] values.
-#' @return A nacre control-flow node.
+#' @return A irid control-flow node.
 #' @export
 Match <- function(...) {
   cases <- list(...)
   structure(
     list(cases = cases),
-    class = "nacre_match"
+    class = "irid_match"
   )
 }
 
 # -- Shiny output wrapper -------------------------------------------------
 
-#' Embed a Shiny render/output pair in a nacre tag tree
+#' Embed a Shiny render/output pair in a irid tag tree
 #'
 #' A generic wrapper that pairs a Shiny render function with its
 #' corresponding output function. For common cases, use the convenience
@@ -114,7 +114,7 @@ Match <- function(...) {
 #' @param output_fn A Shiny output function (e.g. `plotOutput`).
 #' @param fn A function passed to `render_fn`.
 #' @param ... Additional arguments passed to `output_fn`.
-#' @return A nacre output node.
+#' @return A irid output node.
 #' @export
 Output <- function(render_fn, output_fn, fn, ...) {
   render_call <- render_fn({ fn() })
@@ -123,42 +123,42 @@ Output <- function(render_fn, output_fn, fn, ...) {
     output_fn_args = list(...),
     render_call = render_call
   )
-  class(result) <- "nacre_output"
+  class(result) <- "irid_output"
   result
 }
 
-#' Embed a plot output in a nacre tag tree
+#' Embed a plot output in a irid tag tree
 #'
 #' Shorthand for `Output(renderPlot, plotOutput, ...)`.
 #'
 #' @param fn A function that produces a plot.
 #' @param ... Additional arguments passed to [shiny::plotOutput()].
-#' @return A nacre output node.
+#' @return A irid output node.
 #' @export
 PlotOutput <- function(fn, ...) {
   Output(shiny::renderPlot, shiny::plotOutput, fn, ...)
 }
 
-#' Embed a table output in a nacre tag tree
+#' Embed a table output in a irid tag tree
 #'
 #' Shorthand for `Output(renderTable, tableOutput, ...)`.
 #'
 #' @param fn A function that produces a table.
 #' @param ... Additional arguments passed to [shiny::tableOutput()].
-#' @return A nacre output node.
+#' @return A irid output node.
 #' @export
 TableOutput <- function(fn, ...) {
   Output(shiny::renderTable, shiny::tableOutput, fn, ...)
 }
 
-#' Embed a DT DataTable output in a nacre tag tree
+#' Embed a DT DataTable output in a irid tag tree
 #'
 #' Shorthand for `Output(DT::renderDT, DT::DTOutput, ...)`. Requires the
 #' **DT** package.
 #'
 #' @param fn A function that produces a DataTable.
 #' @param ... Additional arguments passed to `DT::DTOutput()`.
-#' @return A nacre output node.
+#' @return A irid output node.
 #' @export
 DTOutput <- function(fn, ...) {
   if (!requireNamespace("DT", quietly = TRUE)) {

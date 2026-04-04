@@ -1,11 +1,11 @@
 # Old Faithful
 #
-# The classic Shiny demo, rebuilt with nacre. A slider controls the number of
+# The classic Shiny demo, rebuilt with irid. A slider controls the number of
 # bins in a histogram of eruption wait times from the Old Faithful geyser
 # dataset. The slider is a controlled input bound to a `reactiveVal`, and the
 # plot is rendered with `PlotOutput`.
 
-library(nacre)
+library(irid)
 library(bslib)
 
 OldFaithful <- function() {
@@ -34,4 +34,4 @@ OldFaithful <- function() {
   )
 }
 
-nacreApp(OldFaithful)
+iridApp(OldFaithful)

@@ -2,7 +2,7 @@
 % Please edit documentation in R/primitives.R
 \name{DTOutput}
 \alias{DTOutput}
-\title{Embed a DT DataTable output in a nacre tag tree}
+\title{Embed a DT DataTable output in a irid tag tree}
 \usage{
 DTOutput(fn, ...)
 }
@@ -12,7 +12,7 @@ DTOutput(fn, ...)
 \item{...}{Additional arguments passed to \code{DT::DTOutput()}.}
 }
 \value{
-A nacre output node.
+A irid output node.
 }
 \description{
 Shorthand for \code{Output(DT::renderDT, DT::DTOutput, ...)}. Requires the

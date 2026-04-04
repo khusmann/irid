@@ -14,7 +14,7 @@ When(condition, yes, otherwise = NULL)
 \item{otherwise}{Optional tag tree to render when the condition is \code{FALSE}.}
 }
 \value{
-A nacre control-flow node.
+A irid control-flow node.
 }
 \description{
 Renders \code{yes} when \code{condition} is \code{TRUE}, and \code{otherwise} (if provided)

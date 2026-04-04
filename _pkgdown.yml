@@ -1,25 +1,25 @@
-url: https://nacre.kylehusmann.com
+url: https://irid.kylehusmann.com
 repo:
   url:
-    home: https://github.com/khusmann/nacre
-    source: https://github.com/khusmann/nacre/blob/HEAD/
-    issue: https://github.com/khusmann/nacre/issues/
+    home: https://github.com/khusmann/irid
+    source: https://github.com/khusmann/irid/blob/HEAD/
+    issue: https://github.com/khusmann/irid/issues/
     user: https://github.com/
 template:
   bootstrap: 5
   light-switch: true
   includes:
     in_header: |
-      <script data-goatcounter="https://nacre.goatcounter.com/count"
+      <script data-goatcounter="https://irid.goatcounter.com/count"
               async src="//gc.zgo.at/count.js"></script>
 
 reference:
   - title: App Entry Points
-    desc: Create and embed nacre applications
+    desc: Create and embed irid applications
     contents:
-      - nacreApp
-      - nacreOutput
-      - renderNacre
+      - iridApp
+      - iridOutput
+      - renderIrid
 
   - title: Control Flow
     desc: Reactive control flow for conditional and list rendering
@@ -32,7 +32,7 @@ reference:
       - Default
 
   - title: Outputs
-    desc: Embed Shiny render/output pairs in nacre tag trees
+    desc: Embed Shiny render/output pairs in irid tag trees
     contents:
       - Output
       - PlotOutput

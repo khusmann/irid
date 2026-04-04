@@ -4,10 +4,10 @@
 \alias{process_tags}
 \title{Walk a tag tree and extract reactive bindings}
 \usage{
-process_tags(tag, counter = nacre_id_counter())
+process_tags(tag, counter = irid_id_counter())
 }
 \arguments{
-\item{tag}{A Shiny tag, tag list, or nacre control-flow node.}
+\item{tag}{A Shiny tag, tag list, or irid control-flow node.}
 }
 \value{
 A list with elements \verb{$tag}, \verb{$bindings}, \verb{$events},
@@ -17,6 +17,6 @@ A list with elements \verb{$tag}, \verb{$bindings}, \verb{$events},
 Recursively walks an HTML tag tree, replacing reactive attributes and
 event handlers with plain IDs. Returns the cleaned tag along with lists
 of bindings, events, control-flow nodes, and Shiny outputs to be mounted
-by \code{\link[=nacre_mount_processed]{nacre_mount_processed()}}.
+by \code{\link[=irid_mount_processed]{irid_mount_processed()}}.
 }
 \keyword{internal}

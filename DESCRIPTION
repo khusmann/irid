@@ -1,4 +1,4 @@
-Package: nacre
+Package: irid
 Title: Component-Based Shiny UI with Fine-Grained Reactivity
 Version: 0.0.0.9000
 Authors@R: person("Kyle", "Husmann", role = c("aut", "cre"),
@@ -7,9 +7,9 @@ Description: A component-based reactive UI framework for Shiny that binds
     reactive values directly to DOM attributes, enabling fine-grained updates
     without re-rendering or 'update*Input' callbacks.
 License: MIT + file LICENSE
-URL: https://nacre.kylehusmann.com,
-    https://github.com/khusmann/nacre
-BugReports: https://github.com/khusmann/nacre/issues
+URL: https://irid.kylehusmann.com,
+    https://github.com/khusmann/irid
+BugReports: https://github.com/khusmann/irid/issues
 Depends:
     R (>= 4.1.0)
 Imports:

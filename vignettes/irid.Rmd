@@ -1,8 +1,8 @@
 ---
-title: "Getting Started with nacre"
+title: "Getting Started with irid"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Getting Started with nacre}
+  %\VignetteIndexEntry{Getting Started with irid}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -14,8 +14,8 @@ knitr::opts_chunk$set(
 )
 ```
 
-nacre is a new way to build dynamic Shiny apps. Instead of `renderUI`,
-nacre binds reactivity directly to individual DOM attributes — one reactive
+irid is a new way to build dynamic Shiny apps. Instead of `renderUI`,
+irid binds reactivity directly to individual DOM attributes — one reactive
 changes, one attribute updates. You keep using `reactiveVal` and `reactive` as
 usual, and build UIs from plain R functions that compose naturally.
 
@@ -28,13 +28,13 @@ Install from GitHub:
 
 ```r
 # install.packages("pak")
-pak::pak("khusmann/nacre")
+pak::pak("khusmann/irid")
 ```
 
-## Your first nacre app
+## Your first irid app
 
 ```r
-library(nacre)
+library(irid)
 library(bslib)
 
 OldFaithful <- function() {
@@ -63,18 +63,18 @@ OldFaithful <- function() {
   )
 }
 
-nacreApp(OldFaithful)
+iridApp(OldFaithful)
 ```
 
 ***[Try it live.](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
 
-A nacre app is a single function that returns a tag tree. Inside the function
+A irid app is a single function that returns a tag tree. Inside the function
 you create `reactiveVal`s for state and wire them to the DOM with functions.
-The function runs **once** — nacre processes the tag tree, extracts the
+The function runs **once** — irid processes the tag tree, extracts the
 reactive functions, and sets up observers that surgically update individual DOM
 attributes when values change. No re-rendering entire subtrees, no DOM destruction.
 
-`nacreApp()` returns a `shinyApp` object, so it works with `runApp()`,
+`iridApp()` returns a `shinyApp` object, so it works with `runApp()`,
 `shinytest2`, and deployment tools.
 
 ## Components compose
@@ -121,7 +121,7 @@ App <- function() {
   )
 }
 
-nacreApp(App)
+iridApp(App)
 ```
 
 ***[Try it live.](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
@@ -211,7 +211,7 @@ update. No `updateTextInput`. No `freezeReactiveValue`.
 ## Control flow
 
 Because the component function runs once, you can't use plain `if`/`else` for
-conditional rendering. nacre provides control flow primitives instead.
+conditional rendering. irid provides control flow primitives instead.
 
 ### When
 
@@ -286,20 +286,20 @@ Output(renderPlot, plotOutput, \() ggplot(mtcars, aes(wt, mpg)) + geom_point())
 
 ## Incremental adoption
 
-You don't have to go all-in. Drop nacre into an existing Shiny app with
-`nacreOutput` / `renderNacre`:
+You don't have to go all-in. Drop irid into an existing Shiny app with
+`iridOutput` / `renderIrid`:
 
 ```r
 ui <- fluidPage(
   sliderInput("n", "N", 1, 100, 50),
-  nacreOutput("filters"),
+  iridOutput("filters"),
   plotOutput("plot")
 )
 
 server <- function(input, output, session) {
   threshold <- reactiveVal(0.5)
 
-  output$filters <- renderNacre(
+  output$filters <- renderIrid(
     tags$div(
       tags$input(
         type = "range", min = 0, max = 1, step = 0.1,
@@ -323,9 +323,9 @@ shinyApp(ui, server)
 The migration path:
 
 1. Start with a normal Shiny app
-2. Drop in one `nacreOutput`/`renderNacre` for a painful `renderUI`
+2. Drop in one `iridOutput`/`renderIrid` for a painful `renderUI`
 3. Gradually convert more components
-4. Eventually switch to `nacreApp` when the whole app is nacre
+4. Eventually switch to `iridApp` when the whole app is irid
 5. Old `sliderInput` etc. still work at every stage
 
 *See the [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*

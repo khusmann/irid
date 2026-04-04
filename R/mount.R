@@ -1,4 +1,4 @@
-#' Mount a pre-processed nacre tag tree
+#' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
 #' reactive attribute bindings, event listeners, Shiny outputs, and
@@ -10,7 +10,7 @@
 #' @return A mount handle with `$tag` (the processed HTML) and `$destroy()`
 #'   (a function that tears down all observers).
 #' @keywords internal
-nacre_mount_processed <- function(result, session) {
+irid_mount_processed <- function(result, session) {
   counter <- result$counter
   observers <- list()
 
@@ -24,12 +24,12 @@ nacre_mount_processed <- function(result, session) {
   # Set up event listeners
   if (length(result$events) > 0L) {
     event_msgs <- lapply(result$events, function(ev) {
-      input_id <- paste0("nacre_ev_", ev$id, "_", ev$event)
+      input_id <- paste0("irid_ev_", ev$id, "_", ev$event)
       handler <- ev$handler
       nformals <- length(formals(handler))
 
       obs <- observeEvent(session$input[[input_id]], {
-        latency <- getOption("nacre.debug.latency", 0)
+        latency <- getOption("irid.debug.latency", 0)
         if (latency > 0) Sys.sleep(latency)
         ev_data <- session$input[[input_id]]
 
@@ -39,18 +39,18 @@ nacre_mount_processed <- function(result, session) {
         # matches the event source (same element). Cross-element updates
         # (e.g. button click clearing a text input) arrive with no
         # sequence and are treated as programmatic by the client.
-        seq <- ev_data[["__nacre_seq"]]
+        seq <- ev_data[["__irid_seq"]]
         if (!is.null(seq)) {
-          session$userData$nacre_current_sequence <- list(
+          session$userData$irid_current_sequence <- list(
             seq = seq, source = ev_data[["id"]]
           )
           session$onFlushed(function() {
-            session$userData$nacre_current_sequence <- NULL
+            session$userData$irid_current_sequence <- NULL
           }, once = TRUE)
         }
 
         event_obj <- lapply(
-          ev_data[setdiff(names(ev_data), c("id", "nonce", "__nacre_seq"))],
+          ev_data[setdiff(names(ev_data), c("id", "nonce", "__irid_seq"))],
           function(x) if (is.null(x)) NA else x
         )
         if (nformals == 0L) {
@@ -73,7 +73,7 @@ nacre_mount_processed <- function(result, session) {
             val <- isolate(sb$fn())
             msg <- list(id = sb$id, attr = sb$attr, value = val,
                         sequence = seq)
-            session$sendCustomMessage("nacre-attr", msg)
+            session$sendCustomMessage("irid-attr", msg)
           }
         }
       }, ignoreInit = TRUE)
@@ -90,7 +90,7 @@ nacre_mount_processed <- function(result, session) {
         preventDefault = ev$prevent_default
       )
     })
-    session$sendCustomMessage("nacre-events", event_msgs)
+    session$sendCustomMessage("irid-events", event_msgs)
   }
 
   # Set up reactive attribute bindings
@@ -98,11 +98,11 @@ nacre_mount_processed <- function(result, session) {
     obs <- observe({
       val <- b$fn()
       msg <- list(id = b$id, attr = b$attr, value = val)
-      seq_info <- session$userData$nacre_current_sequence
+      seq_info <- session$userData$irid_current_sequence
       if (!is.null(seq_info) && seq_info$source == b$id) {
         msg$sequence <- seq_info$seq
       }
-      session$sendCustomMessage("nacre-attr", msg)
+      session$sendCustomMessage("irid-attr", msg)
     })
     observers[[length(observers) + 1L]] <<- obs
   })
@@ -145,17 +145,17 @@ nacre_mount_processed <- function(result, session) {
             processed <- process_tags(branch, counter = counter)
 
             # Swap first so elements exist in DOM
-            session$sendCustomMessage("nacre-swap", list(
+            session$sendCustomMessage("irid-swap", list(
               id = cf_id,
               html = as.character(processed$tag)
             ))
 
             # Then mount observers/events
-            env$current_mount <- nacre_mount_processed(
+            env$current_mount <- irid_mount_processed(
               processed, session
             )
           } else {
-            session$sendCustomMessage("nacre-swap", list(
+            session$sendCustomMessage("irid-swap", list(
               id = cf_id,
               html = ""
             ))
@@ -223,7 +223,7 @@ nacre_mount_processed <- function(result, session) {
           }, character(1), USE.NAMES = FALSE)
 
           # Send DOM mutation
-          session$sendCustomMessage("nacre-mutate", list(
+          session$sendCustomMessage("irid-mutate", list(
             id = cf_id,
             removes = as.list(removes),
             inserts = inserts,
@@ -233,7 +233,7 @@ nacre_mount_processed <- function(result, session) {
           # Mount new items (after DOM exists)
           for (key in added_keys) {
             entry <- env$item_mounts[[key]]
-            entry$mount <- nacre_mount_processed(entry$processed, session)
+            entry$mount <- irid_mount_processed(entry$processed, session)
             entry$processed <- NULL
             env$item_mounts[[key]] <- entry
           }
@@ -291,14 +291,14 @@ nacre_mount_processed <- function(result, session) {
               env$slot_mounts[[ii]] <- processed
             })
 
-            session$sendCustomMessage("nacre-mutate", list(
+            session$sendCustomMessage("irid-mutate", list(
               id = cf_id,
               inserts = inserts
             ))
 
             # Mount new slots (after DOM exists)
             for (i in (old_len + 1L):new_len) {
-              env$slot_mounts[[i]] <- nacre_mount_processed(
+              env$slot_mounts[[i]] <- irid_mount_processed(
                 env$slot_mounts[[i]], session
               )
             }
@@ -314,7 +314,7 @@ nacre_mount_processed <- function(result, session) {
               env$slot_mounts[[i]]$destroy()
             }
 
-            session$sendCustomMessage("nacre-mutate", list(
+            session$sendCustomMessage("irid-mutate", list(
               id = cf_id,
               removes = as.list(removes)
             ))
@@ -364,13 +364,13 @@ nacre_mount_processed <- function(result, session) {
 
           if (!is.null(branch)) {
             processed <- process_tags(branch, counter = counter)
-            session$sendCustomMessage("nacre-swap", list(
+            session$sendCustomMessage("irid-swap", list(
               id = cf_id,
               html = as.character(processed$tag)
             ))
-            env$current_mount <- nacre_mount_processed(processed, session)
+            env$current_mount <- irid_mount_processed(processed, session)
           } else {
-            session$sendCustomMessage("nacre-swap", list(
+            session$sendCustomMessage("irid-swap", list(
               id = cf_id,
               html = ""
             ))

@@ -1,0 +1,16 @@
+html.irid-stale::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 8px;
+  width: 100%;
+  z-index: 99999;
+  background: linear-gradient(90deg, transparent, var(--irid-stale-color, #0d6efd) 50%, transparent);
+  animation: irid-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes irid-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

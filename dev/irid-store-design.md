@@ -1,4 +1,4 @@
-# nacre Store — Design Document
+# irid Store — Design Document
 
 **Status:** Proposed  
 **Date:** March 2026
@@ -7,9 +7,9 @@
 
 ## 1. Motivation
 
-nacre's core primitive is `reactiveVal` — a single scalar reactive value. This works well for simple state but becomes awkward as apps grow. Developers end up with either many disconnected flat `reactiveVal`s, or a single `reactiveVal` holding a large nested list where any change invalidates everything.
+irid's core primitive is `reactiveVal` — a single scalar reactive value. This works well for simple state but becomes awkward as apps grow. Developers end up with either many disconnected flat `reactiveVal`s, or a single `reactiveVal` holding a large nested list where any change invalidates everything.
 
-A store provides fine-grained reactivity over structured, nested state — mirroring what Solid.js's `createStore` does, but in idiomatic R using nacre's existing reactive primitives.
+A store provides fine-grained reactivity over structured, nested state — mirroring what Solid.js's `createStore` does, but in idiomatic R using irid's existing reactive primitives.
 
 ---
 
@@ -83,7 +83,7 @@ state$user(list(name = "Bob", email = "bob@example.com"))
 # Error: Unknown keys in store node 'user': email
 ```
 
-### In nacre tags
+### In irid tags
 
 Store nodes are functions, so they work anywhere `reactiveVal` does — passed directly as reactive attributes.
 
@@ -228,7 +228,7 @@ Branch writes fan out recursively. A write like `state(list(user = list(name = "
 
 However, each leaf `reactiveVal` fires independently as it is written. During a multi-leaf branch write, there is a brief window where some leaves have been updated and others have not. For example, `state$user(list(name = "Dave", age = 25L))` writes `name` first and `age` second — an observer reading both could see `name = "Dave"` with the old `age` before `age` is updated.
 
-In practice this is a non-issue: nacre's reactive system batches invalidations and defers re-execution to the next flush. As long as all leaf writes happen synchronously within the same branch write (which they do), observers will not run until the full write has completed. If nacre ever moves to an eager evaluation model, this assumption would need to be revisited.
+In practice this is a non-issue: irid's reactive system batches invalidations and defers re-execution to the next flush. As long as all leaf writes happen synchronously within the same branch write (which they do), observers will not run until the full write has completed. If irid ever moves to an eager evaluation model, this assumption would need to be revisited.
 
 ---
 
@@ -302,9 +302,9 @@ state$todos(c(state$todos(), list(list(id = 3, text = "New", done = FALSE))))
 
 ### Why this is sufficient
 
-nacre's `Index` passes each item to its callback as a **reactive accessor**. When the list `reactiveVal` fires, `Index` diffs by position and only re-fires observers for items that actually changed — without recreating DOM nodes. Per-item surgical updates therefore work correctly even with an atomic list store.
+irid's `Index` passes each item to its callback as a **reactive accessor**. When the list `reactiveVal` fires, `Index` diffs by position and only re-fires observers for items that actually changed — without recreating DOM nodes. Per-item surgical updates therefore work correctly even with an atomic list store.
 
-nacre's `Each` passes each item as a **plain value** and recreates all items when the list changes. The `by` parameter preserves DOM nodes on reorder but does not prevent recreation on value changes. `Each` is the right choice when add/remove/reorder are the common operations, not in-place value updates — and for those workflows complete list replacement is natural anyway.
+irid's `Each` passes each item as a **plain value** and recreates all items when the list changes. The `by` parameter preserves DOM nodes on reorder but does not prevent recreation on value changes. `Each` is the right choice when add/remove/reorder are the common operations, not in-place value updates — and for those workflows complete list replacement is natural anyway.
 
 ### Usage with Index
 
@@ -344,7 +344,7 @@ A PUT-style branch write (requiring all keys) would force callers to reconstruct
 
 ### Why not `state$user$name <- "Bob"`?
 
-Assignment syntax would be more idiomatic R, but it requires `$<-.store_node` to return a modified copy of the parent — which doesn't work for reference semantics. More importantly, consistency with `reactiveVal` is more valuable in a nacre context. Users already know `val()` to read and `val(x)` to write; the store just extends that pattern recursively.
+Assignment syntax would be more idiomatic R, but it requires `$<-.store_node` to return a modified copy of the parent — which doesn't work for reference semantics. More importantly, consistency with `reactiveVal` is more valuable in a irid context. Users already know `val()` to read and `val(x)` to write; the store just extends that pattern recursively.
 
 ### Why not a single root `reactiveVal`?
 
@@ -352,13 +352,13 @@ One `reactiveVal` at the root holding the entire nested list is the simplest pos
 
 ### Why not `makeActiveBinding`?
 
-`makeActiveBinding` can make `state$user$name` behave like a reactive on read/write without the call syntax. But it only works one level deep on environments, and it obscures the fact that each node is a function — making it harder to pass nodes as reactive arguments to nacre tags.
+`makeActiveBinding` can make `state$user$name` behave like a reactive on read/write without the call syntax. But it only works one level deep on environments, and it obscures the fact that each node is a function — making it harder to pass nodes as reactive arguments to irid tags.
 
-### Where does this live — companion package or in nacre?
+### Where does this live — companion package or in irid?
 
-The store is closely related to nacre's control flow primitives, particularly the interaction between atomic list nodes and `Each`/`Index`. The clean division of responsibility described in Section 6 only works because `Index` passes reactive accessors and `Each` handles its own diffing. If either of those changed, the store design would need to change too.
+The store is closely related to irid's control flow primitives, particularly the interaction between atomic list nodes and `Each`/`Index`. The clean division of responsibility described in Section 6 only works because `Index` passes reactive accessors and `Each` handles its own diffing. If either of those changed, the store design would need to change too.
 
-This suggests the store belongs inside nacre eventually. A reasonable path is to develop it as a companion package first while the API stabilises, then merge it once both sides are proven.
+This suggests the store belongs inside irid eventually. A reasonable path is to develop it as a companion package first while the API stabilises, then merge it once both sides are proven.
 
 ---
 

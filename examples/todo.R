@@ -1,12 +1,12 @@
 # Todo List
 #
-# A TodoMVC-style application demonstrating reactive list management with nacre.
+# A TodoMVC-style application demonstrating reactive list management with irid.
 # Items are stored as a `reactiveVal` holding a plain R list; adding, toggling,
 # and removing items are ordinary functions that update that list. The filter
 # tabs and item count derive reactively from the same source, so everything
 # stays consistent without any manual synchronization.
 
-library(nacre)
+library(irid)
 library(bslib)
 
 TodoItem <- function(todo, on_toggle, on_remove) {
@@ -33,7 +33,7 @@ TodoItem <- function(todo, on_toggle, on_remove) {
 TodoApp <- function() {
   next_id <- 4L
   todos <- reactiveVal(list(
-    list(id = 1L, text = "Learn nacre", done = FALSE),
+    list(id = 1L, text = "Learn irid", done = FALSE),
     list(id = 2L, text = "Build something cool", done = FALSE),
     list(id = 3L, text = "Install R", done = TRUE)
   ))
@@ -156,4 +156,4 @@ TodoApp <- function() {
   )
 }
 
-nacreApp(TodoApp)
+iridApp(TodoApp)

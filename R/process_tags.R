@@ -1,4 +1,4 @@
-#' Test whether a value is a nacre-reactive function
+#' Test whether a value is a irid-reactive function
 #'
 #' Returns `TRUE` for plain functions, Shiny reactives, and rate-limited
 #' handlers created by [event_throttle()] or [event_debounce()].
@@ -6,16 +6,16 @@
 #' @param x An object to test.
 #' @return Logical.
 #' @keywords internal
-is_nacre_reactive <- function(x) {
+is_irid_reactive <- function(x) {
   is.function(x) && (identical(class(x), "function") || inherits(x, "reactive") ||
-    inherits(x, "nacre_event"))
+    inherits(x, "irid_event"))
 }
 
 #' Create a local ID counter for use within a single `process_tags` call
 #'
 #' @return A function that returns the next ID each time it is called.
 #' @keywords internal
-nacre_id_counter <- function(prefix = "nacre") {
+irid_id_counter <- function(prefix = "irid") {
   value <- 0L
   function() {
     value <<- value + 1L
@@ -28,13 +28,13 @@ nacre_id_counter <- function(prefix = "nacre") {
 #' Recursively walks an HTML tag tree, replacing reactive attributes and
 #' event handlers with plain IDs. Returns the cleaned tag along with lists
 #' of bindings, events, control-flow nodes, and Shiny outputs to be mounted
-#' by [nacre_mount_processed()].
+#' by [irid_mount_processed()].
 #'
-#' @param tag A Shiny tag, tag list, or nacre control-flow node.
+#' @param tag A Shiny tag, tag list, or irid control-flow node.
 #' @return A list with elements `$tag`, `$bindings`, `$events`,
 #'   `$control_flows`, and `$shiny_outputs`.
 #' @keywords internal
-process_tags <- function(tag, counter = nacre_id_counter()) {
+process_tags <- function(tag, counter = irid_id_counter()) {
   next_id <- counter
   bindings <- list()
   events <- list()
@@ -44,7 +44,7 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
   walk <- function(node) {
     if (is.null(node)) return(NULL)
 
-    if (inherits(node, "nacre_output")) {
+    if (inherits(node, "irid_output")) {
       id <- next_id()
       shiny_outputs[[length(shiny_outputs) + 1L]] <<- list(
         id = id,
@@ -53,16 +53,16 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
       return(do.call(node$output_fn, c(list(id), node$output_fn_args)))
     }
 
-    if (inherits(node, "nacre_each") || inherits(node, "nacre_index")) {
+    if (inherits(node, "irid_each") || inherits(node, "irid_index")) {
       id <- next_id()
-      type <- if (inherits(node, "nacre_each")) "each" else "index"
+      type <- if (inherits(node, "irid_each")) "each" else "index"
       cf_entry <- list(type = type, id = id, items = node$items, fn = node$fn)
       if (type == "each") cf_entry$by <- node$by
       control_flows[[length(control_flows) + 1L]] <<- cf_entry
       return(tags$div(id = id, style = "display:contents"))
     }
 
-    if (inherits(node, "nacre_match")) {
+    if (inherits(node, "irid_match")) {
       id <- next_id()
       control_flows[[length(control_flows) + 1L]] <<- list(
         type = "match", id = id,
@@ -71,7 +71,7 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
       return(tags$div(id = id, style = "display:contents"))
     }
 
-    if (inherits(node, "nacre_when")) {
+    if (inherits(node, "irid_when")) {
       id <- next_id()
       control_flows[[length(control_flows) + 1L]] <<- list(
         type = "when", id = id,
@@ -82,7 +82,7 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
       return(tags$div(id = id, style = "display:contents"))
     }
 
-    if (is.function(node) && is_nacre_reactive(node)) {
+    if (is.function(node) && is_irid_reactive(node)) {
       id <- next_id()
       bindings[[length(bindings) + 1L]] <<- list(
         id = id, attr = "textContent", fn = node
@@ -108,7 +108,7 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
 
     for (name in names(attribs)) {
       val <- attribs[[name]]
-      if (!is_nacre_reactive(val)) {
+      if (!is_irid_reactive(val)) {
         kept_attribs[[name]] <- val
         next
       }
@@ -118,7 +118,7 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
       if (is_event) {
         js_event <- tolower(sub("^on", "", name))
         # Wrap bare functions: onInput defaults to debounce, others to immediate
-        if (!inherits(val, "nacre_event")) {
+        if (!inherits(val, "irid_event")) {
           val <- if (js_event == "input") {
             event_debounce(val, ms = 200)
           } else {
@@ -168,19 +168,19 @@ process_tags <- function(tag, counter = nacre_id_counter()) {
        counter = counter)
 }
 
-#' nacre JavaScript dependency
+#' irid JavaScript dependency
 #'
-#' Returns an [htmltools::htmlDependency()] for the client-side nacre
-#' runtime (`nacre.js`).
+#' Returns an [htmltools::htmlDependency()] for the client-side irid
+#' runtime (`irid.js`).
 #'
 #' @return An `html_dependency` object.
 #' @keywords internal
-nacre_dependency <- function() {
+irid_dependency <- function() {
   htmltools::htmlDependency(
-    name = "nacre",
+    name = "irid",
     version = "0.0.1",
-    src = system.file("js", package = "nacre"),
-    script = "nacre.js",
-    stylesheet = "nacre.css"
+    src = system.file("js", package = "irid"),
+    script = "irid.js",
+    stylesheet = "irid.css"
   )
 }
