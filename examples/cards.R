@@ -17,41 +17,39 @@ all_datasets <- sort(ls("package:datasets")) |>
   sapply(get, pos = "package:datasets", simplify = FALSE) |>
   Filter(is.data.frame, x = _)
 
-Cards <- function(dataset, columns) {
-  Each(columns, \(col) {
+Card <- function(col, col_class, on_close) {
+  tags$div(
+    class = paste(
+      "card border-2 border-secondary mb-2 p-2 d-flex flex-row",
+      "justify-content-between align-items-center"
+    ),
     tags$div(
-      class = paste(
-        "card border-2 border-secondary mb-2 p-2 d-flex flex-row",
-        "justify-content-between align-items-center"
-      ),
-      tags$div(
-        tags$strong(col),
-        tags$span(
-          class = "text-muted ms-2",
-          \() paste0("(", class(dataset()[[col]])[1], ")")
-        )
-      ),
-      tags$button(
-        class = "btn btn-sm btn-outline-danger",
-        onClick = \() columns(setdiff(columns(), col)),
-        "\u00d7"
+      tags$strong(col),
+      tags$span(
+        class = "text-muted ms-2",
+        \() paste0("(", col_class(), ")")
       )
+    ),
+    tags$button(
+      class = "btn btn-sm btn-outline-danger",
+      onClick = on_close,
+      "\u00d7"
     )
-  })
+  )
 }
 
 App <- function() {
   dataset_name <- reactiveVal(names(all_datasets)[1])
-  selected <- reactiveVal(character(0))
+  selected_columns <- reactiveVal(character(0))
   choice <- reactiveVal("")
 
   dataset <- reactive(all_datasets[[dataset_name()]])
-  available <- reactive(setdiff(names(dataset()), selected()))
+  available <- reactive(setdiff(names(dataset()), selected_columns()))
 
   # Clear selections when dataset changes
   observe({
     dataset_name()
-    selected(character(0))
+    selected_columns(character(0))
     choice("")
   })
 
@@ -72,7 +70,7 @@ App <- function() {
       value = choice,
       onChange = \(event) {
         if (nzchar(event$value)) {
-          selected(c(selected(), event$value))
+          selected_columns(c(selected_columns(), event$value))
           choice("")
         }
       },
@@ -80,7 +78,13 @@ App <- function() {
       Each(available, \(col) tags$option(value = col, col))
     ),
 
-    Cards(dataset, selected)
+    Each(selected_columns, \(col) {
+      Card(
+        col,
+        col_class = \() class(dataset()[[col]])[1],
+        on_close = \() selected_columns(setdiff(selected_columns(), col))
+      )
+    })
   )
 }
 
