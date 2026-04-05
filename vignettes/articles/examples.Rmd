@@ -6,6 +6,10 @@ Each example below opens in a live [Shinylive](https://shinylive.io/) editor whe
 
 <div class="examples-list" style="margin-top: 1.5rem;">
 
+### [Counter](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+The three core bindings in one place: a reactive text child, a reactive attribute (`disabled`), and a direct `onClick` handler.
+
 ### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 The classic Shiny demo, rebuilt with irid. A controlled slider drives a histogram of Old Faithful eruption wait times.

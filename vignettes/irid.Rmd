@@ -35,44 +35,36 @@ pak::pak("khusmann/irid")
 
 ```r
 library(irid)
-library(bslib)
 
-OldFaithful <- function() {
-  bins <- reactiveVal(30L)
+Counter <- function() {
+  count <- reactiveVal(0)
 
-  page_fluid(
-    card(
-      card_body(
-        tags$label(\() paste0("Number of bins: ", bins())),
-        tags$input(
-          type = "range", min = "1", max = "50",
-          value = bins,
-          onInput = \(event) bins(as.integer(event$value))
-        ),
-        PlotOutput(\() {
-          x <- faithful$waiting
-          b <- seq(min(x), max(x), length.out = bins() + 1)
-          hist(
-            x, breaks = b,
-            xlab = "Waiting time to next eruption (in mins)",
-            main = "Histogram of waiting times"
-          )
-        })
-      )
+  tags$div(
+    tags$p("Count: ", count),
+    tags$button(
+      "Increment",
+      disabled = \() count() >= 10,
+      onClick = \(ev) count(count() + 1)
     )
   )
 }
 
-iridApp(OldFaithful)
+iridApp(Counter)
 ```
 
-***[Try it live.](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
+***[Try it live.](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
 
 A irid app is a single function that returns a tag tree. Inside the function
 you create `reactiveVal`s for state and wire them to the DOM with functions.
 The function runs **once** — irid processes the tag tree, extracts the
 reactive functions, and sets up observers that surgically update individual DOM
-attributes when values change. No re-rendering entire subtrees, no DOM destruction.
+nodes when values change. No re-rendering entire subtrees, no DOM destruction.
+
+Three things to notice: `count` appears as a child of `tags$p()` and its value
+is displayed inline; the button's `disabled` attribute is a function, so it
+re-evaluates whenever `count` changes; and `onClick` is wired directly on the
+tag — no observers, no input/output IDs, no `updateActionButton()` or
+`observeEvent()`.
 
 `iridApp()` returns a `shinyApp` object, so it works with `runApp()`,
 `shinytest2`, and deployment tools.
