@@ -23,6 +23,9 @@ static HTML.
 - [ ] `Each` node produces a control-flow entry with `type = "each"` and `by`
 - [ ] `Index` node produces a control-flow entry with `type = "index"`
 - [ ] `Match`/`Case`/`Default` produces a control-flow entry with `type = "match"`
+- [ ] Control-flow nodes emit a pair of `<!--irid:s:ID-->`/`<!--irid:e:ID-->`
+      comment anchors in place of the node (no wrapper element)
+- [ ] Anchor IDs match the `id` in the corresponding `$control_flows` entry
 - [ ] `Output` node produces a `$shiny_outputs` entry
 - [ ] `PlotOutput` / `TableOutput` produce correct render/output function pairs
 - [ ] `DTOutput` errors when DT package is not installed
@@ -255,13 +258,24 @@ coordinate with Shiny's binding lifecycle.
 
 ### `irid-swap` binding lifecycle
 
-- [ ] `Shiny.unbindAll(el)` is called before replacing `innerHTML`
-- [ ] `Shiny.bindAll(el)` is deferred via `setTimeout(0)` after replacement
+- [ ] `Shiny.unbindAll` is called on each element between the start/end anchors
+      before detachment
+- [ ] Nested anchors in the detached range are deregistered from the anchor map
+- [ ] New content is inserted immediately before the end anchor (start/end
+      anchors themselves are preserved across swaps)
+- [ ] Empty `msg.html` clears the range without inserting anything
+- [ ] `Shiny.bindAll(parent)` is deferred via `setTimeout(0)` after replacement
 
 ### `irid-mutate` binding lifecycle
 
-- [ ] `Shiny.unbindAll` is called on each removed child before DOM removal
-- [ ] `Shiny.bindAll` is deferred via `setTimeout(0)` after all mutations complete
+- [ ] `Shiny.unbindAll` is called on each element inside a removed child's range
+- [ ] Nested anchors in each removed child range are deregistered
+- [ ] Insert parses HTML in the container's parent context and registers
+      nested anchors before insertion
+- [ ] Reorder lifts each child's full `[start..end]` range and reinserts it,
+      preserving element identity and anchor-map references
+- [ ] `Shiny.bindAll(parent)` is deferred via `setTimeout(0)` after all
+      mutations complete
 
 ### `irid-events` registration
 
@@ -274,6 +288,55 @@ coordinate with Shiny's binding lifecycle.
 - [ ] Element `value` and `checked` are included in the payload
 - [ ] `valueAsNumber` is included when it is a number (not `NaN`)
 - [ ] Property access errors are caught silently (some event properties throw)
+
+## Comment-anchor range protocol
+
+Verify that the client's anchor registry is correctly populated, maintained,
+and used to locate control-flow ranges in the DOM — including inside
+restricted-content parents where wrapper elements would be invalid.
+
+### Registry population
+
+- [ ] Initial page load walks `document.body` for `irid:s:ID`/`irid:e:ID`
+      comment pairs and registers each in the anchor map
+- [ ] `DOMContentLoaded` is used when document is still loading; immediate
+      scan otherwise
+- [ ] `lookupAnchors(id)` falls back to re-scanning `document.body` on cache
+      miss (handles `renderIrid` output which arrives via Shiny output
+      binding, not an irid message)
+- [ ] Comment nodes with non-matching `data` (not `irid:s:`/`irid:e:`) are
+      ignored by the walker
+- [ ] Unpaired start anchor (no matching end) is not registered
+
+### Registry maintenance
+
+- [ ] Anchors inside inserted HTML are registered after `parseFragment`
+- [ ] Anchors inside removed ranges are deregistered via `TreeWalker` over
+      the detached fragment
+- [ ] Reorder operations do NOT change anchor-map entries (same comment
+      nodes, new positions)
+- [ ] Nested control-flow anchors (e.g. `Each` inside `When`) are correctly
+      registered and deregistered when the outer range is swapped out
+
+### Restricted-content parents
+
+Two representative cases are enough — the mechanism is parent-agnostic, but
+`<select>` and table parsing exercise the strictest HTML parser rules.
+
+- [ ] `Each`/`Index` over `<option>` children renders correctly inside
+      `<select>` (no wrapper `<div>` injected by the parser)
+- [ ] `Each` over `<tr>` children renders correctly inside `<tbody>`
+- [ ] `parseFragment` uses the anchor's parent as parsing context so these
+      fragments parse as their intended element (not stripped to text)
+
+### Control-flow containers
+
+- [ ] `process_tags` output contains `<!--irid:s:ID--><!--irid:e:ID-->`
+      (no `<div style="display:contents">`) for `When`/`Each`/`Index`/`Match`
+- [ ] Each per-item wrapper in `Each`/`Index` is itself bracketed by its own
+      comment-anchor pair
+- [ ] Container end anchor `a.end` is preserved across mutations — child
+      ranges are inserted via `parent.insertBefore(..., a.end)`
 
 ## Debug latency
 
