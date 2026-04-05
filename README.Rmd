@@ -107,8 +107,8 @@ See the [Getting Started](https://irid.kylehusmann.com/articles/irid.html) vigne
 
 ## Why irid?
 
-Irid is the iridescent layer that forms inside a shell. This package is a thin
-rendering layer that forms on top of Shiny. An extra layer of shiny, for Shiny.
+Irid comes from *iridescent* — like the rainbow shimmer inside a shell, formed
+by its layered structure. A component layer for Shiny — extra shiny, for Shiny.
 
 ## Inspiration
 
