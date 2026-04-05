@@ -1,6 +1,6 @@
 # Counter
 #
-# The simplest possible irid component. Demonstrates the three core bindings
+# A simple irid component. Demonstrates the three core bindings
 # in one place: a reactive text child, a reactive attribute, and a direct
 # event handler.
 #
