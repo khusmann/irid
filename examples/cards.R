@@ -14,6 +14,7 @@ library(irid)
 library(bslib)
 
 all_datasets <- sort(ls("package:datasets")) |>
+  (\(v) v[order(tolower(v), v)])() |> # Case insensitive ordering
   sapply(get, pos = "package:datasets", simplify = FALSE) |>
   Filter(is.data.frame, x = _)
 
