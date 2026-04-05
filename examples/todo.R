@@ -61,16 +61,14 @@ TodoApp <- function() {
     todos(Filter(\(t) t$id != id, todos()))
   }
 
-  filtered <- reactive({
-    switch(
-      filter(),
-      all = todos(),
-      active = Filter(\(t) !t$done, todos()),
-      completed = Filter(\(t) t$done, todos())
-    )
-  })
+  filtered <- \() switch(
+    filter(),
+    all = todos(),
+    active = Filter(\(t) !t$done, todos()),
+    completed = Filter(\(t) t$done, todos())
+  )
 
-  remaining <- reactive(sum(!vapply(todos(), \(t) t$done, logical(1))))
+  remaining <- \() sum(!vapply(todos(), \(t) t$done, logical(1)))
 
   page_fluid(
     # Add form

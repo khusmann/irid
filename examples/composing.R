@@ -36,7 +36,7 @@ Counter <- function(label, count) {
 App <- function() {
   count_a <- reactiveVal(0)
   count_b <- reactiveVal(0)
-  total <- reactive(count_a() + count_b())
+  total <- \() count_a() + count_b()
 
   page_fluid(
     tags$h3(

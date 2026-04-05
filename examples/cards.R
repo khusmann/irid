@@ -43,8 +43,8 @@ App <- function() {
   selected_columns <- reactiveVal(character(0))
   choice <- reactiveVal("")
 
-  dataset <- reactive(all_datasets[[dataset_name()]])
-  available <- reactive(setdiff(names(dataset()), selected_columns()))
+  dataset <- \() all_datasets[[dataset_name()]]
+  available <- \() setdiff(names(dataset()), selected_columns())
 
   # Clear selections when dataset changes
   observe({

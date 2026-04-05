@@ -5,7 +5,7 @@
 # traditional Shiny this requires careful coordination to avoid feedback loops.
 # With irid's controlled inputs, the solution is straightforward — one
 # `reactiveVal` holds the canonical Celsius value, and the Fahrenheit
-# thermometer derives from it via a `reactive()`. Both thermometers stay in
+# thermometer derives from it via a closure. Both thermometers stay in
 # sync automatically.
 #
 # The app is composed from two reusable components: `Thermometer` (a labeled
@@ -67,7 +67,7 @@ TemperatureDisplay <- function(celsius, fahrenheit) {
 
 TemperatureApp <- function() {
   celsius <- reactiveVal(20)
-  fahrenheit <- reactive(c_to_f(celsius()))
+  fahrenheit <- \() c_to_f(celsius())
 
   page_fluid(
     card(
