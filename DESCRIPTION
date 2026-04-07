@@ -1,6 +1,6 @@
 Package: irid
 Title: Component-Based Shiny UI with Fine-Grained Reactivity
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: person("Kyle", "Husmann", role = c("aut", "cre"),
     email = "khusmann@gmail.com")
 Description: A component-based reactive UI framework for Shiny that binds
