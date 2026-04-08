@@ -251,10 +251,11 @@ coordinate with Shiny's binding lifecycle.
 
 ### `irid-attr` property vs attribute dispatch
 
-- [ ] `value`, `disabled`, `checked`, `selected` are set as JS properties (not `setAttribute`)
+- [ ] `value`, `disabled`, `checked`, `selected`, `innerHTML` are set as JS properties (not `setAttribute`)
 - [ ] `textContent` is set via `.textContent` property
 - [ ] Other attributes use `setAttribute()`
 - [ ] `false`/`null` attribute values call `removeAttribute()`
+- [ ] `innerHTML` content is trusted (author-controlled); verify user input cannot flow into `innerHTML` bindings unsanitized
 
 ### `irid-swap` binding lifecycle
 

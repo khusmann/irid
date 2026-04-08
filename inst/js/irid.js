@@ -1,7 +1,7 @@
 (function() {
   var defined = new Set();
   var sequences = {};  // element id -> latest sent sequence number
-  var PROP_ATTRS = { value: true, disabled: true, checked: true, selected: true };
+  var PROP_ATTRS = { value: true, disabled: true, checked: true, selected: true, innerHTML: true };
   var anchors = new Map();  // id -> { start: CommentNode, end: CommentNode }
   var ANCHOR_RE = /^irid:(s|e):(.+)$/;
   var staleTimeout = null;  // ms before showing stale indicator (null = disabled)
