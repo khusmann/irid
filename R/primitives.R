@@ -166,3 +166,15 @@ DTOutput <- function(fn, ...) {
   }
   Output(DT::renderDT, DT::DTOutput, fn, ...)
 }
+
+#' Embed HTML output in a irid tag tree
+#'
+#' Shorthand for `Output(renderUI, htmlOutput, ...)`.
+#'
+#' @param fn A function that produces an HTML tag.
+#' @param ... Additional arguments passed to [shiny::htmlOutput()].
+#' @return A irid output node.
+#' @export
+HtmlOutput <- function(fn, ...) {
+  Output(shiny::renderUI, shiny::htmlOutput, fn, ...)
+}
