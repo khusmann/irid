@@ -12,11 +12,11 @@ This doc proposes a unified state and rendering model for irid in
 which every piece of state — whether a store branch, a store leaf,
 a standalone `reactiveVal`, or a per-item accessor inside `Each` —
 is a **unified callable**: `x()` reads, `x(value)` writes. DOM
-elements auto-bind to these callables through state-binding props,
-and `withSetter` is the single interception mechanism for
-validation, transformation, or side effects at any level.
+elements auto-bind to these callables through state-binding props.
+`onInput` disables auto-bind and takes over the write path when
+you need validation, side effects, or custom logic.
 
-The four key moves beyond `dev/stores1/`:
+The three key moves beyond `dev/stores1/`:
 
 1. **Per-item mini-stores in `Each`.** When a collection's items
    are records, `Each` wraps each item in a `reactiveStore`,
@@ -26,19 +26,15 @@ The four key moves beyond `dev/stores1/`:
 2. **Auto-bind for state-binding props.** Props like `value`,
    `checked`, and `selected` accept a unified callable and
    automatically read from it and write back to it on user input.
-   No `onInput` handler needed for the common case.
+   No `onInput` handler needed for the common case. Providing
+   `onInput` disables auto-bind write-back and gives the handler
+   full control.
 
-3. **`withSetter` as the universal write-interception point.**
-   Works identically on store nodes, `reactiveVal`s, and per-item
-   accessors — one pattern for validation or side effects at any
-   component boundary.
-
-4. **Element-level auto-bind props.** Timing (`.debounce`,
-   `.throttle`) controls how fast auto-bind writes back to the
-   server. Browser behavior (`.prevent_default`, `.coalesce`) stays
-   element-level. Explicit event handlers (`onInput`, `onClick`)
-   still use `event_debounce()` / `event_throttle()` when they
-   need their own timing.
+3. **Element-level props.** Timing (`.debounce`, `.throttle`),
+   transport (`.coalesce`), and browser behavior
+   (`.prevent_default`) live on the element, not on handler
+   wrappers. Replaces `event_debounce()` / `event_throttle()` /
+   `event_immediate()`.
 
 ---
 
@@ -152,113 +148,84 @@ plain callbacks. They represent actions, not state. The split is:
 - **Event props** (onClick, onInput, etc.): take a callback,
   fire on DOM events.
 
-Auto-bind and explicit handlers coexist — both fire independently
-(see §"Auto-bind semantics"). To customize write logic, use
-`withSetter`. To take full manual control, pass a read-only
-reactive for `value` and handle the write in `onInput`:
+Providing `onInput` (or `onChange` for checkboxes/selects) disables
+auto-bind write-back. The handler owns the write path:
 
 ```r
-# Custom write logic via withSetter (auto-bind still active)
-tags$input(value = withSetter(field, \(v, node) {
-  if (is_valid(v)) node(v)
-}))
+# Auto-bind (common case)
+tags$input(value = field)
 
-# Full manual control (read-only value, no auto-bind write-back)
+# Validation — onInput takes over the write
 tags$input(
-  value = \() field(),
-  onInput = \(e) field(e$value)
+  value = field,
+  onInput = \(e) if (is_valid_email(e$value)) field(e$value)
 )
+
+# Side effect + write
+tags$input(
+  value = field,
+  onInput = \(e) { field(e$value); update_suggestions(e$value) }
+)
+
+# Read-only display
+tags$input(value = \() toupper(field()))
 ```
-
-### `withSetter(node, fn)`
-
-Wraps any unified callable with a custom write function.
-Reading passes through unchanged; writes go through `fn`.
-
-```r
-withSetter <- function(node, fn) {
-  function(value) {
-    if (missing(value)) return(node())
-    fn(value, node)
-  }
-}
-```
-
-Works on any unified callable — store leaves, store branches,
-standalone `reactiveVal`s, per-item accessors from `Each`:
-
-```r
-# Validation
-tags$input(value = withSetter(state$user$email, \(v, node) {
-  if (is_valid_email(v)) node(v)
-}))
-
-# Side effect on write
-tags$input(value = withSetter(state$filters$search, \(v, node) {
-  node(v)
-  state$filters$page(1L)
-}))
-```
-
-`withSetter` on a leaf returns a plain callable (no `$`
-navigation). If you need to intercept an entire branch, wrap the
-individual leaves you care about. This is almost always what you
-want — interception is on specific fields, not subtrees.
 
 ### Element-level props
 
 Element-level props (`.`-prefixed) configure the element's
 behavior. They are not DOM attributes.
 
-Auto-bind timing:
+#### `.event` — event delivery config
 
-- `.debounce = ms` — wait until the user pauses for `ms`
-  milliseconds before auto-bind writes back. Default for
-  auto-bound `value` props: `200`.
-- `.throttle = ms` — auto-bind writes back at most every `ms`
-  milliseconds while the user is active.
-- `.leading = TRUE/FALSE` — modifier on `.throttle`. If `TRUE`
-  (default), fire immediately on the first event.
-
-These only control auto-bind write-back timing. Explicit event
-handlers manage their own timing via `event_debounce()` /
-`event_throttle()` / `event_immediate()` (unchanged from the
-current API).
-
-Element-wide behavior:
-
-- `.coalesce = TRUE/FALSE` — gate on server idle so events never
-  queue faster than the server can process them. Default: `TRUE`
-  for debounced/throttled, `FALSE` otherwise.
-- `.prevent_default = TRUE/FALSE` — call `event.preventDefault()`
-  in the browser before dispatching. Default: `FALSE`.
+Controls timing and transport for auto-bind write-back or explicit
+event handlers. Set via the `event_debounce()`, `event_throttle()`,
+and `event_immediate()` config constructors (same names as the
+current API, but they return config objects instead of wrapping
+handler functions):
 
 ```r
-# Auto-bound value, default 200ms debounce
+event_debounce(ms, coalesce = TRUE)
+event_throttle(ms, leading = TRUE, coalesce = TRUE)
+event_immediate(coalesce = FALSE)
+```
+
+Default for elements with auto-bound `value`: `event_debounce(200)`.
+Default for all other events: `event_immediate()`.
+
+```r
+# Auto-bound value, default event_debounce(200)
 tags$input(value = field)
 
-# Custom auto-bind debounce
-tags$input(value = field, .debounce = 500)
+# Custom debounce
+tags$input(value = field, .event = event_debounce(500))
 
-# No auto-bind debounce
-tags$input(value = field, .debounce = 0)
+# Immediate (no debounce)
+tags$input(value = field, .event = event_immediate())
 
-# Auto-bind plus a side-effect handler with its own timing
+# Validation handler with custom debounce
 tags$input(
   value = field,
-  .debounce = 500,
-  onInput = event_debounce(\(e) update_suggestions(e$value), ms = 300)
+  onInput = \(e) if (is_valid(e$value)) field(e$value),
+  .event = event_debounce(500)
 )
 
-# Explicit handler with timing, no auto-bind involved
-tags$button(
-  "Save",
-  onClick = event_throttle(\() save(), ms = 1000)
-)
+# Throttled button
+tags$button("Save", onClick = \() save(), .event = event_throttle(1000))
+```
 
-# Prevent default on form submit
+#### `.prevent_default`
+
+Calls `event.preventDefault()` in the browser before dispatching.
+Orthogonal to `.event`. Default: `FALSE`.
+
+```r
 tags$form(onSubmit = \(e) handle(e), .prevent_default = TRUE)
 ```
+
+The `.` prefix signals "element config, not DOM attribute."
+Handlers are plain functions — no wrapper classes, no struct
+attributes. The element owns the transport policy.
 
 ---
 
@@ -566,41 +533,29 @@ When both conditions hold, the element:
 - Writes back to the callable on the corresponding DOM event
   (`input` for `value`, `change` for `checked`/`selected`).
 
-### Opting out
+### Opting out of auto-bind write-back
 
-Pass a plain value or a zero-arg reactive to get read-only binding:
+Two ways to disable auto-bind's write-back:
+
+1. **Provide `onInput`/`onChange`.** The handler takes over the
+   write path. Auto-bind still reads from the callable for
+   rendering, but does not write back — the handler decides
+   what to write and when.
+
+2. **Pass a read-only reactive.** A zero-arg function or
+   `reactive(...)` is not a unified callable (it has no write
+   path), so auto-bind renders it but never attempts to write.
 
 ```r
-# Read-only — no write-back
-tags$input(value = \() toupper(state$user$name()))
-```
-
-### Coexistence with explicit handlers
-
-Auto-bind and explicit event handlers fire independently. Auto-bind
-handles state sync; the handler observes the event for side effects:
-
-```r
-# Auto-bind writes the value, onInput logs it
+# onInput takes over — validation before write
 tags$input(
   value = field,
-  onInput = \(e) log_keystroke(e)
+  onInput = \(e) if (nchar(e$value) <= 100) field(e$value)
 )
+
+# Read-only display — no write path exists
+tags$input(value = \() toupper(state$user$name()))
 ```
-
-### Interaction with `withSetter`
-
-`withSetter` returns a unified callable, so auto-bind works
-transparently:
-
-```r
-tags$input(value = withSetter(field, \(v, node) {
-  if (nchar(v) <= 100) node(v)
-}))
-```
-
-The element reads from the original `field` and writes through the
-wrapper. From the element's perspective, it's just a callable.
 
 ---
 
@@ -616,8 +571,7 @@ patterns like `RenderNode` become verbose.
 
 The unified callable inverts the control model: instead of the
 parent intercepting every write by construction, the parent trusts
-the child with the state and intercepts only where needed via
-`withSetter`. This is safe because:
+the child with the state. This is safe because:
 
 - Writes go through a well-defined path (the store's write
   semantics), not ad-hoc observer chains.
@@ -627,15 +581,14 @@ the child with the state and intercepts only where needed via
   — is prevented by the store's structured state tree, not by the
   component protocol.
 
-### Why `withSetter` instead of store-level middleware
-
-Store-level middleware (`reactiveStore(data, onChange = ...)`) would
-be global — every write to any node in the store goes through the
-same hook. `withSetter` is local: you wrap exactly the node you
-hand to exactly the child that needs interception. Different
-children can see different write policies for the same underlying
-state. Local is almost always what you want for validation and
-UI-level side effects.
+`field(v)` always means "write v to this state." The write path is
+transparent — no wrappers, no interception layers, no hidden
+indirection. When a component needs write interception at a
+specific boundary (validation, side effects), it uses `onInput` on
+the element or accepts an optional `onChange` callback as a
+component prop. Both are explicit and visible at the call site.
+`observe(field, ...)` handles the case where side effects need to
+react to state changes regardless of what triggered the write.
 
 ### Why per-item mini-stores instead of the edit-draft pattern
 
@@ -653,8 +606,9 @@ Because the explicit form is almost always the same boilerplate:
 `onInput = \(e) field(e$value)`. When that's all it does, the
 boilerplate obscures the intent (this input is bound to this
 state) without adding information. Auto-bind makes the common case
-declarative; `onInput` remains available for the uncommon case
-where you need the raw event.
+declarative; `onInput` disables auto-bind write-back and takes
+over the write path when you need validation, side effects, or
+custom logic.
 
 ### Why state-binding props vs event props as the split
 
@@ -667,23 +621,25 @@ auto-binding `onClick` to a callable) would be confusing. The split
 matches user intuition about "this input shows this value" vs "this
 button does this thing."
 
-### Why element-level props for auto-bind timing
+### Why element-level `.event` instead of handler wrappers
 
-When `value = field` auto-binds, there is no explicit handler to
-wrap — the timing has to live somewhere other than a handler
-wrapper. Element-level `.debounce` / `.throttle` give it a home
-without requiring the user to drop out of auto-bind.
+The current API wraps handlers with `event_debounce(fn, ms)`,
+bundling timing config into the handler function via struct
+attributes. This conflates what the handler *does* with how the
+element *delivers events*.
 
-Explicit event handlers (`onInput`, `onClick`, etc.) keep using
-`event_debounce()` / `event_throttle()` for their own timing.
-This avoids ambiguity when an element has both auto-bind and an
-explicit handler — `.debounce` controls the auto-bind write-back,
-`event_debounce()` on the handler controls the handler. Each
-timing mechanism has exactly one job.
+`.event` separates these. `event_debounce()`, `event_throttle()`,
+and `event_immediate()` become config constructors — same names,
+but they produce config objects instead of wrapping functions.
+Handlers stay plain functions. The element owns the delivery
+policy.
 
-`.prevent_default` and `.coalesce` stay element-level because they
-apply to the DOM event itself, not to any specific handler or
-auto-bind write-back.
+This also makes auto-bind work naturally. When `value = field`
+auto-binds, there is no explicit handler to wrap — the timing has
+to live somewhere else. `.event` gives it a home with a sensible
+default (`event_debounce(200)` for auto-bound `value`). When
+`onInput` takes over the write path, the same `.event` prop
+controls the handler's timing — one mechanism for both modes.
 
 ### Record vs collection as the iteration axis
 
@@ -719,29 +675,22 @@ collections (todos, chat messages, presets).
    is safest; option (c) is most ergonomic but risks false
    positives.
 
-3. ~~**Auto-bind and `onInput` coexistence.**~~ Resolved: both
-   fire. Auto-bind writes the value; `onInput` runs independently
-   as a side-effect listener. They are orthogonal — auto-bind is
-   state sync, `onInput` is event observation.
+3. ~~**Auto-bind and `onInput` coexistence.**~~ Resolved: `onInput`
+   disables auto-bind write-back. The handler owns the write path.
+   Auto-bind still reads from the callable for rendering.
 
-4. **`withSetter` on branches.** Current proposal: leaf-only.
-   `withSetter` on a branch returns a plain callable that loses
-   `$` navigation. Is there a real use case for intercepting an
-   entire branch while preserving navigation? If so, the wrapper
-   needs to be a proxy object with `$` dispatch.
-
-5. **What does `Each(..., by)` pass as the second callback
+4. **What does `Each(..., by)` pass as the second callback
    argument?** Proposal: `(item, i)` where `i` is a plain integer
    for `by = NULL` and the key value for `by = fn`. Key as the
    second argument is more useful than position for keyed
    iteration (you already have the key, you rarely need position).
 
-6. **Read-only iteration of derived reactives.** `Each` on a
+5. **Read-only iteration of derived reactives.** `Each` on a
    derived reactive produces read-only items. Write attempts error
    with a clear message. Is a separate primitive needed, or is the
    error sufficient?
 
-7. **`Index` naming.** "Index" reads like "numeric position" in
+6. **`Index` naming.** "Index" reads like "numeric position" in
    most languages. `Fields`, `Record`, or `Children` may be
    clearer for "iterate the children of a record." Low priority
    but affects teachability.
@@ -768,8 +717,9 @@ theory doc, and the stress tests are still valid. What changes:
   nested arrays in mini-stores) means the specific application to
   `Each` is safe.
 - **`event_debounce` / `event_throttle` / `event_immediate`:**
-  Kept for explicit event handlers. Element-level `.debounce` /
-  `.throttle` are new and control auto-bind timing only.
+  Replaced by element-level props (`.debounce`, `.throttle`, etc.).
+  Handlers become plain functions; timing and transport config
+  moves to the element.
 
 ---
 
