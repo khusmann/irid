@@ -1,28 +1,46 @@
 # irid Store — Design Document
 
-**Status:** Deferred — design is ready, but no concrete pain point justifies
-shipping yet.
-**Date:** March 2026 (design), deferred 2026-04.
+**Status:** Validated by stress test (April 2026), ready to prototype.
+**Date:** March 2026 (design); deferred 2026-04; un-deferred 2026-04
+after stress test evidence.
 
 ---
 
-This design is not being built yet. The todo example (`examples/todo.R`) —
-the most state-heavy example in irid — handles all its state with three
-loose `reactiveVal`s at the top of `TodoApp`, with no coordination pain.
-Until a real example or app hits clear pain with loose `reactiveVal`s,
-there is no concrete failure mode to design against, and shipping the wrong
-shape in a 0.x API is more expensive than waiting.
+**Original deferral (March 2026 → April 2026).** The todo example
+(`examples/todo.R`) — the most state-heavy example in irid — handled
+all its state with three loose `reactiveVal`s with no coordination
+pain, and no other example or real app had surfaced a concrete
+failure mode. Shipping the wrong shape in a 0.x API was judged more
+expensive than waiting for pain.
 
-**When to revisit:** if an example or real app shows one or more of the
-following, this doc is the starting point — don't redesign from scratch.
+**Why the deferral was lifted (April 2026).** A concern emerged that
+the "wait for user pain" strategy assumes users can recognize pain
+they've never seen alternatives to — data scientists coming from
+Shiny calibrate against `reactiveValues` and nested `reactiveVal`s,
+and may never articulate the shape of the pain even while fighting
+it in their code. To settle the question without waiting for user
+reports, a blind stress test was run: a fresh session was handed
+three realistic app specs (multi-step wizard, filter panel with
+presets, survey authoring tool) with no mention of stores, and asked
+to produce the cleanest implementations possible using only the
+existing primitives. See `state-stress-test-plan.md` for the plan
+and `state-example-{wizard,filters,survey}.R` for the outputs. The
+executor independently re-derived the store thesis, surfaced
+line-specific pain points matching every shape the design predicts,
+and left three `# NOTE:` comments asking for exactly the
+abstractions this doc describes — without the word "store." A full
+summary is in §10 (Appendix: Stress-test results).
 
-- Many related `reactiveVal`s that want to be grouped and read as a single
-  snapshot (form state, settings panels, multi-field edit drafts).
-- Snapshot/restore round-trips where a data blob is pulled out of a
-  collection, edited field-by-field with fine-grained reactivity, and
-  written back (see the edit-draft pattern in §9).
-- Manual coordination, excessive `isolate()` calls, or boilerplate for
-  injecting initial values into a set of independent `reactiveVal`s.
+**Remaining gate.** Design justification is settled. The gating
+question is now implementation soundness: whether the §4 sketch's
+branch-`reactive` + leaf-`reactiveVal` split behaves correctly under
+irid's `When`, `Each`, and `Index`. That can only be answered by
+building the prototype.
+
+**Out-of-scope finding surfaced by the stress test.** The executor
+also surfaced an `Index` read/write asymmetry in `ChoiceEditor` that
+is orthogonal to the store design (per §6, collections are atomic
+list nodes). Captured separately in `../index-write-asymmetry.md`.
 
 A companion theory doc (`irid-store-design-theory.md`) captures the
 reasoning behind the design choices, the alternatives considered, the
@@ -522,3 +540,107 @@ The draft-store pattern earns its keep when the field count grows, when
 there is nested structure, or when the draft is passed through multiple
 components that would otherwise need a bag of `reactiveVal`s plumbed
 through them.
+
+---
+
+## 10. Appendix: Stress-test results (April 2026)
+
+The March 2026 deferral rested on the premise that no concrete pain
+point justified shipping yet. That premise was tested in April 2026
+by running a blind stress test against the existing primitives. This
+appendix summarises the evidence that flipped the deferral verdict.
+
+### Method
+
+A fresh session was handed `state-stress-test-plan.md` — three
+realistic app specs (multi-step wizard form, dashboard filter panel
+with saved presets, survey authoring tool) with no mention of
+stores, no access to this design doc, and explicit instructions to
+produce idiomatic implementations using only `reactiveVal`,
+`reactive`, `Each`, `Index`, and `When`. The plan framed the task as
+"stress-test the state primitives" and asked for a friction report,
+specifically forbidding the executor from proposing new primitives
+or design changes. The goal was to see what shapes of pain a
+competent implementer would surface, working blind.
+
+Outputs live in `state-example-wizard.R`, `state-example-filters.R`,
+and `state-example-survey.R` alongside this document.
+
+### What the executor found
+
+**Every pain point predicted by this design doc was independently
+re-surfaced**, with line numbers:
+
+- **Wizard.** Each field is named six times across declare / reset /
+  submit / load_draft / step-component signatures / input bindings
+  (lines 200-265). `Step4Review` takes 11 `reactiveVal`s as
+  positional arguments (lines 158-162). `load_draft` is 13 lines of
+  `if (!is.null(x)) setter(x)` boilerplate.
+- **Filters.** The filter shape exists in four places — defaults,
+  `current_filters`, `reset_filters`, and `apply_filters` (lines
+  193-229). `FilterBar` takes seven `reactiveVal`s plus an on-reset
+  callback (lines 24-27).
+- **Survey.** Nine draft `reactiveVal`s for the in-progress edit
+  form (lines 134-142), hand-populated in `select_question` (lines
+  164-180), hand-written-back in `save_edit` (lines 182-207). The
+  executor's verbatim note: *"The relationship 'draft is a copy of
+  the selected question' is implicit and by hand."*
+
+### The three `# NOTE:` comments
+
+The executor independently asked for three abstractions without
+knowing stores existed:
+
+- `state-example-wizard.R:247-250` — *"wished for a single
+  form-schema declaration so reset/submit/load could walk it."*
+- `state-example-filters.R:193-195` — *"declare the filter field set
+  once, derive snapshot/restore."*
+- `state-example-survey.R:136-139` — *"wished for a 'draft = copy of
+  question' helper."*
+
+The first two are §2 (the store's record-like state thesis) and §3
+(branch-patch semantics for bulk operations) rediscovered by
+someone who had never read the design. The third is §9 (edit-draft
+pattern) rediscovered the same way.
+
+### How the findings map to this design
+
+| Finding | Design element | Collapse |
+|---|---|---|
+| Wizard: six-way field enumeration | §3 branch patch | `state(defaults)`, `state()`, `state(saved)` — three one-liners |
+| Wizard: `Step4Review` 11-arg signature | §3 composability | One argument: `state` |
+| Filters: four-place shape duplication | §3 branch patch | Same one-line collapse as wizard |
+| Filters: `FilterBar` 7+1 argument signature | §3 composability | One argument: subtree reference |
+| Survey: parallel draft `reactiveVal` universe | §9 edit-draft pattern | `edit_draft <<- reactiveStore(item)`; `save_edit` reads `edit_draft()` once |
+
+### What the findings do *not* say
+
+The stress test validates that stores solve the pain points the
+design anticipated. It does not validate:
+
+- **Implementation soundness of the §4 sketch.** The branch-
+  `reactive` + leaf-`reactiveVal` split is sound on paper and
+  carefully argued, but has not been executed against irid's real
+  `When` / `Each` / `Index` reactive machinery. That is the gating
+  question now.
+- **Universal applicability.** The collection half of the filters
+  example (the preset list, using `Each` with `by` and plain-list
+  snapshot/restore) was called out as the *cleanest* code in all
+  three files. Stores don't touch that half and shouldn't. This
+  confirms the §6 scoping decision: stores for records, `Each` /
+  `Index` for collections.
+- **Correctness of the edit-draft pattern under `When`.** The §9
+  pattern assumes `When` re-evaluates its body when the condition
+  flips on, so a freshly-assigned `edit_draft` reference is picked
+  up. Worth confirming explicitly when the prototype lands.
+
+### Unrelated finding: `Index` read/write asymmetry
+
+The executor also flagged that `Index`'s reactive accessor is
+read-only — writing an item requires going back through the parent
+`reactiveVal` with a manual read-transform-write. This is
+orthogonal to the store design (§6 keeps collections atomic by
+design) and has been captured separately in
+`../index-write-asymmetry.md`. It is not a gating concern for the
+store work; it is a follow-up ergonomics question for `Each` /
+`Index` that can be triaged after stores land.
