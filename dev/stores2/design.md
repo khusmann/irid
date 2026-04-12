@@ -550,6 +550,60 @@ data always flows parent → mini-store — no circular writes.
   mini-store is created; the item accessor is read-only and write
   attempts error.
 
+### Vertical composition: `Each` inside `Each`
+
+When a record item contains a sub-collection (e.g. a survey
+question with an options list), the outer `Each` produces a
+mini-store, and the inner `Each` iterates a leaf of that
+mini-store:
+
+```r
+state <- reactiveStore(list(
+  questions = list(
+    list(id = 1L, text = "Favorite color?", options = list("Red", "Blue")),
+    list(id = 2L, text = "Favorite food?",  options = list("Pizza", "Sushi"))
+  )
+))
+
+Each(state$questions, by = \(q) q$id, \(question) {
+  tags$div(
+    tags$input(value = question$text),
+    Each(question$options, \(option, i) {
+      tags$input(value = option)
+    }),
+    tags$button(
+      "Add option",
+      onClick = \() question$options(c(question$options(), ""))
+    )
+  )
+})
+```
+
+`question` is a mini-store (projection of the outer collection
+item). `question$options` is a leaf of that mini-store holding an
+unnamed list. The inner `Each` iterates it positionally, giving
+each option a scalar accessor.
+
+Writes flow through a two-level synthetic setter chain:
+
+1. `option("Green")` — scalar accessor writes to
+   `question$options` (replacing the list with the option
+   spliced in at position `i`).
+2. `question$options(new_list)` — mini-store leaf synthetic setter
+   patches the question record and writes through to the parent:
+   `question(modifyList(question(), list(options = new_list)))`.
+3. `question(patched)` — outer mini-store synthetic setter writes
+   the patched question back to `state$questions` at the correct
+   position.
+4. Outer `Each` reconciles — finds the same key with a changed
+   value, patches `question`'s mini-store. Inner `Each` reconciles
+   on `question$options` — positional diff updates the affected
+   slot.
+
+This composes from existing pieces — no new primitive needed. But
+the multi-level synthetic setter chain needs prototype validation;
+see open question 7.
+
 ---
 
 ## Auto-bind semantics
@@ -757,6 +811,23 @@ collections (todos, chat messages, presets).
    most languages. `Fields`, `Record`, or `Children` may be
    clearer for "iterate the children of a record." Low priority
    but affects teachability.
+
+7. **Multi-level synthetic setter chain.** When `Each` is nested
+   inside `Each`, writes from the inner collection flow through
+   two levels of synthetic setters (inner scalar accessor →
+   mini-store leaf → outer mini-store → parent collection). Each
+   link uses the same one-way mechanism, so it should compose, but
+   the chain needs prototype validation. Concerns: (a) does each
+   level's reconcile pass settle without redundant work — the inner
+   `Each` fires on the mini-store leaf, the outer `Each` fires on
+   the parent collection, both ultimately triggered by the same
+   write; (b) does the outer reconcile's patch of the mini-store
+   cause the inner `Each` to reconcile a second time (it shouldn't
+   if the inner list hasn't changed, but needs verification);
+   (c) performance with deeply nested collections — three or more
+   levels of `Each` would chain three or more synthetic setters,
+   each triggering a reconcile pass. Likely fine for realistic
+   depths but worth stress-testing.
 
 ---
 
