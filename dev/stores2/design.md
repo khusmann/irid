@@ -140,14 +140,8 @@ State-binding props — `value`, `checked`, `selected` — accept a
 unified callable and automatically two-way bind:
 
 ```r
-# Read from field(), write back to field(new_value) on input
+# Auto-bind: reads from field(), writes back on input
 tags$input(value = field)
-
-# Equivalent to the explicit form:
-tags$input(
-  value = field,
-  onInput = \(e) field(e$value)
-)
 ```
 
 Event props — `onClick`, `onSubmit`, `onKeyDown`, etc. — remain
@@ -158,10 +152,23 @@ plain callbacks. They represent actions, not state. The split is:
 - **Event props** (onClick, onInput, etc.): take a callback,
   fire on DOM events.
 
-`onInput` and friends are still available for cases where you need
-the raw DOM event (e.g. reading cursor position), but the common
-case — "this input reflects and mutates this piece of state" —
-is a single prop.
+Auto-bind and explicit handlers coexist — both fire independently
+(see §"Auto-bind semantics"). To customize write logic, use
+`withSetter`. To take full manual control, pass a read-only
+reactive for `value` and handle the write in `onInput`:
+
+```r
+# Custom write logic via withSetter (auto-bind still active)
+tags$input(value = withSetter(field, \(v, node) {
+  if (is_valid(v)) node(v)
+}))
+
+# Full manual control (read-only value, no auto-bind write-back)
+tags$input(
+  value = \() field(),
+  onInput = \(e) field(e$value)
+)
+```
 
 ### `withSetter(node, fn)`
 
