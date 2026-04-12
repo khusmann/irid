@@ -30,11 +30,10 @@ The three key moves beyond `dev/stores1/`:
    `onInput` disables auto-bind write-back and gives the handler
    full control.
 
-3. **Element-level props.** Timing (`.debounce`, `.throttle`),
-   transport (`.coalesce`), and browser behavior
-   (`.prevent_default`) live on the element, not on handler
-   wrappers. Replaces `event_debounce()` / `event_throttle()` /
-   `event_immediate()`.
+3. **Element-level props.** `.event` controls timing and transport
+   via config constructors (`event_debounce()`, `event_throttle()`,
+   `event_immediate()`). `.prevent_default` controls browser
+   behavior. Both live on the element, not on handler wrappers.
 
 ---
 
@@ -95,10 +94,14 @@ a `reactive`, or an atomic store leaf. Callback receives
 `(item, index)`:
 
 - When items are records (named lists), `item` is a
-  **per-item mini-store** — a `reactiveStore` wrapping that record.
-  `item$done` is a leaf, `item$text` is a leaf, auto-bind works
-  on each field directly. Writes to any leaf propagate back to the
-  parent collection automatically.
+  **per-item mini-store** — a `reactiveStore` projection of
+  that record. `item$done` and `item$text` are reactive leaves
+  for fine-grained reads. Each leaf has a synthetic setter that
+  routes writes through the parent collection (e.g.
+  `todo$done(TRUE)` internally patches the item and writes it
+  back to the parent). `item()` reads the full record,
+  `item(new_record)` replaces it in the parent. See §"Per-item
+  mini-stores."
 
 - When items are scalars (strings, numbers), `item` is a
   **per-item reactive accessor**. `item()` reads, `item(value)`
@@ -113,7 +116,7 @@ per-slot accessors without DOM recreation.
 
 `by = \(x) x$id` — keyed reconciliation. Items are tracked across
 reorders, adds, and removes by their key. Value changes to kept
-items patch the per-item mini-store (for records) or fire the
+items patch the mini-store's leaves (for records) or fire the
 per-item accessor (for scalars), updating only the affected DOM.
 
 ```r
@@ -125,7 +128,7 @@ Each(state$todos, by = \(t) t$id, \(todo) {
 })
 ```
 
-Writes through item fields work only when the source is directly
+Writes through items work only when the source is directly
 writable (a `reactiveVal` or an atomic store leaf). When `Each`
 iterates a derived reactive, items are read-only; write attempts
 error with a clear message.
@@ -450,6 +453,53 @@ that position.
 
 ## Per-item mini-stores in `Each`
 
+### Architecture: one-way data flow
+
+Mini-stores are **projections** of collection items with synthetic
+setters. Data flows in one direction: parent collection →
+mini-store → DOM. Writes through mini-store leaves are routed
+back through the parent — the leaf never holds independent state.
+
+- `todo$done()`, `todo$text()` — fine-grained reactive reads
+  directly from the mini-store's leaves.
+- `todo()` — reads the full record as a plain list.
+- `todo(new_record)` — writes the whole item back to the parent
+  collection at the correct position.
+- `todo$done(TRUE)` — synthetic setter. Internally does
+  `todo(modifyList(todo(), list(done = TRUE)))`, routing the
+  write through the parent. The leaf itself is a read-only
+  projection; the setter is a convenience that writes through
+  the parent.
+
+Auto-bind on a mini-store field (e.g. `checked = todo$done`)
+uses the same synthetic setter. From the user's perspective,
+`checked = todo$done` and `todo$done(TRUE)` both just work.
+Behind the scenes, writes always go through the parent collection,
+which triggers a reconcile pass that diffs old vs new and patches
+only the changed leaves in the mini-store. No circular flow — the
+leaf never holds independent state; it's a projection with a
+write-through convenience.
+
+```r
+# All three are equivalent — all write through the parent:
+tags$input(type = "checkbox", checked = todo$done)    # auto-bind
+todo$done(TRUE)                                        # synthetic setter
+todo(modifyList(todo(), list(done = TRUE)))             # manual
+```
+
+### Why one-way
+
+Two-way mini-stores where leaf writes go directly to the leaf
+and then propagate to the parent create circular reactive flow:
+leaf write → parent write → reconcile → leaf patch. Making that
+settle without double-fire or infinite loops requires guard
+flags or identity checks. One-way avoids the problem entirely:
+the parent is the single source of truth, mini-store leaves are
+projections with synthetic setters that route writes through the
+parent, and the reactive graph is acyclic. The user experience
+is the same — `todo$done(TRUE)` works — but the write goes
+through the parent, not to the leaf directly.
+
 ### Why this is safe
 
 `dev/stores1/irid-store-design-theory.md` §3.1 warned against the
@@ -468,11 +518,11 @@ structurally impossible.
 
 Each per-key entry in `Each`'s internal map holds:
 
-- A `reactiveStore(item)` (for record items) or a `reactiveVal(item)`
-  (for scalar items).
+- A read-only `reactiveStore(item)` (for record items) or a
+  `reactiveVal(item)` (for scalar items).
 - The mounted DOM fragment for that entry.
 
-On each reconcile pass (when the source collection changes):
+On each reconcile pass (when the parent collection changes):
 
 1. **New keys** → create a new mini-store/accessor, call `fn`,
    mount the DOM.
@@ -488,21 +538,8 @@ The critical property: step 3 patches rather than replaces. A todo
 whose `done` flips from `FALSE` to `TRUE` fires only `todo$done`'s
 observers, not `todo$text`'s. This is the fine-grained reactivity
 payoff that justified stores in the first place, now extended into
-collections.
-
-### Write-back from mini-stores
-
-When a callback writes to a mini-store leaf (`todo$done(TRUE)`),
-`Each` must propagate that write back to the parent collection:
-
-1. Snapshot the mini-store: `new_item <- store()`.
-2. Splice into the parent list at the correct position.
-3. Write the new list to the parent source: `source(new_list)`.
-
-This triggers a reconcile pass on the parent, which finds the same
-key with a changed value and reaches step 3 above — but the
-mini-store already holds the new value, so the patch is a no-op.
-No observer double-fire.
+collections. And because mini-stores are read-only projections,
+data always flows parent → mini-store — no circular writes.
 
 ### When mini-stores are not created
 
@@ -524,7 +561,8 @@ A prop auto-binds when:
 1. It is a recognized state-binding prop (`value`, `checked`,
    `selected`), and
 2. Its value is a unified callable (a function that reads when
-   called with no args and writes when called with one arg).
+   called with no args and writes when called with one arg), or
+   a read-only mini-store leaf (see below).
 
 When both conditions hold, the element:
 
@@ -532,6 +570,17 @@ When both conditions hold, the element:
   expression).
 - Writes back to the callable on the corresponding DOM event
   (`input` for `value`, `change` for `checked`/`selected`).
+
+### Auto-bind on mini-store fields
+
+Mini-store leaves (e.g. `todo$done` inside an `Each` callback)
+have a synthetic setter that routes writes through the parent
+item. Auto-bind uses this setter: it reads from the leaf for
+fine-grained reactivity, and on write, the setter patches the
+field and writes back through the parent collection. The user
+writes `checked = todo$done` and gets the same experience as a
+regular store leaf — but under the hood, the data flow is
+strictly one-way (parent → mini-store).
 
 ### Opting out of auto-bind write-back
 
@@ -600,6 +649,22 @@ Mini-stores give field-level reactivity and auto-bind by default;
 the edit-draft pattern remains available for modal workflows where
 discarding changes is a real user action.
 
+### Why one-way mini-stores
+
+The alternative is two-way mini-stores where `todo$done(TRUE)`
+writes directly to the leaf, then propagates the change back to
+the parent collection. This creates circular reactive flow
+(leaf → parent → reconcile → leaf) that needs guard flags or
+identity checks to settle.
+
+One-way mini-stores avoid this: the parent collection is the
+single source of truth, and mini-store leaves are projections
+with synthetic setters. `todo$done(TRUE)` writes through the
+parent, not to the leaf. The reconcile pass flows parent →
+mini-store and the reactive graph is acyclic. The user
+experience is identical — `todo$done(TRUE)` just works — but
+the data flow is clean.
+
 ### Why auto-bind instead of explicit onInput everywhere
 
 Because the explicit form is almost always the same boilerplate:
@@ -660,12 +725,10 @@ collections (todos, chat messages, presets).
 
 ## Open questions
 
-1. **Observer races in mini-store write-back.** When a mini-store
-   leaf write triggers a parent-collection write, which triggers a
-   reconcile pass that patches the mini-store — the patch should
-   be a no-op because the store already holds the new value. Needs
-   prototype confirmation that the reactive graph settles without
-   double-fire or infinite loops.
+1. ~~**Observer races in mini-store write-back.**~~ Resolved:
+   mini-stores are read-only projections. Writes route through the
+   parent collection; data flows one-way (parent → mini-store).
+   No circular reactive flow, no guard flags needed.
 
 2. **Auto-bind detection.** How does the element know a prop value
    is a unified callable vs a plain function? Options: (a) check
@@ -717,9 +780,9 @@ theory doc, and the stress tests are still valid. What changes:
   nested arrays in mini-stores) means the specific application to
   `Each` is safe.
 - **`event_debounce` / `event_throttle` / `event_immediate`:**
-  Replaced by element-level props (`.debounce`, `.throttle`, etc.).
-  Handlers become plain functions; timing and transport config
-  moves to the element.
+  Repurposed from handler wrappers to config constructors, used
+  via the element-level `.event` prop. Handlers become plain
+  functions; timing and transport config moves to the element.
 
 ---
 
