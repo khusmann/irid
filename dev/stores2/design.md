@@ -618,16 +618,24 @@ A prop auto-binds when:
 
 1. It is a recognized state-binding prop (`value`, `checked`,
    `selected`), and
-2. Its value is a unified callable (a function that reads when
-   called with no args and writes when called with one arg), or
-   a read-only mini-store leaf (see below).
+2. Its value is a function, detected by arity:
+   - **0-or-1 args** → read-write. Auto-bind reads (`f()`) and
+     writes (`f(value)`) on the corresponding DOM event.
+   - **0 args only** → read-only. Auto-bind reads but never
+     writes.
 
-When both conditions hold, the element:
+No tagging or class checks needed — `reactiveVal` is 0-or-1 by
+construction, store leaves are the same, and `\() expr()` is
+automatically read-only. See open question 2 (resolved).
 
-- Reads the callable reactively for rendering (like any reactive
+When auto-bind is active, the element:
+
+- Reads the function reactively for rendering (like any reactive
   expression).
-- Writes back to the callable on the corresponding DOM event
-  (`input` for `value`, `change` for `checked`/`selected`).
+- Writes back on the corresponding DOM event (`input` for
+  `value`, `change` for `checked`/`selected`), unless the
+  function is read-only (0 args) or `onInput`/`onChange` is
+  provided.
 
 ### Auto-bind on mini-store fields
 
@@ -649,9 +657,9 @@ Two ways to disable auto-bind's write-back:
    rendering, but does not write back — the handler decides
    what to write and when.
 
-2. **Pass a read-only reactive.** A zero-arg function or
-   `reactive(...)` is not a unified callable (it has no write
-   path), so auto-bind renders it but never attempts to write.
+2. **Pass a read-only reactive.** A zero-arg function (e.g.
+   `\() toupper(field())`) has no write path by arity, so
+   auto-bind renders it but never attempts to write.
 
 ```r
 # onInput takes over — validation before write
@@ -696,6 +704,22 @@ the element or accepts an optional `onChange` callback as a
 component prop. Both are explicit and visible at the call site.
 `observe(field, ...)` handles the case where side effects need to
 react to state changes regardless of what triggered the write.
+
+**Read-only passing at component boundaries.** When a component
+should not write, pass a read-only closure instead of the callable:
+
+```r
+# Full access — component can read and write
+MyEditor(field = state$user$name)
+
+# Read-only — component can only read (0-arg, no write path)
+MyDisplay(value = \() state$user$name())
+```
+
+This is convention, not enforcement — R can't prevent a closure
+from capturing the writable reference. But the convention is
+visible at the call site and sufficient in practice, the same way
+R package namespaces rely on convention over hard isolation.
 
 ### Why per-item mini-stores instead of the edit-draft pattern
 
@@ -788,13 +812,16 @@ collections (todos, chat messages, presets).
    parent collection; data flows one-way (parent → mini-store).
    No circular reactive flow, no guard flags needed.
 
-2. **Auto-bind detection.** How does the element know a prop value
-   is a unified callable vs a plain function? Options: (a) check
-   for a class/attribute on the callable, (b) callables from
-   `reactiveVal`/`reactiveStore` are tagged, (c) any function
-   accepting zero or one args is treated as a callable. Option (b)
-   is safest; option (c) is most ergonomic but risks false
-   positives.
+2. ~~**Auto-bind detection.**~~ Resolved: arity dispatch. A
+   function accepting 0 args is read-only (auto-bind reads, never
+   writes). A function accepting 0-or-1 args is read-write
+   (auto-bind reads and writes). This requires no tagging, no
+   wrapping of Shiny's `reactiveVal`, and no new primitives.
+   `reactiveVal` is already 0-or-1 by construction; store leaves
+   are the same; `\() derived_expr()` is automatically read-only
+   by arity. False positives (a 1-arg non-setter on a state-
+   binding prop) are not realistic — `value = \(x) toupper(x)` is
+   a type error regardless of auto-bind.
 
 3. ~~**Auto-bind and `onInput` coexistence.**~~ Resolved: `onInput`
    disables auto-bind write-back. The handler owns the write path.
