@@ -1,7 +1,32 @@
 # irid Store — Design Document
 
-**Status:** Proposed  
-**Date:** March 2026
+**Status:** Deferred — design is ready, but no concrete pain point justifies
+shipping yet.
+**Date:** March 2026 (design), deferred 2026-04.
+
+---
+
+This design is not being built yet. The todo example (`examples/todo.R`) —
+the most state-heavy example in irid — handles all its state with three
+loose `reactiveVal`s at the top of `TodoApp`, with no coordination pain.
+Until a real example or app hits clear pain with loose `reactiveVal`s,
+there is no concrete failure mode to design against, and shipping the wrong
+shape in a 0.x API is more expensive than waiting.
+
+**When to revisit:** if an example or real app shows one or more of the
+following, this doc is the starting point — don't redesign from scratch.
+
+- Many related `reactiveVal`s that want to be grouped and read as a single
+  snapshot (form state, settings panels, multi-field edit drafts).
+- Snapshot/restore round-trips where a data blob is pulled out of a
+  collection, edited field-by-field with fine-grained reactivity, and
+  written back (see the edit-draft pattern in §9).
+- Manual coordination, excessive `isolate()` calls, or boilerplate for
+  injecting initial values into a set of independent `reactiveVal`s.
+
+A companion theory doc (`irid-store-design-theory.md`) captures the
+reasoning behind the design choices, the alternatives considered, the
+Solid comparison, and the py-irid port.
 
 ---
 
@@ -33,7 +58,7 @@ A store provides fine-grained reactivity over structured, nested state — mirro
 The shape of the store is defined by the initial value and is fixed at construction time. The store does not grow dynamically.
 
 ```r
-state <- create_store(list(
+state <- reactiveStore(list(
   user = list(name = "Alice", age = 30),
   todos = list(
     list(id = 1, text = "Buy milk", done = FALSE),
@@ -140,13 +165,26 @@ This means components can be written against `reactiveVal` and later wired to a 
 
 ## 4. Internal Design
 
-### Leaves are `reactiveVal`, branches are `reactive`
+### Leaves are `reactiveVal`, branches read through `reactive`
 
-The key insight is that **leaves are the source of truth**. Branch nodes are derived — they are `reactive` expressions that compute their value from their children. This means:
+Every node — leaf or branch — is externally a callable that accepts both
+reads (no argument) and writes (one argument). The distinction is internal:
+
+- **Leaves** hold a `reactiveVal`. Reads and writes both go through it directly.
+- **Branches** hold a `reactive` for the *read* path only. The branch's
+  read recomputes by calling each child in turn and reassembling the
+  result. The branch's *write* path does not touch that `reactive` at all
+  — it validates the incoming keys and then calls each child's node
+  function with the corresponding new value, recursing down until every
+  affected leaf's `reactiveVal` has been set.
+
+The key insight is that **leaves are the source of truth**. Branches never
+own state; their read is a derived view, and their write is a fan-out to
+children. This gives us:
 
 - Data flows in one direction only: writes fan down to leaves, reads compose up from leaves
-- No circular invalidation — branches are read-only computed values, not writable state
-- Writing to a branch is just syntactic sugar for patching its children
+- No circular invalidation — the branch's `reactive` is never a write target, so leaf updates cannot bounce back through it
+- Writing to a branch is just syntactic sugar for patching its children, and patching composes to arbitrary depth
 
 ```
 Write root → fans out to children → fans out to leaves (reactiveVal)
@@ -157,10 +195,10 @@ Read branch → reactive(children...)  → recomputes when any child changes
 ### Implementation sketch
 
 ```r
-create_store <- function(x, .name = "root") {
+reactiveStore <- function(x, .name = "root") {
   # Unnamed lists are atomic — do not recurse
   is_named <- is.list(x) && !is.null(names(x))
-  children <- if (is_named) lapply(x, create_store) else list()
+  children <- if (is_named) lapply(x, reactiveStore) else list()
 
   val <- if (length(children) > 0) {
     reactive({
@@ -381,3 +419,106 @@ load_store <- function(store, snapshot) {
 ### `reactiveVal` identity is guaranteed
 
 If a user holds a direct reference to a leaf node (`name_node <- state$user$name`) and the store is later updated via a branch write, the reference remains valid. Leaves are never replaced — only written to. Branch writes fan down to existing leaf `reactiveVal`s; they never create new ones. This is a guaranteed property of the store and should be documented as such.
+
+---
+
+## 9. Patterns
+
+### Edit drafts over collection elements
+
+The store is for record-like state; collections live as atomic list nodes.
+The interesting boundary is what happens when the user wants to edit a
+single element of a collection with fine-grained per-field reactivity —
+a form over the currently selected todo, for example.
+
+The pattern: **spin up a fresh store from the selected element when the
+edit session begins, and write it back to the collection on save.** The
+canonical list never knows the draft exists; the draft is a short-lived
+record store with the same shape as the element it was cloned from.
+
+```r
+state <- reactiveStore(list(
+  todos = list(
+    list(id = 1L, text = "Learn irid", done = FALSE,
+         meta = list(priority = "high", notes = "")),
+    ...
+  ),
+  selected_id = NULL
+))
+
+edit_draft <- NULL
+
+start_edit <- function(id) {
+  item <- Find(\(t) t$id == id, state$todos())
+  edit_draft <<- reactiveStore(item)
+  state$selected_id(id)
+}
+
+save_edit <- function() {
+  snapshot <- edit_draft()
+  state$todos(lapply(
+    state$todos(),
+    \(t) if (t$id == snapshot$id) snapshot else t
+  ))
+  state$selected_id(NULL)
+  edit_draft <<- NULL
+}
+
+cancel_edit <- function() {
+  state$selected_id(NULL)
+  edit_draft <<- NULL
+}
+```
+
+Inside the edit form, every field binds to its own reactive leaf:
+
+```r
+tags$input(
+  value = edit_draft$text,
+  onInput = \(e) edit_draft$text(e$value)
+)
+tags$input(
+  type = "checkbox",
+  checked = edit_draft$done,
+  onClick = \(e) edit_draft$done(e$checked)
+)
+tags$select(
+  value = edit_draft$meta$priority,
+  onChange = \(e) edit_draft$meta$priority(e$value)
+)
+```
+
+Typing in the text box doesn't invalidate the priority dropdown; toggling
+`done` doesn't invalidate the text field. The nested `meta` branch is a
+mini-store by the standard recursion rules, so `edit_draft$meta$priority`
+is its own leaf with its own subscribers.
+
+**Why this is the right shape:**
+
+- **No positional stores needed.** Items live as plain data in an atomic
+  list; per-item render reactivity comes from `Index`; per-field edit
+  reactivity comes from the short-lived draft store. Each layer handles
+  the granularity it is built for, and the Solid-style array-recursion
+  trap (§3.1 of the theory doc) is avoided.
+- **Cancel is free.** Dropping the draft reference discards all its
+  leaves with no stale subscribers — the draft was never wired into the
+  canonical state tree, so nothing upstream depended on it.
+- **Save is one write.** `edit_draft()` produces a plain nested list by
+  the standard read rules; `lapply` places it back in the collection;
+  `state$todos(...)` is a single whole-list replacement that the existing
+  atomic-list machinery handles.
+- **Nested structure falls out.** If the item has named sub-objects, the
+  draft's branch recursion automatically gives you per-field reactivity
+  inside them. No special handling for nesting depth.
+- **Components compose.** Since branches behave as mini-stores, you can
+  pass `edit_draft$meta` to a `MetaEditor(meta)` component without the
+  component knowing whether it received a full store or a subtree — the
+  same composability property described in §3 applies to drafts.
+
+**When loose `reactiveVal`s are enough instead.** If the element has two
+or three fields, constructing a store is ceremony without payoff —
+`reactiveVal(item$text)` and `reactiveVal(item$done)` are just as clean.
+The draft-store pattern earns its keep when the field count grows, when
+there is nested structure, or when the draft is passed through multiple
+components that would otherwise need a bag of `reactiveVal`s plumbed
+through them.
