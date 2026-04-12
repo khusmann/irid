@@ -3,6 +3,10 @@
 **Status:** Draft, April 2026.
 **Prior art:** `dev/stores1/` (store internals, edit-draft pattern,
 theory doc, stress tests, iteration redesign).
+**Naming note:** `dev/stores1/` uses `Index` for the record
+iteration primitive. This doc renames it to `Fields` — "iterate
+the fields of a record." References to `Index` in `dev/stores1/`
+correspond to `Fields` here.
 
 ---
 
@@ -63,7 +67,7 @@ state <- reactiveStore(list(
 Every node is callable. `node()` reads, `node(value)` writes.
 Leaves replace; branches patch.
 
-### `Index(branch, fn)`
+### `Fields(branch, fn)`
 
 Iterates the children of a store branch. Callback receives
 `(child_node, key)`:
@@ -73,13 +77,13 @@ Iterates the children of a store branch. Callback receives
   writes. Writes propagate through the store's normal write path.
 - `key` is the child's field name as a string.
 
-Branches have static shape, so `Index` has no reconciliation — it
-calls `fn` once per child at mount time. `Index` itself is not
+Branches have static shape, so `Fields` has no reconciliation — it
+calls `fn` once per child at mount time. `Fields` itself is not
 reactive; the callback's DOM is reactive to the child nodes it
 captured.
 
 ```r
-Index(state$user, \(field, key) {
+Fields(state$user, \(field, key) {
   tags$div(
     tags$label(key),
     tags$input(value = field)
@@ -297,7 +301,7 @@ RenderNode <- function(node, key) {
   if (is_store(node)) {
     tags$fieldset(
       tags$legend(key),
-      Index(node, RenderNode)
+      Fields(node, RenderNode)
     )
   } else {
     tags$div(
@@ -317,7 +321,7 @@ ProfileApp <- function() {
 
   page_fluid(
     tags$h2("Profile"),
-    Index(state, RenderNode),
+    Fields(state, RenderNode),
     tags$button("Reset", onClick = \() state(defaults)),
     tags$button("Save",  onClick = \() post_to_server(state()))
   )
@@ -326,7 +330,7 @@ ProfileApp <- function() {
 
 `RenderNode` lives outside `ProfileApp` because it captures nothing
 from it — it is a fully generic recursive form renderer. `is_store`
-dispatches branch vs leaf; `Index` recurses into branches;
+dispatches branch vs leaf; `Fields` recurses into branches;
 `tags$input(value = node)` auto-binds at leaves. Adding a new
 section or field is a one-line change to `defaults`.
 
@@ -338,7 +342,7 @@ A two-level `GroupComponent` / `ItemComponent` split can't express
 this without knowing the shape at the call site.
 
 Caveat: `RenderNode` assumes every leaf is scalar. An atomic-list
-leaf (a collection) would need three-way dispatch — store (Index +
+leaf (a collection) would need three-way dispatch — store (Fields +
 recurse), collection (Each), scalar (input). The profile schema has
 no collection leaves so two-way suffices here.
 
@@ -374,7 +378,7 @@ FilterApp <- function() {
 
   FilterBar <- function(filters) {
     tags$div(
-      Index(filters, \(field, key) {
+      Fields(filters, \(field, key) {
         tags$div(
           tags$label(key),
           tags$input(value = field)
@@ -407,14 +411,14 @@ FilterApp <- function() {
 }
 ```
 
-`FilterBar` uses `Index` over a branch with auto-bind — no
+`FilterBar` uses `Fields` over a branch with auto-bind — no
 `onInput` handlers. `PresetList` uses `Each` with keyed
 reconciliation; `preset$name()` reads a field from the per-item
 mini-store.
 
 ### Example 4 — Survey question editor (per-field edit via Each)
 
-This is where the old `Index` write asymmetry showed up — editing
+This is where the old `Fields` write asymmetry showed up — editing
 a single choice option required `modify_if(options, by_index, f)`.
 Under mini-stores, `option` is a scalar accessor and auto-bind
 handles the write.
@@ -807,10 +811,9 @@ collections (todos, chat messages, presets).
    with a clear message. Is a separate primitive needed, or is the
    error sufficient?
 
-6. **`Index` naming.** "Index" reads like "numeric position" in
-   most languages. `Fields`, `Record`, or `Children` may be
-   clearer for "iterate the children of a record." Low priority
-   but affects teachability.
+6. ~~**`Index` naming.**~~ Resolved: renamed to `Fields`. "Iterate
+   the fields of a record" reads naturally, pairs with `Each`
+   without overlapping, and matches the doc's own vocabulary.
 
 7. **Multi-level synthetic setter chain.** When `Each` is nested
    inside `Each`, writes from the inner collection flow through
@@ -844,7 +847,8 @@ theory doc, and the stress tests are still valid. What changes:
   field-level edits" to "useful for cancel/discard workflows."
   Inline field-level edits go through mini-stores by default.
 - **`stores-and-iteration-design.md`:** Superseded by this doc.
-  The `Index`/`Each` split by record/collection carries forward;
+  The `Index`/`Each` split by record/collection carries forward
+  (with `Index` renamed to `Fields` in this doc);
   the per-item accessor design and callback signatures change.
 - **Theory doc §3.1 (array-recursion trap):** Still valid in
   general, but the bounded-recursion argument (store rule prevents
