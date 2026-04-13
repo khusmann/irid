@@ -442,3 +442,61 @@ and independent; and it unlocks fine-grained downstream behavior without pulling
 any lens/focus machinery. The case against: the workaround above is already
 idiomatic and not much to write. Decision deferred alongside the rest of the
 lens/focus work.
+
+---
+
+## Appendix: Store design stress test (April 2026)
+
+Before finalising the store design, a blind stress test was run to validate that
+the design solved real pain points rather than hypothetical ones.
+
+### Method
+
+A fresh session was handed three realistic app specs — a multi-step wizard form,
+a dashboard filter panel with saved presets, and a survey authoring tool — with
+no mention of stores and no access to the design docs. The executor was asked to
+produce idiomatic implementations using only the then-existing primitives
+(`reactiveVal`, `reactive`, `Each`, `Index`, `When`) and to file a friction
+report, explicitly forbidden from proposing new primitives.
+
+### What the executor found
+
+Every pain point predicted by the store design was independently re-surfaced:
+
+- **Wizard.** Each field named six times across declare / reset / submit /
+  load_draft / step-component signatures / input bindings. `Step4Review` took
+  11 `reactiveVal`s as positional arguments. `load_draft` was 13 lines of
+  `if (!is.null(x)) setter(x)` boilerplate.
+- **Filters.** The filter shape existed in four places — defaults,
+  `current_filters`, `reset_filters`, and `apply_filters`. `FilterBar` took
+  seven `reactiveVal`s plus an on-reset callback.
+- **Survey.** Nine draft `reactiveVal`s for the in-progress edit form,
+  hand-populated in `select_question`, hand-written-back in `save_edit`. The
+  executor's verbatim note: *"The relationship 'draft is a copy of the selected
+  question' is implicit and by hand."*
+
+### The three independently-requested abstractions
+
+Without knowing stores existed, the executor asked for:
+
+1. A single form-schema declaration so reset/submit/load could walk it.
+   (= branch-patch semantics, §3 of the store design)
+2. Declare the filter field set once, derive snapshot/restore.
+   (= same)
+3. A "draft = copy of question" helper.
+   (= edit-draft pattern)
+
+### What the findings confirmed
+
+| Finding | Store design element |
+|---|---|
+| Wizard: six-way field enumeration | Branch patch — `state(defaults)`, `state()`, `state(saved)` collapse to one-liners |
+| Wizard: 11-arg `Step4Review` signature | Branch composability — one argument: `state` |
+| Filters: four-place shape duplication | Branch patch — same one-line collapse |
+| Filters: 7+1 argument `FilterBar` | Branch composability — one argument: subtree reference |
+| Survey: parallel draft `reactiveVal` universe | Edit-draft pattern — `edit_draft <<- reactiveStore(item)` |
+
+The collection half of the filters example (preset list via `Each` with `by` and
+plain-list snapshot/restore) was called out as the *cleanest* code in all three
+files — confirming the §6 scoping decision: stores for records, `Each`/`Fields`
+for collections.
