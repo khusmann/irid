@@ -947,3 +947,26 @@ RichTextEditor(constrained)  # can't modify, don't need to
    writes flow through two levels of synthetic setters. Each link uses the same
    one-way mechanism so it should compose, but needs prototype validation.
    Concerns: redundant reconcile passes, performance at three or more levels.
+
+4. **Reactive position accessor.** The callback currently receives
+   `(item, i)` where `i` is a plain value — slot number for `by = NULL`, key
+   value for `by = fn`. This leaves no way to read an item's *current*
+   position reactively after reorders. Solid's `For` solves this by passing
+   `index` as a reactive accessor, enabling patterns like live "Item #3 of
+   10" numbering, queue-position indicators, or alternating row styles that
+   follow reorders.
+
+   Proposal: change the callback to `(item, pos)` where `pos` is always a
+   reactive accessor returning the current 1-indexed slot. The reconciler
+   already tracks slot positions to move DOM nodes; exposing that as a signal
+   per mini-store is cheap.
+
+   - `by = NULL`: `pos()` is a constant signal — slot number is the identity,
+     never changes.
+   - `by = fn`: `pos()` is live — fires on reorder with the item's new slot.
+
+   Always-reactive-accessor keeps the callback shape uniform across modes.
+   Users who need the stable key value in the `by = fn` case read it from the
+   item (`item$id()`) or re-apply `by`; a dedicated `key` arg was considered
+   and rejected as redundant for the common case where the key is derived
+   from the item itself.
