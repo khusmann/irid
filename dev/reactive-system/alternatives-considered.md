@@ -1,8 +1,8 @@
 # Alternatives Considered
 
 Orthogonal ideas evaluated during the reactive system design. Each entry covers
-what it is, why it was considered, why it was rejected or deferred, and where
-the discussion lives.
+what it is, why it was considered, why it was rejected or deferred, and the key
+points from the design discussion.
 
 ---
 
@@ -23,7 +23,16 @@ significant ceremony. It would also duplicate `Each`/`Fields` without adding
 expressivity, and the recursion has no natural bound: arrays of objects of
 arrays create unbounded reactive trees.
 
-**Discussion:** `dev/stores1/irid-store-design-theory.md` §3.1.
+**Key discussion points:** Dynamic shape breaks the static-shape invariant
+central to the store design. The problems array-recursion solves (per-field
+granularity within items, writable references into items) are rare in
+practice — the current architecture (store owns structure, `Each`/`Fields` own
+per-item reactivity) is clean and small. Adding array recursion would be a
+3–5× complexity jump for edge cases. Solid can do this because JS `Proxy`
+makes transparent reactive reads free at every level; R has no equivalent.
+Note: one-way mini-stores inside `Each` (the chosen design) avoid this trap by
+bounding recursion at the store's own rule — unnamed lists stay atomic, so
+mini-stores are one level deep by construction.
 
 ---
 
@@ -41,7 +50,14 @@ not a complement to it. Every store would expose two interaction models. The
 callable model already handles everything lenses do, without introducing a new
 concept for users to learn. YAGNI.
 
-**Discussion:** `dev/stores1/irid-store-design-theory.md` §3.
+**Key discussion points:** Implementing traversals inside the store requires
+dynamic reactive nodes, key-based identity tracking, and observer lifetime
+management — all machinery that overlaps with what `Each`/`Fields` already do.
+purrr already covers the read-traversal shapes (`modify_if`, `keep`, `map`,
+`pluck`, `assign_in`, `detect`) on nested R lists, which is exactly the store's
+data model. The gap between lenses and the callable model is real but narrow;
+it can be closed additively later without breaking anything. Rejected for v1 on
+YAGNI grounds — the current design covers ~90% of use cases.
 
 ---
 
@@ -58,7 +74,14 @@ longer matches any item — the focus would return `NULL` or error, and anything
 downstream would need to handle that. Deferred until real use cases surface the
 right semantics.
 
-**Discussion:** `dev/stores1/irid-store-design-theory.md` §3.
+**Key discussion points:** A plausible implementation routes reads through an
+`observe` + `reactiveVal` pair (so `reactiveVal`'s equality check gates
+propagation) and routes writes through a recursive path-update function. The
+result is still a callable node — no second API shape. But it introduces
+observer-lifetime concerns and a new concept ("focused reactive") that users
+would need to learn alongside store nodes. Real user code hitting the gap is
+needed before the right semantics (predicate paths vs key-based paths) become
+clear.
 
 ---
 
@@ -73,7 +96,10 @@ access `state()$user$name`; writes replace the whole tree.
 tree. Changing `todos` invalidates components reading `user$name` — the entire
 purpose of fine-grained reactivity is defeated.
 
-**Discussion:** `dev/stores1/irid-store-design.md` §7.
+**Key discussion points:** The store's leaf-`reactiveVal` + branch-`reactive`
+split is specifically designed to avoid this: leaves are the source of truth,
+branches are derived views. Any change invalidates only the observers of the
+affected leaf plus any branch nodes above it — not the whole tree.
 
 ---
 
@@ -91,7 +117,12 @@ can't be passed as reactive arguments to irid tags without extra wrapping. The
 consistency of "call it to read, call it with a value to write" is more valuable
 than saving a pair of parentheses.
 
-**Discussion:** `dev/stores1/irid-store-design.md` §7.
+**Key discussion points:** The unified callable model's real value is
+passability: a store leaf, a branch, a standalone `reactiveVal`, and a
+per-item accessor inside `Each` are all the same shape — zero args reads, one
+arg writes — so components never need to know what kind of reactive they
+received. `makeActiveBinding` breaks this: a bare binding can't be passed as a
+value without triggering the active binding's read path.
 
 ---
 
@@ -110,7 +141,11 @@ reference, not a value; assignment semantics would silently create a copy rather
 than mutating in place. Consistency with `reactiveVal` (call to read, call with
 value to write) is more valuable.
 
-**Discussion:** `dev/stores1/irid-store-design.md` §7.
+**Key discussion points:** The `state$user$name("Bob")` callable form is also
+more important for composability (see A5 above). R's `$<-` replacement operator
+is fundamentally a value-copy operation; making it work on a reference type
+requires non-obvious tricks and produces confusing behavior when the result isn't
+reassigned to the parent.
 
 ---
 
@@ -132,8 +167,14 @@ reconciliation is needed for add/remove/reorder. A single primitive would need
 to overload or dispatch on the data type, conflating two operations with
 different semantics under one name.
 
-**Discussion:** `dev/stores1/stores-and-iteration-design.md` §"Design
-decisions".
+**Key discussion points:** The record-vs-collection distinction also mirrors the
+store's own named-vs-unnamed rule — named lists recurse into branches (records),
+unnamed lists stay atomic (collections). Splitting iteration the same way means
+one mental model covers both state shape and iteration shape. A unified `For`
+would force dispatch on the argument type and pass different callback shapes with
+different key semantics (string vs position/by-key): possible but a complicated
+dispatch rule that most users would need to learn. Two primitives with crisp names
+is cleaner.
 
 ---
 
@@ -152,8 +193,15 @@ for collections) maps onto the store's own named-vs-unnamed rule and gives users
 one mental model for state shape and iteration shape. Keyed reconciliation is
 opt-in via `by` within `Each`.
 
-**Discussion:** `dev/stores1/stores-and-iteration-design.md` §"Design
-decisions".
+**Key discussion points:** In practice, users already choose between the old
+`Index` (positional) and `Each` (keyed) based on data shape — a fixed set of
+slots where values change vs a dynamic list where items come and go. That is a
+"what is iterated" distinction dressed up as a "diffing strategy" distinction.
+Making the split explicit by record vs collection surfaces the real distinction.
+It also frees up `Fields` to take on its correct role (iterate the children of a
+store branch — a structurally different thing from iterating a collection that
+deserves its own name) and frees `Each` to handle all collection cases with an
+optional `by` argument.
 
 ---
 
@@ -172,8 +220,13 @@ in place — the ceremony is pure overhead with no payoff. Mini-stores give
 field-level reactivity and auto-bind by default; edit-draft remains available
 for modal workflows.
 
-**Discussion:** `dev/stores2/design.md`, `dev/stores3/design.md` §"Design
-decisions".
+**Key discussion points:** The old `Each` had a footgun: it silently ignored
+value changes for kept items (items whose key matched across reconcile passes
+had their DOM left unchanged even if their data changed). Gaining per-item
+accessors in `Each` fixed this. The edit-draft pattern (spin up
+`reactiveStore(item)` on edit start, write the snapshot back on save) is still
+the right shape for modal workflows with cancel/discard — it just isn't the
+default for every collection item.
 
 ---
 
@@ -193,8 +246,16 @@ entirely: the parent is the single source of truth, mini-store leaves are
 projections with synthetic setters, and the reactive graph is acyclic. The user
 experience is identical.
 
-**Discussion:** `dev/stores2/design.md`, `dev/stores3/design.md` §"Why one-way
-mini-stores".
+**Key discussion points:** One-way mini-stores are projections of collection
+items. Each per-key entry in `Each`'s internal map holds a read-only
+`reactiveStore(item)` (for records) or a `reactiveVal` (for scalars). Writes
+through a mini-store leaf (e.g. `todo$done(TRUE)`) use a synthetic setter that
+internally does `todo(modifyList(todo(), list(done = TRUE)))` — routing the write
+through the parent collection. The reconcile pass that follows flows strictly
+parent → mini-store, patching only changed leaves. No circular flow, no guard
+flags. From the user's perspective `todo$done(TRUE)`, `todo(modifyList(...))`,
+and `checked = todo$done` (auto-bind) are all equivalent — the data-flow
+direction is invisible.
 
 ---
 
@@ -217,8 +278,16 @@ transform in `value`, write transform in `onChange`), and callers must keep them
 in sync manually. The common case (just bind to state) requires the full pair
 even when no interception is needed.
 
-**Discussion:** `dev/stores2/design-anti.md`,
-`dev/stores2/with-setter-validate/verdict.md` pattern (b).
+**Key discussion points:** The scorecard in the write-control pattern evaluation
+gave this pattern (b) a `--` on composability and a `--` on third-party
+support (it only works if the third-party component happens to use
+value/onChange convention — irid ecosystem components accept a single callable,
+so pattern (b) has no answer at all). Branch-passing (`ColorPicker(state$color)`,
+`Fields(state$user, RenderNode)`) is impossible — components would need four
+props for two fields, and the recursive `RenderNode` case becomes `\(getter,
+setter, key)` with explicit plumbing at every level. The counterargument
+(one extra prop makes write paths visible everywhere) doesn't outweigh these
+costs in an R context where convention-as-enforcement is the norm.
 
 ---
 
@@ -238,7 +307,16 @@ internally. Fields not exposed can't be intercepted, even if the parent needs
 to. The component author decides at definition time which fields are
 interceptable — a decision that should belong to the call site.
 
-**Discussion:** `dev/stores2/with-setter-validate/verdict.md` pattern (c).
+**Key discussion points:** The write-control pattern evaluation scored this
+pattern (c) as adequate for common-case simplicity and validated-case ceremony,
+but weak on composability and third-party support. A component author must
+collapse internally: `onInput = \(e) if (!is.null(onChange)) onChange(e$value)
+else field(e$value)` — boilerplate on every component that wants to be
+constrainable. Adding a constrainable field means changing the component
+signature at every intermediate level. For components you don't control
+(third-party packages), this pattern has no answer. `reactiveProxy` supersedes
+it: the parent wraps the callable before passing it, so no component author
+coordination is needed.
 
 ---
 
@@ -258,8 +336,18 @@ disables auto-bind" is a non-obvious special case interaction. `reactiveProxy`
 replaces this mechanism entirely: it wraps the callable (not the element), so it
 works at any boundary and handles both read and write transforms.
 
-**Discussion:** `dev/stores3/design.md` §"Why `reactiveProxy` instead of
-`onInput`", `dev/stores2/with-setter-validate/verdict.md`.
+**Key discussion points:** Three concrete limitations drove the replacement:
+(1) `onInput` only works at the DOM element level — it cannot intercept writes
+through a component you don't control; (2) bidirectional transforms (temperature
+conversion, currency formatting) required a read-only closure on `value` and a
+write handler on `onInput`, split across two different props and requiring manual
+synchronization; (3) "providing `onInput` disables auto-bind" is a surprising
+special-case interaction between two concepts — not obvious without reading the
+docs. `reactiveProxy` solves all three: it wraps the callable itself, so it
+works at any boundary (including components that accept a single callable without
+exposing any `onInput`), it holds `get` and `set` in one place, and it
+introduces no special-case interactions with auto-bind (a proxy is just another
+callable).
 
 ---
 
@@ -278,8 +366,17 @@ ceremony to the common case for a benefit (`set_x` can be withheld to enforce
 read-only) that `\() x()` already provides at lower cost. Deferred as a valid
 future direction, not needed now.
 
-**Discussion:** `dev/stores2/design-anti.md`, `dev/stores2/design.md` §"What
-this design is not".
+**Key discussion points:** The counterargument from the design-anti analysis:
+R closures defeat capability control regardless — any function can capture
+anything from its enclosing scope, so withholding a setter provides convention,
+not enforcement, in the same way `\() x()` does. The composability case is
+stronger: branch-passing and recursive iteration (`Fields(node, \(node, key)
+...)`) are clean with unified callables; they become verbose with getter/setter
+pairs (`Fields(node, \(getter, setter, key) ...)`) with explicit plumbing at
+every level. The read-only passing pattern (`MyDisplay(value = \() x())`) is
+available without adding a new primitive. Deferred rather than rejected because
+zeallot-style destructuring remains a valid future direction compatible with the
+unified callable model.
 
 ---
 
@@ -300,7 +397,17 @@ ergonomic benefit, and explicit read-transform-write is already clear. The
 boilerplate cost is real but bounded — it only shows up for collection-level
 mutations, not per-field ones (which `Each` mini-stores handle).
 
-**Discussion:** `dev/stores1/irid-store-design-theory.md` §3.
+**Key discussion points:** R's copy-on-write semantics make the read-transform-
+write idiom safe and obvious: `state$todos(modify_if(state$todos(), ...))` tells
+the reader exactly what happens — read the node, transform, write the node.
+purrr verbs (`modify_if`, `modify_at`, `modify_in`, `keep`, `map`, `pluck`,
+`assign_in`, `detect`) already operate on nested R lists, which is the store's
+data model. Users who know purrr already know how to traverse the store. A
+helper like `update(node, f)` or `%<>S%` saves a few characters but hides the
+read/write pair behind a new concept. Also, R's COW means `state$todos()` can
+hand out the real underlying list at zero cost — the copy only materialises if
+the caller actually modifies it — so there's no performance reason to wrap the
+pattern either.
 
 ---
 
@@ -317,4 +424,21 @@ value on consecutive evaluations.
 **Status:** Still open. Not rejected — independent of the store design and could
 ship separately. No decision made.
 
-**Discussion:** `dev/stores1/irid-store-design-theory.md` §3.
+**Key discussion points:** `reactiveVal` already provides distinct-until-changed
+on writes (it checks equality before firing), so the pattern is expressible
+today:
+
+```r
+distinct <- function(expr) {
+  out <- reactiveVal(NULL)
+  observe(out(expr()))
+  out
+}
+```
+
+The question is whether to surface this as a first-class helper. The case for:
+it has broad value everywhere in reactive code, not just with stores; it's small
+and independent; and it unlocks fine-grained downstream behavior without pulling
+any lens/focus machinery. The case against: the workaround above is already
+idiomatic and not much to write. Decision deferred alongside the rest of the
+lens/focus work.
