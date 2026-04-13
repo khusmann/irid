@@ -1,4 +1,9 @@
-# Survey question editor: Each inside Each (vertical composition), scalar accessor writes
+# Survey question editor: discriminated union via compound Each key
+#
+# Questions are a tagged union keyed on (id, qtype). Different variants carry
+# different fields — choice questions have $options, text/scale do not.
+# Changing qtype replaces the whole item so Each tears down the old mini-store
+# and mounts a fresh one with the correct shape for the new variant.
 
 library(irid)
 
@@ -30,17 +35,27 @@ ChoiceConfig <- function(question) {
   )
 }
 
+new_question <- function(id, qtype, text = "") switch(qtype,
+  text   = list(id = id, text = text, qtype = "text"),
+  scale  = list(id = id, text = text, qtype = "scale"),
+  choice = list(id = id, text = text, qtype = "choice", options = list(""))
+)
+
 QuestionEditor <- function(question) {
+  # Proxy replaces the whole item on qtype change so the incoming mini-store
+  # always has the correct shape for its variant. The compound Each key
+  # (id + qtype) ensures the old mini-store is torn down and a fresh one
+  # mounted rather than patching a differently-shaped record.
+  qtype_proxy <- reactiveProxy(question$qtype,
+    set = \(v) question(new_question(question()$id, v, text = question()$text))
+  )
+
   tags$div(
     class = "question",
-    tags$input(
-      value = question$text,
-      placeholder = "Question text..."
-    ),
-    QuestionTypeSelect(question$qtype),
-    When(
-      \() question$qtype() == "choice",
-      ChoiceConfig(question)
+    tags$input(value = question$text, placeholder = "Question text..."),
+    QuestionTypeSelect(qtype_proxy),
+    Match(
+      Case(\() question$qtype() == "choice", ChoiceConfig(question))
     )
   )
 }
@@ -56,22 +71,16 @@ SurveyApp <- function() {
         options = list("Red", "Blue", "Green")
       ),
       list(
-        id      = 2L,
-        text    = "How satisfied are you?",
-        qtype   = "scale",
-        options = list()
+        id    = 2L,
+        text  = "How satisfied are you?",
+        qtype = "scale"
       )
     )
   ))
   next_id <- 3L
 
   add_question <- function() {
-    state$questions(c(state$questions(), list(list(
-      id      = next_id,
-      text    = "",
-      qtype   = "text",
-      options = list()
-    ))))
+    state$questions(c(state$questions(), list(new_question(next_id, "text"))))
     next_id <<- next_id + 1L
   }
 
@@ -85,7 +94,9 @@ SurveyApp <- function() {
       tags$input(value = state$title)
     ),
     tags$div(
-      Each(state$questions, by = \(q) q$id, \(question) {
+      # Key on (id, qtype): changing qtype destroys the old mini-store and
+      # mounts a fresh one with the correct shape for the new variant.
+      Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
         tags$div(
           QuestionEditor(question),
           tags$button(

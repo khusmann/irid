@@ -540,6 +540,62 @@ Writes flow through a two-level synthetic setter chain: inner scalar accessor
 → mini-store leaf → outer mini-store → parent collection. Each level uses the
 same one-way mechanism.
 
+### Discriminated unions
+
+When collection items follow a tagged union — different shapes for different
+variants — use a compound `by` key that includes the discriminator:
+
+```r
+Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
+  tags$div(
+    # ... common fields ...
+    Match(
+      Case(\() question$qtype() == "text",   TextQuestion(question)),
+      Case(\() question$qtype() == "scale",  ScaleQuestion(question)),
+      Case(\() question$qtype() == "choice", ChoiceQuestion(question))
+    )
+  )
+})
+```
+
+Mini-stores have fixed shape (derived from the item at mount time). The
+compound key ensures a type change is treated as a remove + add rather than
+a patch: the old mini-store (and its DOM) is torn down; a new one of the
+correct shape is mounted. The fixed-shape constraint applies within a variant,
+not across the union.
+
+The write path replaces the whole item rather than just updating the
+discriminator field. A `reactiveProxy` on the discriminator handles this,
+delegating to a constructor that centralises variant shapes:
+
+```r
+new_question <- function(id, qtype, text = "") switch(qtype,
+  text   = list(id = id, text = text, qtype = "text"),
+  scale  = list(id = id, text = text, qtype = "scale"),
+  choice = list(id = id, text = text, qtype = "choice", options = list(""))
+)
+
+qtype_proxy <- reactiveProxy(question$qtype,
+  set = \(v) question(new_question(question()$id, v, text = question()$text))
+)
+```
+
+`question(new_item)` routes through the mini-store's synthetic setter and
+replaces the slot in the parent collection atomically. The reconciler then
+sees the old compound key gone and the new one appearing — full teardown and
+fresh mount with the correct shape for the new variant.
+
+Because the component is remounted on type change, the `Match` condition is
+stable for the lifetime of each mini-store — it never flips. But a reactive
+context is still required to read the value, so `Match`/`Case` is needed:
+
+```r
+Match(
+  Case(\() question$qtype() == "choice", ChoiceConfig(question))
+)
+# $options is always present here — the mini-store shape guarantees it
+```
+
 ### Read-only iteration
 
 `Each` on a derived reactive wraps it in a `reactiveProxy(set = <error>)`
