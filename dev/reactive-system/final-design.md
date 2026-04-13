@@ -258,8 +258,8 @@ Because `set` is a closure, it can read sibling state for cross-field validation
 **Validation gate:**
 
 ```r
-reactiveProxy(state$email,
-  set = \(v) if (is_valid_email(v)) state$email(v)
+reactiveProxy(state$username,
+  set = \(v) if (nchar(v) <= 20L) state$username(v)
 )
 ```
 
@@ -289,11 +289,11 @@ reactiveProxy(state$search,
 **Validation with error feedback:**
 
 ```r
-email_error <- reactiveVal(NULL)
-reactiveProxy(state$email,
+username_error <- reactiveVal(NULL)
+reactiveProxy(state$username,
   set = \(v) {
-    if (is_valid_email(v)) { email_error(NULL); state$email(v) }
-    else email_error("Invalid email address")
+    if (nchar(v) <= 20L) { username_error(NULL); state$username(v) }
+    else username_error("Username must be 20 characters or less")
   }
 )
 ```
@@ -802,12 +802,13 @@ that are hard to debug and prone to glitchy intermediate states.
 ```r
 # BAD — observe reacts after the write. Invalid state briefly exists.
 observe({
-  if (!is_valid_email(state$email())) state$email("")
+  if (nchar(state$username()) > 20L)
+    state$username(substr(state$username(), 1L, 20L))
 })
 
 # GOOD — proxy rejects the write. Invalid state never exists.
-validated_email <- reactiveProxy(state$email,
-  set = \(v) if (is_valid_email(v)) state$email(v)
+validated_username <- reactiveProxy(state$username,
+  set = \(v) if (nchar(v) <= 20L) state$username(v)
 )
 ```
 
@@ -858,11 +859,11 @@ Not legitimate uses:
 A component accepts a callable, auto-bind handles reads and writes. No ceremony:
 
 ```r
-EmailInput <- function(email) {
-  tags$input(type = "email", value = email)
+NameInput <- function(name) {
+  tags$input(value = name)
 }
 
-EmailInput(state$email)
+NameInput(state$name)
 ```
 
 ### Adding validation at a component boundary
@@ -870,10 +871,10 @@ EmailInput(state$email)
 The parent wraps the callable in a proxy. The component is unchanged:
 
 ```r
-validated_email <- reactiveProxy(state$email,
-  set = \(v) if (is_valid_email(v)) state$email(v)
+validated_name <- reactiveProxy(state$name,
+  set = \(v) if (nchar(v) <= 100L) state$name(v)
 )
-EmailInput(validated_email)
+NameInput(validated_name)
 ```
 
 ### Adding a bidirectional transform

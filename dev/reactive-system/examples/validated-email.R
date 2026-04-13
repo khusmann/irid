@@ -1,4 +1,9 @@
-# reactiveProxy for validation at a component boundary
+# Form validation: proxy gate vs. draft + commit
+#
+# A proxy gate (dropping invalid writes) only works when partial input is still
+# meaningful — e.g. max-length or numeric range. Email format validation needs
+# a different approach: let the user type freely into draft state, validate on
+# submit. state$email only ever holds a valid (or empty) value.
 
 library(irid)
 
@@ -15,18 +20,20 @@ EmailApp <- function() {
     email = "",
     name  = ""
   ))
+
+  email_draft <- reactiveVal("")
   email_error <- reactiveVal(NULL)
 
-  validated_email <- reactiveProxy(state$email,
-    set = \(v) {
-      if (is_valid_email(v)) {
-        email_error(NULL)
-        state$email(v)
-      } else {
-        email_error("Invalid email address")
-      }
+  submit_form <- function() {
+    v <- email_draft()
+    if (!is_valid_email(v)) {
+      email_error("Invalid email address")
+      return()
     }
-  )
+    email_error(NULL)
+    state$email(v)
+    save_profile(state())
+  }
 
   page_fluid(
     tags$div(
@@ -35,16 +42,13 @@ EmailApp <- function() {
     ),
     tags$div(
       tags$label("Email"),
-      EmailInput(validated_email),
+      EmailInput(email_draft),
       When(
         \() !is.null(email_error()),
         tags$p(\() email_error(), style = "color: red")
       )
     ),
-    tags$button(
-      "Submit",
-      onClick = \() submit_form(state())
-    )
+    tags$button("Submit", onClick = \() submit_form())
   )
 }
 
