@@ -970,3 +970,55 @@ RichTextEditor(constrained)  # can't modify, don't need to
    item (`item$id()`) or re-apply `by`; a dedicated `key` arg was considered
    and rejected as redundant for the common case where the key is derived
    from the item itself.
+
+5. **`Fields` vs `names()` + `lapply` + `[[`.** irid supports `[[` on
+   reactive store nodes for dynamic key navigation. If `names.reactiveStore`
+   is also supported — returning a branch's child keys directly from the
+   internal shape, without assembling values — then users can iterate a
+   branch in plain R:
+
+   ```r
+   lapply(names(state$user), \(k) render_field(state$user[[k]], k))
+   ```
+
+   This is nearly equivalent to `Fields(state$user, render_field)`:
+
+   - Both iterate children once at mount. Component bodies run in an
+     `isolate()` context, so neither establishes a branch-level subscription.
+   - Both preserve fine-grained per-leaf reactivity — auto-bind subscribes
+     inside each input, not at the `lapply` level.
+   - `names.reactiveStore` reads shape directly, avoiding the
+     assemble-and-discard that `names(state$user())` would require.
+
+   Given the near-equivalence, does `Fields` still earn its keep?
+
+   **Case for keeping `Fields`:**
+
+   - Canonical: names the pattern, gives docs a place to point, prevents
+     a user-land ecosystem split where everyone writes their own
+     `render_fields()` helper with slightly different semantics.
+   - Forms the explicit dual of `Each`, making the static/dynamic dichotomy
+     visible in the primitive vocabulary rather than something users must
+     re-derive.
+   - Marginally more ergonomic: one call vs `lapply` + `names` + `[[`.
+   - Can be implemented to enumerate shape without any public API surface,
+     tighter than the user-land composition.
+
+   **Case for dropping `Fields`:**
+
+   - Pure R idiom, one fewer primitive to learn or document.
+   - `names()` + `[[` is useful beyond iteration (debugging, introspection,
+     `purrr::map`); `Fields` only covers the iteration case.
+   - Users who want to stay in base R avoid a framework-specific abstraction.
+   - Smaller API surface.
+
+   Separately from this question, `names.reactiveStore` — along with
+   `length`, `print`, `str`, `as.list` — is worth supporting regardless.
+   These are R-idiomatic introspection methods that make a store feel like
+   a regular named list. Users will reach for them on instinct; supporting
+   them is nearly free and pays off in places that have nothing to do with
+   iteration.
+
+   The open question is specifically whether `Fields` is still worth
+   shipping once `names()` + `[[` is available, or whether the canonical
+   form should be ceded to user-land `lapply`.
