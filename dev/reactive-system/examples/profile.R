@@ -1,4 +1,4 @@
-# Profile editor: Fields, RenderGroup/RenderField, branch passing, reset/save
+# Profile editor: branch iteration with lapply/names, RenderGroup/RenderField, reset/save
 
 library(irid)
 
@@ -12,7 +12,7 @@ RenderField <- function(field, key) {
 RenderGroup <- function(group) {
   tags$fieldset(
     tags$legend(\() group$name()),
-    Fields(group$fields, RenderField)
+    lapply(names(group$fields), \(k) RenderField(group$fields[[k]], k))
   )
 }
 
@@ -35,7 +35,7 @@ ProfileApp <- function() {
 
   page_fluid(
     tags$h2("Profile"),
-    Fields(state, \(group, key) RenderGroup(group)),
+    lapply(names(state), \(k) RenderGroup(state[[k]])),
     tags$div(
       tags$button("Reset", onClick = \() state(defaults)),
       tags$button("Save",  onClick = \() post_to_server(state()))

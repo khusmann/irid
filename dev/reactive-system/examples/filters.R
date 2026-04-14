@@ -1,4 +1,5 @@
-# Filter panel with presets: Fields for filter bar, Each for presets, branch snapshot/restore
+# Filter panel with presets: lapply/names for filter bar, Each for presets,
+# branch snapshot/restore
 
 library(irid)
 
@@ -36,10 +37,10 @@ FilterApp <- function() {
 
   FilterBar <- function(filters) {
     tags$div(
-      Fields(filters, \(field, key) {  # fields here are all leaves
+      lapply(names(filters), \(k) {
         tags$div(
-          tags$label(key),
-          tags$input(value = field)
+          tags$label(k),
+          tags$input(value = filters[[k]])
         )
       })
     )

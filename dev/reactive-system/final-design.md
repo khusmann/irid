@@ -6,7 +6,7 @@
 
 ## Summary
 
-irid's state and rendering model is built on six concepts:
+irid's state and rendering model is built on five concepts:
 
 1. **`reactiveStore`** — hierarchical reactive state.
 2. **Auto-bind** — state-binding props (`value`, `checked`, `selected`)
@@ -15,8 +15,7 @@ irid's state and rendering model is built on six concepts:
    The single mechanism for validation, transforms, side effects, and
    read-only views at component boundaries.
 4. **`Each`** — collection iteration with per-item mini-stores.
-5. **`Fields`** — record (branch) iteration.
-6. **`.event` config** — element-level timing and transport.
+5. **`.event` config** — element-level timing and transport.
 
 Every piece of state — store branch, store leaf, standalone `reactiveVal`,
 per-item accessor inside `Each` — is a **unified callable**: `x()` reads,
@@ -608,75 +607,6 @@ No special case in `Each` — it sees a callable either way.
 
 ---
 
-## `Fields`
-
-Iterates the children of a store branch. Callback receives
-`(child_node, key)`:
-
-```r
-Fields(branch, fn)
-```
-
-- `child_node` is a store node (leaf or nested branch). It is a callable —
-  `child_node()` reads, `child_node(value)` writes.
-- `key` is the child's field name as a string.
-
-Branches have static shape, so `Fields` has no reconciliation — it calls `fn`
-once per child at mount time. `Fields` itself is not reactive; the callback's
-DOM is reactive to the child nodes it captured.
-
-```r
-Fields(state$user, \(field, key) {
-  tags$div(
-    tags$label(key),
-    tags$input(value = field)
-  )
-})
-```
-
-### Recursive generic forms
-
-`Fields` composes with two-level rendering — `RenderGroup` for branches,
-`RenderField` for leaves:
-
-```r
-RenderField <- function(field, key) {
-  tags$div(
-    tags$label(key),
-    tags$input(value = field)
-  )
-}
-
-RenderGroup <- function(group) {
-  tags$fieldset(
-    tags$legend(\() group$name()),
-    Fields(group$fields, RenderField)
-  )
-}
-
-Fields(state, \(group, key) RenderGroup(group))
-```
-
-The store shape encodes the group label alongside the fields:
-
-```r
-state <- reactiveStore(list(
-  user = list(
-    name   = "User",
-    fields = list(name = "", email = "")
-  ),
-  address = list(
-    name   = "Address",
-    fields = list(street = "", city = "", zip = "", country = "US")
-  )
-))
-```
-
-`RenderField` and `RenderGroup` capture nothing from the call site — they can
-live outside any app function.
-
----
-
 ## `.event` config
 
 Element-level prop controlling timing and transport for auto-bind write-back
@@ -851,7 +781,7 @@ Not legitimate uses:
 | Sync with outside world              | `observe`                                         |
 | Discrete user actions                | Event callbacks (`onClick`, `onSubmit`, ...)      |
 | Collection iteration (fine-grained)  | `Each` with mini-stores                           |
-| Record/branch iteration              | `Fields`                                          |
+| Branch iteration (static shape)      | `lapply(names(branch), \(k) fn(branch[[k]], k))` |
 | Event timing                         | `.event` (element-level config)                   |
 
 ### The common case
@@ -901,28 +831,32 @@ Each(state$todos, by = \(t) t$id, \(todo) {
 })
 ```
 
-### Recursive form with auto-bind
+### Branch iteration with auto-bind
 
 ```r
-ProfileApp <- function() {
-  defaults <- list(
-    user = list(
-      name   = "User",
-      fields = list(name = "", email = "")
-    ),
-    address = list(
-      name   = "Address",
-      fields = list(street = "", city = "", zip = "")
-    )
+RenderField <- function(field, key) {
+  tags$div(
+    tags$label(key),
+    tags$input(value = field)
   )
-  state <- reactiveStore(defaults)
+}
+
+ProfileApp <- function() {
+  state <- reactiveStore(list(
+    name  = "",
+    email = ""
+  ))
 
   page_fluid(
-    Fields(state, \(group, key) RenderGroup(group)),
-    tags$button("Reset", onClick = \() state(defaults))
+    lapply(names(state), \(k) RenderField(state[[k]], k))
   )
 }
 ```
+
+`names(state)` reads the branch's child keys from the store's internal shape
+without assembling values. `state[[k]]` returns the child node — a callable
+that auto-bind subscribes to individually. The iteration itself is not reactive;
+fine-grained reactivity lives inside each `tags$input`.
 
 ### Third-party component interception
 
@@ -971,54 +905,12 @@ RichTextEditor(constrained)  # can't modify, don't need to
    and rejected as redundant for the common case where the key is derived
    from the item itself.
 
-5. **`Fields` vs `names()` + `lapply` + `[[`.** irid supports `[[` on
-   reactive store nodes for dynamic key navigation. If `names.reactiveStore`
-   is also supported — returning a branch's child keys directly from the
-   internal shape, without assembling values — then users can iterate a
-   branch in plain R:
-
-   ```r
-   lapply(names(state$user), \(k) render_field(state$user[[k]], k))
-   ```
-
-   This is nearly equivalent to `Fields(state$user, render_field)`:
-
-   - Both iterate children once at mount. Component bodies run in an
-     `isolate()` context, so neither establishes a branch-level subscription.
-   - Both preserve fine-grained per-leaf reactivity — auto-bind subscribes
-     inside each input, not at the `lapply` level.
-   - `names.reactiveStore` reads shape directly, avoiding the
-     assemble-and-discard that `names(state$user())` would require.
-
-   Given the near-equivalence, does `Fields` still earn its keep?
-
-   **Case for keeping `Fields`:**
-
-   - Canonical: names the pattern, gives docs a place to point, prevents
-     a user-land ecosystem split where everyone writes their own
-     `render_fields()` helper with slightly different semantics.
-   - Forms the explicit dual of `Each`, making the static/dynamic dichotomy
-     visible in the primitive vocabulary rather than something users must
-     re-derive.
-   - Marginally more ergonomic: one call vs `lapply` + `names` + `[[`.
-   - Can be implemented to enumerate shape without any public API surface,
-     tighter than the user-land composition.
-
-   **Case for dropping `Fields`:**
-
-   - Pure R idiom, one fewer primitive to learn or document.
-   - `names()` + `[[` is useful beyond iteration (debugging, introspection,
-     `purrr::map`); `Fields` only covers the iteration case.
-   - Users who want to stay in base R avoid a framework-specific abstraction.
-   - Smaller API surface.
-
-   Separately from this question, `names.reactiveStore` — along with
-   `length`, `print`, `str`, `as.list` — is worth supporting regardless.
-   These are R-idiomatic introspection methods that make a store feel like
-   a regular named list. Users will reach for them on instinct; supporting
-   them is nearly free and pays off in places that have nothing to do with
-   iteration.
-
-   The open question is specifically whether `Fields` is still worth
-   shipping once `names()` + `[[` is available, or whether the canonical
-   form should be ceded to user-land `lapply`.
+5. ~~**`Fields` vs `names()` + `lapply` + `[[`.**~~ Resolved: drop `Fields`.
+   `Fields` has no reconciliation machinery and no reactive semantics of its
+   own — once `names.reactiveStore` and `[[` work, it is just
+   `lapply(names(branch), \(k) fn(branch[[k]], k))`. A named primitive is
+   only justified when it implements something users cannot correctly compose
+   from simpler pieces; `Fields` does not clear that bar. `names.reactiveStore`
+   — along with `length`, `print`, `str`, `as.list` — is worth supporting for
+   R-idiomatic introspection regardless. The canonical branch-iteration pattern
+   is `lapply(names(branch), \(k) fn(branch[[k]], k))`.
