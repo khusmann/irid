@@ -166,8 +166,8 @@ remain valid after branch writes. Leaves are never replaced — only written to.
 ### R-idiomatic store methods
 
 Store branches support the standard R introspection generics: `names`,
-`length`, `print`, `str`, `as.list`. These make a branch feel like a regular
-named list and pay off in contexts that have nothing to do with iteration.
+`length`, `print`, and `str`. These make a branch feel like a regular named
+list and pay off in contexts that have nothing to do with iteration.
 
 Crucially, `[[` supports **integer indexing** in addition to string indexing.
 Together with `length` and `names`, this means standard R and purrr iteration
@@ -184,9 +184,6 @@ imap(state$user, \(field, key) tags$div(tags$label(key), tags$input(value = fiel
 `lapply` uses `seq_along(X)` (via `length`) and `X[[i]]` (integer `[[`) under
 the hood. `imap` additionally reads `names(X)`. Both receive the child node
 callables — not resolved values — so auto-bind works unchanged.
-
-`as.list` returns a named list of child node callables (not resolved values),
-consistent with the above: the list elements are callables, same as `branch[[k]]`.
 
 ---
 
@@ -937,4 +934,6 @@ RichTextEditor(constrained)  # can't modify, don't need to
    iteration works directly on a branch: `lapply(branch, fn)` for single-arg
    callbacks, `imap(branch, fn)` when the key is also needed. These generics
    are worth supporting for R-idiomatic introspection regardless — the branch
-   iteration use case comes for free.
+   iteration use case comes for free. `as.list` is intentionally not supported:
+   it is ambiguous (values or callables?) and both interpretations are already
+   covered (`branch()` for values, `lapply(branch, fn)` for callable iteration).
