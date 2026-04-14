@@ -163,6 +163,31 @@ complete before any observer runs.
 `reactiveVal` identity is guaranteed: leaf references (`node <- state$user$name`)
 remain valid after branch writes. Leaves are never replaced — only written to.
 
+### R-idiomatic store methods
+
+Store branches support the standard R introspection generics: `names`,
+`length`, `print`, `str`, `as.list`. These make a branch feel like a regular
+named list and pay off in contexts that have nothing to do with iteration.
+
+Crucially, `[[` supports **integer indexing** in addition to string indexing.
+Together with `length` and `names`, this means standard R and purrr iteration
+works directly on a branch:
+
+```r
+# Single-arg callback — field only
+lapply(state$user, \(field) tags$input(value = field))
+
+# Two-arg callback — field and key (purrr)
+imap(state$user, \(field, key) tags$div(tags$label(key), tags$input(value = field)))
+```
+
+`lapply` uses `seq_along(X)` (via `length`) and `X[[i]]` (integer `[[`) under
+the hood. `imap` additionally reads `names(X)`. Both receive the child node
+callables — not resolved values — so auto-bind works unchanged.
+
+`as.list` returns a named list of child node callables (not resolved values),
+consistent with the above: the list elements are callables, same as `branch[[k]]`.
+
 ---
 
 ## Auto-bind
@@ -781,7 +806,7 @@ Not legitimate uses:
 | Sync with outside world              | `observe`                                         |
 | Discrete user actions                | Event callbacks (`onClick`, `onSubmit`, ...)      |
 | Collection iteration (fine-grained)  | `Each` with mini-stores                           |
-| Branch iteration (static shape)      | `lapply(names(branch), \(k) fn(branch[[k]], k))` |
+| Branch iteration (static shape)      | `lapply(branch, fn)` / `imap(branch, fn)`        |
 | Event timing                         | `.event` (element-level config)                   |
 
 ### The common case
@@ -848,15 +873,15 @@ ProfileApp <- function() {
   ))
 
   page_fluid(
-    lapply(names(state), \(k) RenderField(state[[k]], k))
+    imap(state, RenderField)
   )
 }
 ```
 
-`names(state)` reads the branch's child keys from the store's internal shape
-without assembling values. `state[[k]]` returns the child node — a callable
-that auto-bind subscribes to individually. The iteration itself is not reactive;
-fine-grained reactivity lives inside each `tags$input`.
+`imap` receives each child node as a callable and its key as a string.
+Auto-bind subscribes inside each `tags$input` — the iteration itself is not
+reactive. Without purrr, the base R equivalent is
+`lapply(names(state), \(k) RenderField(state[[k]], k))`.
 
 ### Third-party component interception
 
@@ -907,10 +932,9 @@ RichTextEditor(constrained)  # can't modify, don't need to
 
 5. ~~**`Fields` vs `names()` + `lapply` + `[[`.**~~ Resolved: drop `Fields`.
    `Fields` has no reconciliation machinery and no reactive semantics of its
-   own — once `names.reactiveStore` and `[[` work, it is just
-   `lapply(names(branch), \(k) fn(branch[[k]], k))`. A named primitive is
-   only justified when it implements something users cannot correctly compose
-   from simpler pieces; `Fields` does not clear that bar. `names.reactiveStore`
-   — along with `length`, `print`, `str`, `as.list` — is worth supporting for
-   R-idiomatic introspection regardless. The canonical branch-iteration pattern
-   is `lapply(names(branch), \(k) fn(branch[[k]], k))`.
+   own — it is not a primitive. With `length.reactiveStore`, integer
+   `[[.reactiveStore`, and `names.reactiveStore`, standard R and purrr
+   iteration works directly on a branch: `lapply(branch, fn)` for single-arg
+   callbacks, `imap(branch, fn)` when the key is also needed. These generics
+   are worth supporting for R-idiomatic introspection regardless — the branch
+   iteration use case comes for free.

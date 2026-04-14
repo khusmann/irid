@@ -35,7 +35,7 @@ ProfileApp <- function() {
 
   page_fluid(
     tags$h2("Profile"),
-    lapply(names(state), \(k) RenderGroup(state[[k]])),
+    lapply(state, RenderGroup),
     tags$div(
       tags$button("Reset", onClick = \() state(defaults)),
       tags$button("Save",  onClick = \() post_to_server(state()))
