@@ -228,6 +228,50 @@ test_that("deep root patch replaces atomic list wholesale", {
   expect_equal(shiny::isolate(state$user$name()), "A")
 })
 
+# --- Classed lists are opaque leaves -----------------------------------------
+
+test_that("data.frame initial is stored as a leaf, class preserved", {
+  df <- data.frame(x = 1:3, y = c("a", "b", "c"), stringsAsFactors = FALSE)
+  state <- reactiveStore(list(df = df))
+  expect_true(inherits(state$df, "reactiveLeaf"))
+  expect_false(inherits(state$df, "reactiveBranch"))
+  expect_equal(shiny::isolate(state$df()), df)
+})
+
+test_that("data.frame leaf accepts data.frame writes without shape validation", {
+  state <- reactiveStore(list(df = data.frame(x = 1:3)))
+  new_df <- data.frame(x = 4:6, y = 7:9)
+  state$df(new_df)
+  expect_equal(shiny::isolate(state$df()), new_df)
+})
+
+test_that("data.frame is not navigated into via $", {
+  state <- reactiveStore(list(df = data.frame(x = 1:3)))
+  expect_null(state$df$x)
+})
+
+test_that("tibble (if installed) is stored opaquely as a leaf", {
+  skip_if_not_installed("tibble")
+  tb <- tibble::tibble(x = 1:3, y = c("a", "b", "c"))
+  state <- reactiveStore(list(tb = tb))
+  expect_equal(shiny::isolate(state$tb()), tb)
+  expect_true(inherits(shiny::isolate(state$tb()), "tbl_df"))
+})
+
+test_that("classed list leaf accepts arbitrary replacement (types not enforced)", {
+  state <- reactiveStore(list(df = data.frame(x = 1:3)))
+  state$df("not a df anymore")
+  expect_equal(shiny::isolate(state$df()), "not a df anymore")
+})
+
+test_that("nested classed list leaf survives a branch patch", {
+  state <- reactiveStore(list(view = list(df = data.frame(x = 1:3), n = 1L)))
+  new_df <- data.frame(x = 10:12)
+  state$view(list(df = new_df))
+  expect_equal(shiny::isolate(state$view$df()), new_df)
+  expect_equal(shiny::isolate(state$view$n()), 1L)
+})
+
 # --- Identity stability -------------------------------------------------------
 
 test_that("repeated $ access returns the same leaf (identity stable)", {

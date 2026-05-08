@@ -1,15 +1,19 @@
 #' Hierarchical reactive state container
 #'
-#' Builds a callable hierarchical state tree from a nested list. Named lists
-#' become navigable branches; everything else (scalars, vectors, `NULL`,
-#' unnamed lists) becomes a leaf backed by a single [shiny::reactiveVal()].
+#' Builds a callable hierarchical state tree from a nested list. Bare named
+#' lists become navigable branches; everything else (scalars, vectors,
+#' `NULL`, unnamed bare lists, and classed lists such as `data.frame` /
+#' tibble) becomes a leaf backed by a single [shiny::reactiveVal()].
 #'
 #' Every node is callable: `node()` reads, `node(value)` writes. Leaves
 #' replace; branches patch (only the keys present in the patch are updated).
 #' Unknown keys on a branch write are an error. Types are not enforced.
 #'
-#' @param initial A named list describing the initial shape. Unnamed lists
-#'   at any position are stored atomically as a single `reactiveVal`.
+#' @param initial A bare named list describing the initial shape. Unnamed
+#'   bare lists at any position are stored atomically as a single
+#'   `reactiveVal`. Classed lists (e.g., `data.frame`, tibble) are stored
+#'   opaquely as scalar leaves — their class is preserved across reads and
+#'   writes, and write shape is not validated.
 #' @return A callable root branch with class `c("reactiveStore",
 #'   "reactiveBranch", "function")`.
 #' @export
@@ -17,10 +21,18 @@ reactiveStore <- function(initial) {
   build_node(initial, "", root = TRUE)
 }
 
-# TRUE = branch, FALSE = leaf (scalar or atomic-list); errors on
-# partially-named lists, which are neither.
+# A "bare list" is an unclassed list — `list()` but not `data.frame`,
+# tibble, or any other S3/S4 classed list-like object. Only bare lists
+# are eligible to become branches or atomic-list leaves; classed lists
+# fall through to opaque scalar leaves.
+is_bare_list <- function(value) {
+  is.list(value) && !is.object(value)
+}
+
+# TRUE = branch, FALSE = leaf (scalar, classed list, or atomic bare list);
+# errors on partially-named bare lists, which are neither.
 is_branch <- function(value, path) {
-  if (!is.list(value)) return(FALSE)
+  if (!is_bare_list(value)) return(FALSE)
   if (length(value) == 0L) return(TRUE)
   nm <- names(value)
   if (is.null(nm)) return(FALSE)
@@ -48,7 +60,7 @@ build_node <- function(value, path, root = FALSE) {
     make_branch(children, keys, path, root = root)
   } else {
     if (root) stop("`initial` must be a named list", call. = FALSE)
-    make_leaf(value, atomic_list = is.list(value), path = path)
+    make_leaf(value, atomic_list = is_bare_list(value), path = path)
   }
 }
 

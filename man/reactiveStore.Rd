@@ -7,16 +7,20 @@
 reactiveStore(initial)
 }
 \arguments{
-\item{initial}{A named list describing the initial shape. Unnamed lists
-at any position are stored atomically as a single \code{reactiveVal}.}
+\item{initial}{A bare named list describing the initial shape. Unnamed
+bare lists at any position are stored atomically as a single
+\code{reactiveVal}. Classed lists (e.g., \code{data.frame}, tibble) are stored
+opaquely as scalar leaves — their class is preserved across reads and
+writes, and write shape is not validated.}
 }
 \value{
 A callable root branch with class \code{c("reactiveStore", "reactiveBranch", "function")}.
 }
 \description{
-Builds a callable hierarchical state tree from a nested list. Named lists
-become navigable branches; everything else (scalars, vectors, \code{NULL},
-unnamed lists) becomes a leaf backed by a single \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}}.
+Builds a callable hierarchical state tree from a nested list. Bare named
+lists become navigable branches; everything else (scalars, vectors,
+\code{NULL}, unnamed bare lists, and classed lists such as \code{data.frame} /
+tibble) becomes a leaf backed by a single \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}}.
 }
 \details{
 Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
