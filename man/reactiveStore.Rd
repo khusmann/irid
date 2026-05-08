@@ -7,11 +7,12 @@
 reactiveStore(initial)
 }
 \arguments{
-\item{initial}{A bare named list describing the initial shape. Unnamed
-bare lists at any position are stored atomically as a single
-\code{reactiveVal}. Classed lists (e.g., \code{data.frame}, tibble) are stored
-opaquely as scalar leaves — their class is preserved across reads and
-writes, and write shape is not validated.}
+\item{initial}{A bare named list describing the initial shape. Bare lists
+without names (including the empty \code{list()}) at any position are stored
+atomically as a single \code{reactiveVal}. Classed lists (e.g., \code{data.frame},
+tibble) are stored opaquely as scalar leaves — their class is preserved
+across reads and writes, and write shape is not validated. To declare
+an explicitly empty \emph{branch}, use \code{setNames(list(), character(0))}.}
 }
 \value{
 A callable root branch with class \code{c("reactiveStore", "reactiveBranch", "function")}.

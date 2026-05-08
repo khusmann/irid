@@ -18,8 +18,22 @@ test_that("unnamed list at leaf position is stored atomically", {
   expect_equal(shiny::isolate(state$todos()), todos)
 })
 
-test_that("empty named list constructs an empty branch", {
-  state <- reactiveStore(list(group = list()))
+test_that("empty list() at a leaf position is an atomic-list leaf", {
+  state <- reactiveStore(list(todos = list()))
+  expect_true(inherits(state$todos, "reactiveLeaf"))
+  expect_false(inherits(state$todos, "reactiveBranch"))
+  expect_equal(shiny::isolate(state$todos()), list())
+})
+
+test_that("empty list() leaf accepts unnamed-list writes", {
+  state <- reactiveStore(list(todos = list()))
+  state$todos(list(list(id = 1)))
+  expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
+})
+
+test_that("setNames(list(), character(0)) is the explicit empty branch", {
+  state <- reactiveStore(list(group = setNames(list(), character(0))))
+  expect_true(inherits(state$group, "reactiveBranch"))
   expect_equal(shiny::isolate(state$group()), list())
 })
 
@@ -408,8 +422,8 @@ test_that("names() on a nested branch returns its keys", {
   expect_equal(length(state$user), 2L)
 })
 
-test_that("length() on empty branch is 0", {
-  state <- reactiveStore(list(g = list()))
+test_that("length() on explicit empty branch is 0", {
+  state <- reactiveStore(list(g = setNames(list(), character(0))))
   expect_equal(length(state$g), 0L)
   expect_equal(names(state$g), character(0))
 })

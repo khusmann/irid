@@ -9,11 +9,12 @@
 #' replace; branches patch (only the keys present in the patch are updated).
 #' Unknown keys on a branch write are an error. Types are not enforced.
 #'
-#' @param initial A bare named list describing the initial shape. Unnamed
-#'   bare lists at any position are stored atomically as a single
-#'   `reactiveVal`. Classed lists (e.g., `data.frame`, tibble) are stored
-#'   opaquely as scalar leaves — their class is preserved across reads and
-#'   writes, and write shape is not validated.
+#' @param initial A bare named list describing the initial shape. Bare lists
+#'   without names (including the empty `list()`) at any position are stored
+#'   atomically as a single `reactiveVal`. Classed lists (e.g., `data.frame`,
+#'   tibble) are stored opaquely as scalar leaves — their class is preserved
+#'   across reads and writes, and write shape is not validated. To declare
+#'   an explicitly empty *branch*, use `setNames(list(), character(0))`.
 #' @return A callable root branch with class `c("reactiveStore",
 #'   "reactiveBranch", "function")`.
 #' @export
@@ -30,12 +31,15 @@ is_bare_list <- function(value) {
 }
 
 # TRUE = branch, FALSE = leaf (scalar, classed list, or atomic bare list);
-# errors on partially-named bare lists, which are neither.
+# errors on partially-named bare lists, which are neither. An empty `list()`
+# has no names, so it registers as an empty atomic-list leaf — symmetric
+# with non-empty unnamed lists. To get an empty branch explicitly, use
+# `setNames(list(), character(0))`.
 is_branch <- function(value, path) {
   if (!is_bare_list(value)) return(FALSE)
-  if (length(value) == 0L) return(TRUE)
   nm <- names(value)
   if (is.null(nm)) return(FALSE)
+  if (length(value) == 0L) return(TRUE)
   if (all(nzchar(nm))) return(TRUE)
   empty_idx <- which(!nzchar(nm))
   stop(sprintf(
