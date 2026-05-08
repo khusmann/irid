@@ -246,7 +246,7 @@ str.reactiveBranch <- function(object, indent.str = "", ...) {
     cat(indent.str, " $ ", k, sep = "")
     if (inherits(child, "reactiveBranch")) {
       cat(": ")
-      str(child, indent.str = paste0(indent.str, " .."), ...)
+      utils::str(child, indent.str = paste0(indent.str, " .."), ...)
     } else {
       val <- shiny::isolate(child())
       cat(": ")
