@@ -325,6 +325,65 @@ test_that("deep root patch carries the path through to the offending node", {
   )
 })
 
+# --- Atomic patches (validate-then-commit) -----------------------------------
+
+test_that("branch patch rejects atomic-list violation without committing siblings", {
+  state <- reactiveStore(list(
+    user = list(name = "A"),
+    todos = list(list(id = 1))
+  ))
+  expect_error(
+    state(list(
+      user = list(name = "Bob"),
+      todos = list(name = "X")
+    )),
+    "Atomic-list leaf 'todos'"
+  )
+  expect_equal(shiny::isolate(state$user$name()), "A")
+  expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
+})
+
+test_that("nested branch patch validates whole subtree before committing", {
+  state <- reactiveStore(list(
+    a = list(x = 1, y = 2),
+    b = list(z = "z")
+  ))
+  expect_error(
+    state(list(
+      a = list(x = 10, y = 20),
+      b = list(unknown = "x")
+    )),
+    "'b'.*unknown"
+  )
+  expect_equal(shiny::isolate(state$a$x()), 1)
+  expect_equal(shiny::isolate(state$a$y()), 2)
+  expect_equal(shiny::isolate(state$b$z()), "z")
+})
+
+test_that("failed atomic patch produces no reactive flush", {
+  state <- reactiveStore(list(
+    user = list(name = "A"),
+    todos = list(list(id = 1))
+  ))
+  fired <- 0L
+  obs <- shiny::observe({
+    state()
+    fired <<- fired + 1L
+  })
+  flushReact()
+  expect_equal(fired, 1L)
+  try(
+    state(list(
+      user = list(name = "Bob"),
+      todos = list(name = "X")
+    )),
+    silent = TRUE
+  )
+  flushReact()
+  expect_equal(fired, 1L)
+  obs$destroy()
+})
+
 # --- Reactive granularity -----------------------------------------------------
 
 test_that("leaf observer fires only when its leaf changes", {
@@ -473,6 +532,11 @@ test_that("[[ with out-of-range integer errors", {
 test_that("[[ with unknown string key errors", {
   state <- reactiveStore(list(user = list(name = "A")))
   expect_error(state[["nope"]], "Unknown key 'nope'")
+})
+
+test_that("[[ with NA_character_ errors", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  expect_error(state[[NA_character_]], "single key")
 })
 
 test_that("[[ on a leaf returns the callable, not the value", {

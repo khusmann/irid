@@ -80,11 +80,7 @@ make_leaf <- function(initial_value, atomic_list = FALSE, path = "") {
       rv(val)
     }
   }
-  class(fn) <- if (atomic_list) {
-    c("reactiveAtomicLeaf", "reactiveLeaf", "function")
-  } else {
-    c("reactiveLeaf", "function")
-  }
+  class(fn) <- c("reactiveLeaf", "function")
   fn
 }
 
@@ -122,28 +118,9 @@ make_branch <- function(children, keys, path, root = FALSE) {
       }
     } else {
       patch <- ..1
-      if (!is.list(patch)) {
-        stop(sprintf(
-          "Branch write to %s expected a named list, got %s",
-          label, paste(class(patch), collapse = "/")
-        ), call. = FALSE)
-      }
+      validate_write(fn, patch)
       if (length(patch) > 0L) {
-        patch_keys <- names(patch)
-        if (is.null(patch_keys) || !all(nzchar(patch_keys))) {
-          stop(sprintf(
-            "Branch write to %s expected a named list (got unnamed elements)",
-            label
-          ), call. = FALSE)
-        }
-        unknown <- setdiff(patch_keys, keys)
-        if (length(unknown) > 0L) {
-          stop(sprintf(
-            "Unknown keys in store node %s: %s",
-            label, paste(unknown, collapse = ", ")
-          ), call. = FALSE)
-        }
-        for (k in patch_keys) children[[k]](patch[[k]])
+        for (k in names(patch)) children[[k]](patch[[k]])
       }
       invisible(NULL)
     }
@@ -154,6 +131,48 @@ make_branch <- function(children, keys, path, root = FALSE) {
     c("reactiveBranch", "function")
   }
   fn
+}
+
+# Recursively validates a write/patch against the target subtree without
+# committing — throws on the first shape violation, otherwise returns
+# invisibly. Branches enforce: list-shaped, fully named, no unknown keys.
+# Leaves enforce: atomic-list shape (when applicable). Used by branch write
+# paths so that a downstream rejection (e.g., a named list arriving at an
+# atomic-list leaf five levels deep) leaves siblings unmodified.
+validate_write <- function(node, value) {
+  env <- environment(node)
+  if (inherits(node, "reactiveLeaf")) {
+    if (isTRUE(env$atomic_list)) {
+      validate_atomic_list_write(value, env$label)
+    }
+    return(invisible())
+  }
+  label <- env$label
+  if (!is.list(value)) {
+    stop(sprintf(
+      "Branch write to %s expected a named list, got %s",
+      label, paste(class(value), collapse = "/")
+    ), call. = FALSE)
+  }
+  if (length(value) == 0L) return(invisible())
+  patch_keys <- names(value)
+  if (is.null(patch_keys) || !all(nzchar(patch_keys))) {
+    stop(sprintf(
+      "Branch write to %s expected a named list (got unnamed elements)",
+      label
+    ), call. = FALSE)
+  }
+  unknown <- setdiff(patch_keys, env$keys)
+  if (length(unknown) > 0L) {
+    stop(sprintf(
+      "Unknown keys in store node %s: %s",
+      label, paste(unknown, collapse = ", ")
+    ), call. = FALSE)
+  }
+  for (k in patch_keys) {
+    validate_write(env$children[[k]], value[[k]])
+  }
+  invisible()
 }
 
 #' @export
@@ -184,8 +203,10 @@ length.reactiveBranch <- function(x) {
   keys <- env$keys
   if (is.numeric(i)) {
     if (length(i) != 1L) {
-      stop("`[[` on a reactiveStore branch requires a single index",
-           call. = FALSE)
+      stop(
+        "`[[` on a reactiveStore branch requires a single index",
+        call. = FALSE
+      )
     }
     idx <- as.integer(i)
     if (is.na(idx) || idx < 1L || idx > length(keys)) {
@@ -197,16 +218,20 @@ length.reactiveBranch <- function(x) {
     env$children[[keys[idx]]]
   } else if (is.character(i)) {
     if (length(i) != 1L || is.na(i)) {
-      stop("`[[` on a reactiveStore branch requires a single key",
-           call. = FALSE)
+      stop(
+        "`[[` on a reactiveStore branch requires a single key",
+        call. = FALSE
+      )
     }
     if (!(i %in% keys)) {
       stop(sprintf("Unknown key '%s' in store node", i), call. = FALSE)
     }
     env$children[[i]]
   } else {
-    stop("`[[` on a reactiveStore branch requires a string or integer index",
-         call. = FALSE)
+    stop(
+      "`[[` on a reactiveStore branch requires a string or integer index",
+      call. = FALSE
+    )
   }
 }
 
