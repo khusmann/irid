@@ -36,6 +36,24 @@ test_that("non-list `initial` is rejected", {
   expect_error(reactiveStore("hi"), "named list")
 })
 
+test_that("unnamed list at root is rejected", {
+  expect_error(reactiveStore(list("a", "b")), "named list")
+})
+
+test_that("partially-named list at root errors with positions", {
+  expect_error(
+    reactiveStore(list(a = 1, "b")),
+    "store root.*partially named.*positions 2"
+  )
+})
+
+test_that("partially-named list inside a branch errors with path", {
+  expect_error(
+    reactiveStore(list(group = list(a = 1, "b"))),
+    "'group'.*partially named.*positions 2"
+  )
+})
+
 # --- Leaf read / write --------------------------------------------------------
 
 test_that("leaf write replaces the value", {
@@ -141,6 +159,63 @@ test_that("atomic list write replaces the entire list", {
 test_that("$ traversal into a leaf returns NULL", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_null(state$todos$id)
+})
+
+test_that("atomic-list leaf accepts an empty list write", {
+  state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
+  state$todos(list())
+  expect_equal(shiny::isolate(state$todos()), list())
+})
+
+test_that("atomic-list leaf rejects named-list writes", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(
+    state$todos(list(a = 1, b = 2)),
+    "named list"
+  )
+})
+
+test_that("atomic-list leaf rejects partially-named-list writes", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(
+    state$todos(list(1, b = 2)),
+    "partially-named"
+  )
+})
+
+test_that("atomic-list leaf rejects non-list writes", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(state$todos("hi"), "requires an unnamed list")
+  expect_error(state$todos(NULL), "requires an unnamed list")
+  expect_error(state$todos(42), "requires an unnamed list")
+})
+
+test_that("branch patch routing into an atomic-list leaf still validates", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(
+    state(list(todos = list(name = "X"))),
+    "Atomic-list leaf 'todos'.*named list"
+  )
+})
+
+test_that("observer reading an atomic-list leaf fires on write", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  fired <- 0L
+  obs <- shiny::observe({
+    state$todos()
+    fired <<- fired + 1L
+  })
+  flushReact()
+  expect_equal(fired, 1L)
+
+  state$todos(list(list(id = 2)))
+  flushReact()
+  expect_equal(fired, 2L)
+
+  state$todos(list())
+  flushReact()
+  expect_equal(fired, 3L)
+  obs$destroy()
 })
 
 test_that("deep root patch replaces atomic list wholesale", {

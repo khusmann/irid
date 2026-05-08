@@ -14,21 +14,28 @@
 #'   "reactiveBranch", "function")`.
 #' @export
 reactiveStore <- function(initial) {
-  if (!is_branch_input(initial)) {
-    stop("`initial` must be a named list", call. = FALSE)
-  }
   build_node(initial, "", root = TRUE)
 }
 
-is_branch_input <- function(x) {
-  if (!is.list(x)) return(FALSE)
-  if (length(x) == 0L) return(TRUE)
-  nm <- names(x)
-  !is.null(nm) && all(nzchar(nm))
+# TRUE = branch, FALSE = leaf (scalar or atomic-list); errors on
+# partially-named lists, which are neither.
+is_branch <- function(value, path) {
+  if (!is.list(value)) return(FALSE)
+  if (length(value) == 0L) return(TRUE)
+  nm <- names(value)
+  if (is.null(nm)) return(FALSE)
+  if (all(nzchar(nm))) return(TRUE)
+  empty_idx <- which(!nzchar(nm))
+  stop(sprintf(
+    "List at %s is partially named (positions %s have no names). %s",
+    if (nzchar(path)) sprintf("'%s'", path) else "store root",
+    paste(empty_idx, collapse = ", "),
+    "Use a fully named list (branch) or a fully unnamed list (atomic leaf)."
+  ), call. = FALSE)
 }
 
 build_node <- function(value, path, root = FALSE) {
-  if (is_branch_input(value)) {
+  if (is_branch(value, path)) {
     keys <- names(value)
     if (is.null(keys)) keys <- character(0)
     children <- stats::setNames(
@@ -40,17 +47,52 @@ build_node <- function(value, path, root = FALSE) {
     )
     make_branch(children, keys, path, root = root)
   } else {
-    make_leaf(value)
+    if (root) stop("`initial` must be a named list", call. = FALSE)
+    make_leaf(value, atomic_list = is.list(value), path = path)
   }
 }
 
-make_leaf <- function(initial_value) {
+make_leaf <- function(initial_value, atomic_list = FALSE, path = "") {
+  label <- if (nzchar(path)) sprintf("'%s'", path) else "leaf"
   rv <- shiny::reactiveVal(initial_value)
   fn <- function(...) {
-    if (missing(..1)) rv() else rv(..1)
+    if (missing(..1)) {
+      rv()
+    } else {
+      val <- ..1
+      if (atomic_list) validate_atomic_list_write(val, label)
+      rv(val)
+    }
   }
-  class(fn) <- c("reactiveLeaf", "function")
+  class(fn) <- if (atomic_list) {
+    c("reactiveAtomicLeaf", "reactiveLeaf", "function")
+  } else {
+    c("reactiveLeaf", "function")
+  }
   fn
+}
+
+validate_atomic_list_write <- function(val, label) {
+  if (!is.list(val)) {
+    stop(sprintf(
+      "Atomic-list leaf %s requires an unnamed list, got %s.",
+      label, paste(class(val), collapse = "/")
+    ), call. = FALSE)
+  }
+  if (length(val) == 0L) return(invisible())
+  nm <- names(val)
+  if (is.null(nm)) return(invisible())
+  if (all(nzchar(nm))) {
+    stop(sprintf(
+      "Atomic-list leaf %s does not accept a named list. Use an unnamed list.",
+      label
+    ), call. = FALSE)
+  }
+  empty_idx <- which(!nzchar(nm))
+  stop(sprintf(
+    "Atomic-list leaf %s does not accept a partially-named list (positions %s unnamed). Use a fully unnamed list.",
+    label, paste(empty_idx, collapse = ", ")
+  ), call. = FALSE)
 }
 
 make_branch <- function(children, keys, path, root = FALSE) {
