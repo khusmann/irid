@@ -107,3 +107,155 @@ make_branch <- function(children, keys, path, root = FALSE) {
 `$.reactiveLeaf` <- function(x, name) {
   NULL
 }
+
+# ---- Branch introspection ---------------------------------------------------
+
+#' @export
+names.reactiveBranch <- function(x) {
+  environment(x)$keys
+}
+
+#' @export
+length.reactiveBranch <- function(x) {
+  length(environment(x)$keys)
+}
+
+#' @export
+`[[.reactiveBranch` <- function(x, i) {
+  env <- environment(x)
+  keys <- env$keys
+  if (is.numeric(i)) {
+    if (length(i) != 1L) {
+      stop("`[[` on a reactiveStore branch requires a single index",
+           call. = FALSE)
+    }
+    idx <- as.integer(i)
+    if (is.na(idx) || idx < 1L || idx > length(keys)) {
+      stop(sprintf(
+        "Index %s out of range for store node with %d children",
+        format(i), length(keys)
+      ), call. = FALSE)
+    }
+    env$children[[keys[idx]]]
+  } else if (is.character(i)) {
+    if (length(i) != 1L || is.na(i)) {
+      stop("`[[` on a reactiveStore branch requires a single key",
+           call. = FALSE)
+    }
+    if (!(i %in% keys)) {
+      stop(sprintf("Unknown key '%s' in store node", i), call. = FALSE)
+    }
+    env$children[[i]]
+  } else {
+    stop("`[[` on a reactiveStore branch requires a string or integer index",
+         call. = FALSE)
+  }
+}
+
+#' @export
+`[[<-.reactiveBranch` <- function(x, i, value) {
+  stop(
+    "Cannot assign into a reactiveStore branch with `[[<-`. ",
+    "Use `branch$key(value)` or `branch(list(key = value))`.",
+    call. = FALSE
+  )
+}
+
+#' @export
+as.list.reactiveBranch <- function(x, ...) {
+  # Returns the named list of child callables. `branch()` returns resolved
+  # values; this returns the callables themselves so that `lapply` (which
+  # calls `as.list` on class-bearing objects) can iterate child nodes.
+  environment(x)$children
+}
+
+#' @export
+print.reactiveBranch <- function(x, ...) {
+  keys <- environment(x)$keys
+  if (length(keys) == 0L) {
+    cat("<reactiveStore branch> [0 children]\n")
+  } else {
+    cat(sprintf(
+      "<reactiveStore branch> [%d %s: %s]\n",
+      length(keys),
+      if (length(keys) == 1L) "child" else "children",
+      paste(keys, collapse = ", ")
+    ))
+  }
+  invisible(x)
+}
+
+# Soft vctrs integration: lets `purrr::imap()` etc. iterate a branch directly,
+# without taking vctrs as Imports. The method registers only when vctrs is
+# loaded. The proxy is the named list of child callables — same as
+# `as.list(branch)` — so consumers see the structural list of nodes.
+#' @exportS3Method vctrs::vec_proxy
+vec_proxy.reactiveBranch <- function(x, ...) {
+  environment(x)$children
+}
+
+#' @export
+str.reactiveBranch <- function(object, indent.str = "", ...) {
+  keys <- environment(object)$keys
+  children <- environment(object)$children
+  cat("<reactiveStore branch> with", length(keys), "children\n")
+  for (k in keys) {
+    child <- children[[k]]
+    cat(indent.str, " $ ", k, sep = "")
+    if (inherits(child, "reactiveBranch")) {
+      cat(": ")
+      str(child, indent.str = paste0(indent.str, " .."), ...)
+    } else {
+      val <- shiny::isolate(child())
+      cat(": ")
+      utils::str(val, ...)
+    }
+  }
+  invisible()
+}
+
+# ---- Leaf introspection (errors that point at the right call) --------------
+
+#' @export
+print.reactiveLeaf <- function(x, ...) {
+  val <- shiny::isolate(x())
+  if (is.null(val)) {
+    cat("<reactiveStore leaf> = NULL\n")
+  } else if (is.atomic(val) && length(val) == 1L) {
+    cat(sprintf("<reactiveStore leaf> = %s\n", format(val)))
+  } else {
+    cat(sprintf(
+      "<reactiveStore leaf> [%s, length %d]\n",
+      paste(class(val), collapse = "/"), length(val)
+    ))
+  }
+  invisible(x)
+}
+
+#' @export
+length.reactiveLeaf <- function(x) {
+  stop(
+    "`length()` is not defined for a reactiveStore leaf. ",
+    "Use `length(leaf())` to read the underlying value's length.",
+    call. = FALSE
+  )
+}
+
+#' @export
+names.reactiveLeaf <- function(x) {
+  stop(
+    "`names()` is not defined for a reactiveStore leaf. ",
+    "Use `names(leaf())` to read the underlying value's names.",
+    call. = FALSE
+  )
+}
+
+#' @export
+`[[.reactiveLeaf` <- function(x, i) {
+  stop(
+    "`[[` is not defined for a reactiveStore leaf. ",
+    "Use `leaf()[[i]]` for a snapshot read, or `Each()` to iterate ",
+    "an atomic-list leaf reactively.",
+    call. = FALSE
+  )
+}

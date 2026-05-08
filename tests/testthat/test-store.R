@@ -270,3 +270,197 @@ test_that("branch write of multiple leaves results in a single flush", {
   expect_equal(fired, 2L)        # one flush, not two
   obs$destroy()
 })
+
+# --- names / length on a branch ----------------------------------------------
+
+test_that("names() returns top-level keys in construction order", {
+  state <- reactiveStore(list(b = 1, a = 2, c = 3))
+  expect_equal(names(state), c("b", "a", "c"))
+})
+
+test_that("length() matches names()", {
+  state <- reactiveStore(list(b = 1, a = 2, c = 3))
+  expect_equal(length(state), 3L)
+})
+
+test_that("names() on a nested branch returns its keys", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  expect_equal(names(state$user), c("name", "email"))
+  expect_equal(length(state$user), 2L)
+})
+
+test_that("length() on empty branch is 0", {
+  state <- reactiveStore(list(g = list()))
+  expect_equal(length(state$g), 0L)
+  expect_equal(names(state$g), character(0))
+})
+
+test_that("reading length() does not subscribe to leaf changes", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  fired <- 0L
+  obs <- shiny::observe({
+    length(state)
+    fired <<- fired + 1L
+  })
+  flushReact()
+  expect_equal(fired, 1L)
+  state$user$name("Z")
+  flushReact()
+  expect_equal(fired, 1L)
+  obs$destroy()
+})
+
+# --- [[ on a branch ----------------------------------------------------------
+
+test_that("[[ string is identical to $", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  expect_identical(state[["user"]], state$user)
+  expect_identical(state$user[["name"]], state$user$name)
+})
+
+test_that("[[ integer matches the keyed access", {
+  state <- reactiveStore(list(user = list(name = "A"), n = 1))
+  expect_identical(state[[1L]], state$user)
+  expect_identical(state[[2L]], state$n)
+  expect_identical(state[[1L]], state[[names(state)[1]]])
+})
+
+test_that("[[ accepts numeric and coerces to integer", {
+  state <- reactiveStore(list(user = list(name = "A"), n = 1))
+  expect_identical(state[[1.0]], state$user)
+})
+
+test_that("[[ with out-of-range integer errors", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  expect_error(state[[99L]], "out of range")
+  expect_error(state[[0L]], "out of range")
+  expect_error(state[[NA_integer_]], "out of range")
+})
+
+test_that("[[ with unknown string key errors", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  expect_error(state[["nope"]], "Unknown key 'nope'")
+})
+
+test_that("[[ on a leaf returns the callable, not the value", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  leaf <- state$user[["name"]]
+  expect_true(is.function(leaf))
+  expect_equal(shiny::isolate(leaf()), "A")
+})
+
+# --- [[<- ; as.list returns callables ----------------------------------------
+
+test_that("[[<- on a branch errors with a hint", {
+  state <- reactiveStore(list(user = list(name = "A")))
+  expect_error(
+    state$user[["name"]] <- "X",
+    "branch\\$key\\(value\\)"
+  )
+})
+
+test_that("as.list returns the named list of child callables", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  out <- as.list(state$user)
+  expect_equal(names(out), c("name", "email"))
+  expect_identical(out$name, state$user$name)
+  expect_identical(out$email, state$user$email)
+})
+
+# --- Iteration via lapply / imap --------------------------------------------
+
+test_that("lapply on a branch yields a named list of callables", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  out <- lapply(state$user, identity)
+  expect_equal(names(out), c("name", "email"))
+  expect_identical(out$name, state$user$name)
+  expect_identical(out$email, state$user$email)
+})
+
+test_that("lapply that resolves callables matches branch read", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  values <- lapply(state$user, function(f) shiny::isolate(f()))
+  expect_equal(values, shiny::isolate(state$user()))
+})
+
+test_that("purrr::imap iterates a branch directly", {
+  skip_if_not_installed("purrr")
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  out <- purrr::imap(state$user, function(field, key) {
+    list(key = key, is_fn = is.function(field), value = shiny::isolate(field()))
+  })
+  expect_equal(out$name$key, "name")
+  expect_true(out$name$is_fn)
+  expect_equal(out$name$value, "A")
+  expect_equal(out$email$value, "B")
+})
+
+# --- Reactivity inside iteration --------------------------------------------
+
+test_that("observer reading one field via iterated callable subscribes only to that leaf", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  fields <- lapply(state$user, identity)
+  fired <- 0L
+  obs <- shiny::observe({
+    fields$name()
+    fired <<- fired + 1L
+  })
+  flushReact()
+  expect_equal(fired, 1L)
+
+  state$user$email("X")    # sibling
+  flushReact()
+  expect_equal(fired, 1L)
+
+  state$user$name("Y")     # tracked leaf
+  flushReact()
+  expect_equal(fired, 2L)
+  obs$destroy()
+})
+
+# --- print / str smoke tests -------------------------------------------------
+
+test_that("print(branch) lists every top-level key", {
+  state <- reactiveStore(list(user = list(name = "A"), todos = list(list(id = 1))))
+  out <- capture.output(print(state))
+  expect_true(any(grepl("user", out)))
+  expect_true(any(grepl("todos", out)))
+})
+
+test_that("print(leaf) shows the current value for scalars", {
+  state <- reactiveStore(list(x = 42))
+  out <- capture.output(print(state$x))
+  expect_true(any(grepl("42", out)))
+})
+
+test_that("print(leaf) abbreviates atomic-list leaves", {
+  state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
+  out <- capture.output(print(state$todos))
+  expect_true(any(grepl("list", out)))
+})
+
+test_that("str(branch) is non-empty and shows nested keys", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  out <- capture.output(str(state))
+  expect_gt(length(out), 1L)
+  expect_true(any(grepl("user", out)))
+  expect_true(any(grepl("name", out)))
+})
+
+test_that("str(branch) does not error on atomic-list leaves", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_no_error(capture.output(str(state)))
+})
+
+# --- Atomic-list leaves: error stubs ----------------------------------------
+
+test_that("[[ on a leaf errors and points at Each / leaf()", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(state$todos[[1L]], "Each|leaf\\(\\)")
+})
+
+test_that("length() and names() on a leaf error with hints", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
+  expect_error(length(state$todos), "length\\(leaf\\(\\)\\)")
+  expect_error(names(state$todos), "names\\(leaf\\(\\)\\)")
+})
