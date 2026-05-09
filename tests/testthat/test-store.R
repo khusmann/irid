@@ -599,6 +599,18 @@ test_that("print(leaf) abbreviates list-valued leaves", {
   expect_true(any(grepl("list", out)))
 })
 
+test_that("print(leaf) shows rows x cols for data.frame", {
+  state <- reactiveStore(list(df = data.frame(x = 1:3, y = 4:6)))
+  out <- capture.output(print(state$df))
+  expect_true(any(grepl("3 x 2", out)))
+})
+
+test_that("print(leaf) shows dims for matrices and arrays", {
+  state <- reactiveStore(list(m = matrix(1:6, nrow = 2, ncol = 3)))
+  out <- capture.output(print(state$m))
+  expect_true(any(grepl("2 x 3", out)))
+})
+
 test_that("str(branch) is non-empty and shows nested keys", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
   out <- capture.output(str(state))

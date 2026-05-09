@@ -277,6 +277,12 @@ print.reactiveLeaf <- function(x, ...) {
     cat("<reactiveStore leaf> = NULL\n")
   } else if (is.atomic(val) && length(val) == 1L) {
     cat(sprintf("<reactiveStore leaf> = %s\n", format(val)))
+  } else if (!is.null(dim(val))) {
+    cat(sprintf(
+      "<reactiveStore leaf> [%s, %s]\n",
+      paste(class(val), collapse = "/"),
+      paste(dim(val), collapse = " x ")
+    ))
   } else {
     cat(sprintf(
       "<reactiveStore leaf> [%s, length %d]\n",
