@@ -8,23 +8,25 @@ reactiveStore(initial)
 }
 \arguments{
 \item{initial}{A bare named list describing the initial shape. Bare lists
-without names (including the empty \code{list()}) at any position are stored
-atomically as a single \code{reactiveVal}. Classed lists (e.g., \code{data.frame},
-tibble) are stored opaquely as scalar leaves — their class is preserved
-across reads and writes, and write shape is not validated. To declare
-an explicitly empty \emph{branch}, use \code{setNames(list(), character(0))}.}
+that are empty or unnamed at any position become atomic-list leaves —
+a single \code{reactiveVal} holding the list verbatim. Classed lists (e.g.,
+\code{data.frame}, tibble) are stored opaquely as scalar leaves: their class
+is preserved across reads and writes, and write shape is not validated.}
 }
 \value{
-A callable root branch with class \code{c("reactiveStore", "reactiveBranch", "function")}.
+A callable \code{reactiveStore} node with class
+\code{c("reactiveStore", "function")}. Sub-trees share the same class;
+atomic positions are \code{c("reactiveLeaf", "function")}.
 }
 \description{
 Builds a callable hierarchical state tree from a nested list. Bare named
-lists become navigable branches; everything else (scalars, vectors,
-\code{NULL}, unnamed bare lists, and classed lists such as \code{data.frame} /
-tibble) becomes a leaf backed by a single \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}}.
+lists become navigable \code{reactiveStore} nodes (every sub-tree is itself a
+\code{reactiveStore}); everything else (scalars, vectors, \code{NULL}, unnamed bare
+lists, and classed lists such as \code{data.frame} / tibble) becomes a
+\code{reactiveLeaf} backed by a single \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}}.
 }
 \details{
 Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
-replace; branches patch (only the keys present in the patch are updated).
-Unknown keys on a branch write are an error. Types are not enforced.
+replace; store nodes patch (only the keys present in the patch are
+updated). Unknown keys are an error. Types are not enforced.
 }

@@ -21,7 +21,7 @@ test_that("unnamed list at leaf position is stored atomically", {
 test_that("empty list() at a leaf position is an atomic-list leaf", {
   state <- reactiveStore(list(todos = list()))
   expect_true(inherits(state$todos, "reactiveLeaf"))
-  expect_false(inherits(state$todos, "reactiveBranch"))
+  expect_false(inherits(state$todos, "reactiveStore"))
   expect_equal(shiny::isolate(state$todos()), list())
 })
 
@@ -31,10 +31,10 @@ test_that("empty list() leaf accepts unnamed-list writes", {
   expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
 })
 
-test_that("setNames(list(), character(0)) is the explicit empty branch", {
+test_that("setNames(list(), character(0)) is also an atomic-list leaf", {
   state <- reactiveStore(list(group = setNames(list(), character(0))))
-  expect_true(inherits(state$group, "reactiveBranch"))
-  expect_equal(shiny::isolate(state$group()), list())
+  expect_true(inherits(state$group, "reactiveLeaf"))
+  expect_false(inherits(state$group, "reactiveStore"))
 })
 
 test_that("mixed-type children at one level work", {
@@ -248,7 +248,7 @@ test_that("data.frame initial is stored as a leaf, class preserved", {
   df <- data.frame(x = 1:3, y = c("a", "b", "c"), stringsAsFactors = FALSE)
   state <- reactiveStore(list(df = df))
   expect_true(inherits(state$df, "reactiveLeaf"))
-  expect_false(inherits(state$df, "reactiveBranch"))
+  expect_false(inherits(state$df, "reactiveStore"))
   expect_equal(shiny::isolate(state$df()), df)
 })
 
@@ -481,12 +481,6 @@ test_that("names() on a nested branch returns its keys", {
   expect_equal(length(state$user), 2L)
 })
 
-test_that("length() on explicit empty branch is 0", {
-  state <- reactiveStore(list(g = setNames(list(), character(0))))
-  expect_equal(length(state$g), 0L)
-  expect_equal(names(state$g), character(0))
-})
-
 test_that("reading length() does not subscribe to leaf changes", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
   fired <- 0L
@@ -552,7 +546,7 @@ test_that("[[<- on a branch errors with a hint", {
   state <- reactiveStore(list(user = list(name = "A")))
   expect_error(
     state$user[["name"]] <- "X",
-    "branch\\$key\\(value\\)"
+    "store\\$key\\(value\\)"
   )
 })
 
