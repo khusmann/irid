@@ -38,6 +38,7 @@ reactiveProxy <- function(target, get = identity, set = \(v) target(v)) {
   if (!is.null(set) && !is.function(set)) {
     stop("`set` must be a function or NULL", call. = FALSE)
   }
+  force(target)
   force(get)
   force(set)
   fn <- function(...) {
