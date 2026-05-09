@@ -81,11 +81,11 @@ build_node <- function(value, path, root = FALSE) {
     make_store(children, keys, path)
   } else {
     if (root) stop("`initial` must be a named list", call. = FALSE)
-    make_leaf(strip_asis(value), path = path)
+    make_leaf(strip_asis(value))
   }
 }
 
-make_leaf <- function(initial_value, path = "") {
+make_leaf <- function(initial_value) {
   rv <- shiny::reactiveVal(initial_value)
   fn <- function(...) {
     if (missing(..1)) rv() else rv(..1)
@@ -185,6 +185,12 @@ length.reactiveStore <- function(x) {
         "`[[` on a reactiveStore requires a single index",
         call. = FALSE
       )
+    }
+    if (!is.na(i) && i != as.integer(i)) {
+      stop(sprintf(
+        "`[[` on a reactiveStore requires an integer index (got %s)",
+        format(i)
+      ), call. = FALSE)
     }
     idx <- as.integer(i)
     if (is.na(idx) || idx < 1L || idx > length(keys)) {

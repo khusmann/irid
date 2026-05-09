@@ -485,6 +485,11 @@ test_that("[[ accepts numeric and coerces to integer", {
   expect_identical(state[[1.0]], state$user)
 })
 
+test_that("[[ rejects non-integer numeric indices", {
+  state <- reactiveStore(list(user = list(name = "A"), n = 1))
+  expect_error(state[[1.5]], "integer index")
+})
+
 test_that("[[ with out-of-range integer errors", {
   state <- reactiveStore(list(user = list(name = "A")))
   expect_error(state[[99L]], "out of range")
