@@ -47,10 +47,11 @@ reference:
       - event_debounce
 
   - title: Reactive Basics
-    desc: Re-exported Shiny reactive primitives
+    desc: Reactive primitives — Shiny's `reactiveVal` plus irid's hierarchical store and callable proxy
     contents:
       - reactiveVal
       - reactiveStore
+      - reactiveProxy
 
 navbar:
   components:
