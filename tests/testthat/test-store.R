@@ -164,9 +164,9 @@ test_that("list leaf write replaces the entire value", {
   expect_equal(shiny::isolate(state$todos()), list(list(id = 9)))
 })
 
-test_that("$ traversal into a leaf returns NULL", {
+test_that("$ on a leaf errors with a hint pointing at leaf()$name", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_null(state$todos$id)
+  expect_error(state$todos$id, "leaf\\(\\)\\$id")
 })
 
 test_that("list leaf accepts any-shape write (no validation)", {
@@ -230,7 +230,7 @@ test_that("data.frame leaf accepts data.frame writes without shape validation", 
 
 test_that("data.frame is not navigated into via $", {
   state <- reactiveStore(list(df = data.frame(x = 1:3)))
-  expect_null(state$df$x)
+  expect_error(state$df$x, "leaf\\(\\)\\$x")
 })
 
 test_that("tibble (if installed) is stored opaquely as a leaf", {

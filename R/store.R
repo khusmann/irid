@@ -86,7 +86,6 @@ build_node <- function(value, path, root = FALSE) {
 }
 
 make_leaf <- function(initial_value, path = "") {
-  label <- if (nzchar(path)) sprintf("'%s'", path) else "leaf"
   rv <- shiny::reactiveVal(initial_value)
   fn <- function(...) {
     if (missing(..1)) rv() else rv(..1)
@@ -157,7 +156,11 @@ validate_write <- function(node, value) {
 
 #' @export
 `$.reactiveLeaf` <- function(x, name) {
-  NULL
+  stop(
+    "`$` is not defined for a reactiveStore leaf. ",
+    "Use `leaf()$", name, "` to read a field of the underlying value.",
+    call. = FALSE
+  )
 }
 
 # ---- Store-node introspection ----------------------------------------------
