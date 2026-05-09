@@ -87,11 +87,8 @@ build_node <- function(value, path, root = FALSE) {
 
 make_leaf <- function(initial_value) {
   rv <- shiny::reactiveVal(initial_value)
-  fn <- function(...) {
-    if (missing(..1)) rv() else rv(..1)
-  }
-  class(fn) <- c("reactiveLeaf", "function")
-  fn
+  class(rv) <- c("reactiveLeaf", class(rv))
+  rv
 }
 
 make_store <- function(children, keys, path) {
@@ -108,7 +105,7 @@ make_store <- function(children, keys, path) {
       invisible(NULL)
     }
   }
-  class(fn) <- c("reactiveStore", "function")
+  class(fn) <- c("reactiveStore", "reactive", "function")
   fn
 }
 
