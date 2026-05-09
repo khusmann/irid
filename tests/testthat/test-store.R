@@ -18,20 +18,14 @@ test_that("unnamed list at leaf position is stored atomically", {
   expect_equal(shiny::isolate(state$todos()), todos)
 })
 
-test_that("empty list() at a leaf position is an atomic-list leaf", {
+test_that("empty list() at a leaf position is a leaf", {
   state <- reactiveStore(list(todos = list()))
   expect_true(inherits(state$todos, "reactiveLeaf"))
   expect_false(inherits(state$todos, "reactiveStore"))
   expect_equal(shiny::isolate(state$todos()), list())
 })
 
-test_that("empty list() leaf accepts unnamed-list writes", {
-  state <- reactiveStore(list(todos = list()))
-  state$todos(list(list(id = 1)))
-  expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
-})
-
-test_that("setNames(list(), character(0)) is also an atomic-list leaf", {
+test_that("setNames(list(), character(0)) is also a leaf", {
   state <- reactiveStore(list(group = setNames(list(), character(0))))
   expect_true(inherits(state$group, "reactiveLeaf"))
   expect_false(inherits(state$group, "reactiveStore"))
@@ -162,9 +156,9 @@ test_that("branch patch with unnamed elements errors", {
   expect_error(state$user(list("x")), "named list")
 })
 
-# --- Atomic list semantics ----------------------------------------------------
+# --- List-leaf semantics ------------------------------------------------------
 
-test_that("atomic list write replaces the entire list", {
+test_that("list leaf write replaces the entire value", {
   state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
   state$todos(list(list(id = 9)))
   expect_equal(shiny::isolate(state$todos()), list(list(id = 9)))
@@ -175,44 +169,19 @@ test_that("$ traversal into a leaf returns NULL", {
   expect_null(state$todos$id)
 })
 
-test_that("atomic-list leaf accepts an empty list write", {
+test_that("list leaf accepts any-shape write (no validation)", {
   state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
   state$todos(list())
   expect_equal(shiny::isolate(state$todos()), list())
+  state$todos(list(a = 1, b = 2))
+  expect_equal(shiny::isolate(state$todos()), list(a = 1, b = 2))
+  state$todos("loading")
+  expect_equal(shiny::isolate(state$todos()), "loading")
+  state$todos(NULL)
+  expect_null(shiny::isolate(state$todos()))
 })
 
-test_that("atomic-list leaf rejects named-list writes", {
-  state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(
-    state$todos(list(a = 1, b = 2)),
-    "named list"
-  )
-})
-
-test_that("atomic-list leaf rejects partially-named-list writes", {
-  state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(
-    state$todos(list(1, b = 2)),
-    "partially-named"
-  )
-})
-
-test_that("atomic-list leaf rejects non-list writes", {
-  state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(state$todos("hi"), "requires an unnamed list")
-  expect_error(state$todos(NULL), "requires an unnamed list")
-  expect_error(state$todos(42), "requires an unnamed list")
-})
-
-test_that("branch patch routing into an atomic-list leaf still validates", {
-  state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(
-    state(list(todos = list(name = "X"))),
-    "Atomic-list leaf 'todos'.*named list"
-  )
-})
-
-test_that("observer reading an atomic-list leaf fires on write", {
+test_that("observer reading a list leaf fires on write", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
   fired <- 0L
   obs <- shiny::observe({
@@ -232,7 +201,7 @@ test_that("observer reading an atomic-list leaf fires on write", {
   obs$destroy()
 })
 
-test_that("deep root patch replaces atomic list wholesale", {
+test_that("deep root patch replaces list leaf wholesale", {
   state <- reactiveStore(list(
     user = list(name = "A"),
     todos = list(list(id = 1), list(id = 2))
@@ -327,20 +296,20 @@ test_that("deep root patch carries the path through to the offending node", {
 
 # --- Atomic patches (validate-then-commit) -----------------------------------
 
-test_that("branch patch rejects atomic-list violation without committing siblings", {
+test_that("root patch rejects deep unknown key without committing siblings", {
   state <- reactiveStore(list(
     user = list(name = "A"),
-    todos = list(list(id = 1))
+    settings = list(theme = "dark")
   ))
   expect_error(
     state(list(
       user = list(name = "Bob"),
-      todos = list(name = "X")
+      settings = list(unknown = "x")
     )),
-    "Atomic-list leaf 'todos'"
+    "'settings'.*unknown"
   )
   expect_equal(shiny::isolate(state$user$name()), "A")
-  expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
+  expect_equal(shiny::isolate(state$settings$theme()), "dark")
 })
 
 test_that("nested branch patch validates whole subtree before committing", {
@@ -363,7 +332,7 @@ test_that("nested branch patch validates whole subtree before committing", {
 test_that("failed atomic patch produces no reactive flush", {
   state <- reactiveStore(list(
     user = list(name = "A"),
-    todos = list(list(id = 1))
+    settings = list(theme = "dark")
   ))
   fired <- 0L
   obs <- shiny::observe({
@@ -375,7 +344,7 @@ test_that("failed atomic patch produces no reactive flush", {
   try(
     state(list(
       user = list(name = "Bob"),
-      todos = list(name = "X")
+      settings = list(unknown = "x")
     )),
     silent = TRUE
   )
@@ -624,7 +593,7 @@ test_that("print(leaf) shows the current value for scalars", {
   expect_true(any(grepl("42", out)))
 })
 
-test_that("print(leaf) abbreviates atomic-list leaves", {
+test_that("print(leaf) abbreviates list-valued leaves", {
   state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
   out <- capture.output(print(state$todos))
   expect_true(any(grepl("list", out)))
@@ -638,12 +607,12 @@ test_that("str(branch) is non-empty and shows nested keys", {
   expect_true(any(grepl("name", out)))
 })
 
-test_that("str(branch) does not error on atomic-list leaves", {
+test_that("str(branch) does not error on list-valued leaves", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_no_error(capture.output(str(state)))
 })
 
-# --- Atomic-list leaves: error stubs ----------------------------------------
+# --- Leaf error stubs --------------------------------------------------------
 
 test_that("[[ on a leaf errors and points at Each / leaf()", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
@@ -654,4 +623,59 @@ test_that("length() and names() on a leaf error with hints", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_error(length(state$todos), "length\\(leaf\\(\\)\\)")
   expect_error(names(state$todos), "names\\(leaf\\(\\)\\)")
+})
+
+# --- I() opt-out: bare named lists as leaves --------------------------------
+
+test_that("I()-wrapped named list at construction becomes a leaf", {
+  state <- reactiveStore(list(filter = I(list(foo = 1, bar = 2))))
+  expect_true(inherits(state$filter, "reactiveLeaf"))
+  expect_false(inherits(state$filter, "reactiveStore"))
+})
+
+test_that("I()-wrapped value strips AsIs class on read", {
+  state <- reactiveStore(list(filter = I(list(foo = 1, bar = 2))))
+  val <- shiny::isolate(state$filter())
+  expect_equal(val, list(foo = 1, bar = 2))
+  expect_false(inherits(val, "AsIs"))
+  expect_null(oldClass(val))
+})
+
+test_that("I()-wrapped leaf accepts any-shape writes (union types)", {
+  state <- reactiveStore(list(req = I(list(status = "loading"))))
+  state$req(list(status = "success", data = 1:3))
+  expect_equal(
+    shiny::isolate(state$req()),
+    list(status = "success", data = 1:3)
+  )
+  state$req(list(status = "error", message = "boom"))
+  expect_equal(
+    shiny::isolate(state$req()),
+    list(status = "error", message = "boom")
+  )
+  state$req(NULL)
+  expect_null(shiny::isolate(state$req()))
+})
+
+test_that("I(list()) gives a shape-flexible empty leaf (df-or-list pattern)", {
+  state <- reactiveStore(list(data = I(list())))
+  expect_true(inherits(state$data, "reactiveLeaf"))
+  state$data(data.frame(x = 1:3))
+  expect_equal(shiny::isolate(state$data()), data.frame(x = 1:3))
+  state$data(list(a = 1, b = 2))
+  expect_equal(shiny::isolate(state$data()), list(a = 1, b = 2))
+})
+
+test_that("I() preserves underlying class while stripping AsIs", {
+  df <- data.frame(x = 1:3)
+  state <- reactiveStore(list(df = I(df)))
+  val <- shiny::isolate(state$df())
+  expect_s3_class(val, "data.frame")
+  expect_false(inherits(val, "AsIs"))
+})
+
+test_that("I()-wrapped value at root patch reaches the leaf", {
+  state <- reactiveStore(list(filter = I(list(foo = 1))))
+  state(list(filter = list(bar = 2, baz = 3)))
+  expect_equal(shiny::isolate(state$filter()), list(bar = 2, baz = 3))
 })

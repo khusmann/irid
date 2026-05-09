@@ -1,42 +1,44 @@
 #' Hierarchical reactive state container
 #'
-#' Builds a callable hierarchical state tree from a nested list. Bare named
-#' lists become navigable `reactiveStore` nodes (every sub-tree is itself a
-#' `reactiveStore`); everything else (scalars, vectors, `NULL`, unnamed bare
-#' lists, and classed lists such as `data.frame` / tibble) becomes a
-#' `reactiveLeaf` backed by a single [shiny::reactiveVal()].
+#' Builds a callable hierarchical state tree from a nested list. The shape
+#' rule is simple: a bare named list (length > 0) becomes a navigable
+#' `reactiveStore` node (every sub-tree is itself a `reactiveStore`);
+#' everything else becomes a `reactiveLeaf` backed by a single
+#' [shiny::reactiveVal()] that accepts any value on write. To force a
+#' bare named list to be treated as a leaf instead of a store, wrap it
+#' in [base::I()].
 #'
 #' Every node is callable: `node()` reads, `node(value)` writes. Leaves
 #' replace; store nodes patch (only the keys present in the patch are
-#' updated). Unknown keys are an error. Types are not enforced.
+#' updated). Unknown keys on a store-node patch are an error. Types are
+#' not enforced.
 #'
-#' @param initial A bare named list describing the initial shape. Bare lists
-#'   that are empty or unnamed at any position become atomic-list leaves —
-#'   a single `reactiveVal` holding the list verbatim. Classed lists (e.g.,
-#'   `data.frame`, tibble) are stored opaquely as scalar leaves: their class
-#'   is preserved across reads and writes, and write shape is not validated.
+#' @param initial A bare named list describing the initial shape.
+#'   Sub-positions classify as follows: bare named lists (length > 0)
+#'   become store sub-nodes; anything else (scalars, vectors, `NULL`,
+#'   unnamed/empty bare lists, classed lists, or any value wrapped in
+#'   `I()`) becomes a leaf. Partially-named bare lists are an error.
 #' @return A callable `reactiveStore` node with class
 #'   `c("reactiveStore", "function")`. Sub-trees share the same class;
-#'   atomic positions are `c("reactiveLeaf", "function")`.
+#'   leaf positions are `c("reactiveLeaf", "function")`.
 #' @export
 reactiveStore <- function(initial) {
   build_node(initial, "", root = TRUE)
 }
 
 # A "bare list" is an unclassed list — `list()` but not `data.frame`,
-# tibble, or any other S3/S4 classed list-like object. Only bare lists
-# are eligible to become store nodes or atomic-list leaves; classed lists
-# fall through to opaque scalar leaves.
+# tibble, or any other S3/S4 classed list-like object. Only bare named
+# lists become store nodes; everything else is a leaf.
 is_bare_list <- function(value) {
   is.list(value) && !is.object(value)
 }
 
-# TRUE = store node, FALSE = leaf (scalar, classed list, or atomic bare
-# list); errors on partially-named bare lists, which are neither. Empty
-# bare lists always register as atomic-list leaves — store nodes are
-# structurally frozen at construction, so an empty store node would be a
-# permanent dead-end (no keys to patch, can't grow).
+# TRUE = store node, FALSE = leaf. Errors on partially-named bare lists,
+# which are neither. `I(...)`-wrapped values are always leaves regardless
+# of underlying shape — that's the explicit opt-out from auto-classification
+# for the otherwise-ambiguous bare-named-list case.
 is_branch <- function(value, path) {
+  if (inherits(value, "AsIs")) return(FALSE)
   if (!is_bare_list(value)) return(FALSE)
   if (length(value) == 0L) return(FALSE)
   nm <- names(value)
@@ -47,8 +49,23 @@ is_branch <- function(value, path) {
     "List at %s is partially named (positions %s have no names). %s",
     if (nzchar(path)) sprintf("'%s'", path) else "store root",
     paste(empty_idx, collapse = ", "),
-    "Use a fully named list (store node) or a fully unnamed list (atomic leaf)."
+    "Use a fully named list (store node) or a fully unnamed list (leaf)."
   ), call. = FALSE)
+}
+
+# Drops the `AsIs` class added by `I()`, leaving any other classes intact.
+# Used when a leaf is constructed from an `I()`-wrapped value so the leaf
+# holds the underlying value verbatim — `I()` is a one-time construction
+# signal, not a property the leaf carries forward.
+strip_asis <- function(value) {
+  if (!inherits(value, "AsIs")) return(value)
+  cl <- setdiff(oldClass(value), "AsIs")
+  if (length(cl) == 0L) {
+    oldClass(value) <- NULL
+  } else {
+    oldClass(value) <- cl
+  }
+  value
 }
 
 build_node <- function(value, path, root = FALSE) {
@@ -64,47 +81,18 @@ build_node <- function(value, path, root = FALSE) {
     make_store(children, keys, path)
   } else {
     if (root) stop("`initial` must be a named list", call. = FALSE)
-    make_leaf(value, atomic_list = is_bare_list(value), path = path)
+    make_leaf(strip_asis(value), path = path)
   }
 }
 
-make_leaf <- function(initial_value, atomic_list = FALSE, path = "") {
+make_leaf <- function(initial_value, path = "") {
   label <- if (nzchar(path)) sprintf("'%s'", path) else "leaf"
   rv <- shiny::reactiveVal(initial_value)
   fn <- function(...) {
-    if (missing(..1)) {
-      rv()
-    } else {
-      val <- ..1
-      if (atomic_list) validate_atomic_list_write(val, label)
-      rv(val)
-    }
+    if (missing(..1)) rv() else rv(..1)
   }
   class(fn) <- c("reactiveLeaf", "function")
   fn
-}
-
-validate_atomic_list_write <- function(val, label) {
-  if (!is.list(val)) {
-    stop(sprintf(
-      "Atomic-list leaf %s requires an unnamed list, got %s.",
-      label, paste(class(val), collapse = "/")
-    ), call. = FALSE)
-  }
-  if (length(val) == 0L) return(invisible())
-  nm <- names(val)
-  if (is.null(nm)) return(invisible())
-  if (all(nzchar(nm))) {
-    stop(sprintf(
-      "Atomic-list leaf %s does not accept a named list. Use an unnamed list.",
-      label
-    ), call. = FALSE)
-  }
-  empty_idx <- which(!nzchar(nm))
-  stop(sprintf(
-    "Atomic-list leaf %s does not accept a partially-named list (positions %s unnamed). Use a fully unnamed list.",
-    label, paste(empty_idx, collapse = ", ")
-  ), call. = FALSE)
 }
 
 make_store <- function(children, keys, path) {
@@ -128,17 +116,12 @@ make_store <- function(children, keys, path) {
 # Recursively validates a write/patch against the target subtree without
 # committing — throws on the first shape violation, otherwise returns
 # invisibly. Store nodes enforce: list-shaped, fully named, no unknown
-# keys. Leaves enforce: atomic-list shape (when applicable). Used by store
-# write paths so a downstream rejection (e.g., a named list arriving at an
-# atomic-list leaf five levels deep) leaves siblings unmodified.
+# keys. Leaves accept any value, so they always pass validation. Used by
+# store write paths so a downstream rejection (e.g., an unknown key five
+# levels deep) leaves siblings unmodified.
 validate_write <- function(node, value) {
+  if (inherits(node, "reactiveLeaf")) return(invisible())
   env <- environment(node)
-  if (inherits(node, "reactiveLeaf")) {
-    if (isTRUE(env$atomic_list)) {
-      validate_atomic_list_write(value, env$label)
-    }
-    return(invisible())
-  }
   label <- env$label
   if (!is.list(value)) {
     stop(sprintf(

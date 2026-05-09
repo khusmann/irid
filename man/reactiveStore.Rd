@@ -7,26 +7,29 @@
 reactiveStore(initial)
 }
 \arguments{
-\item{initial}{A bare named list describing the initial shape. Bare lists
-that are empty or unnamed at any position become atomic-list leaves —
-a single \code{reactiveVal} holding the list verbatim. Classed lists (e.g.,
-\code{data.frame}, tibble) are stored opaquely as scalar leaves: their class
-is preserved across reads and writes, and write shape is not validated.}
+\item{initial}{A bare named list describing the initial shape.
+Sub-positions classify as follows: bare named lists (length > 0)
+become store sub-nodes; anything else (scalars, vectors, \code{NULL},
+unnamed/empty bare lists, classed lists, or any value wrapped in
+\code{I()}) becomes a leaf. Partially-named bare lists are an error.}
 }
 \value{
 A callable \code{reactiveStore} node with class
 \code{c("reactiveStore", "function")}. Sub-trees share the same class;
-atomic positions are \code{c("reactiveLeaf", "function")}.
+leaf positions are \code{c("reactiveLeaf", "function")}.
 }
 \description{
-Builds a callable hierarchical state tree from a nested list. Bare named
-lists become navigable \code{reactiveStore} nodes (every sub-tree is itself a
-\code{reactiveStore}); everything else (scalars, vectors, \code{NULL}, unnamed bare
-lists, and classed lists such as \code{data.frame} / tibble) becomes a
-\code{reactiveLeaf} backed by a single \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}}.
+Builds a callable hierarchical state tree from a nested list. The shape
+rule is simple: a bare named list (length > 0) becomes a navigable
+\code{reactiveStore} node (every sub-tree is itself a \code{reactiveStore});
+everything else becomes a \code{reactiveLeaf} backed by a single
+\code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} that accepts any value on write. To force a
+bare named list to be treated as a leaf instead of a store, wrap it
+in \code{\link[base:AsIs]{base::I()}}.
 }
 \details{
 Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
 replace; store nodes patch (only the keys present in the patch are
-updated). Unknown keys are an error. Types are not enforced.
+updated). Unknown keys on a store-node patch are an error. Types are
+not enforced.
 }
