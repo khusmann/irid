@@ -9,6 +9,7 @@ R/
   event.R         event_immediate, event_throttle, event_debounce
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
+  store.R         reactiveStore — hierarchical reactive state container
   irid-package.R Package-level imports
 
 inst/js/
