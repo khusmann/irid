@@ -102,6 +102,57 @@ resolve_event_config <- function(event_name, autobind_origin, lookup) {
   if (autobind_origin) event_debounce(200) else event_immediate()
 }
 
+# Compose multiple event handlers into a single 2-arg function. Each source
+# handler is dispatched by its own arity (0, 1, or 2 formals). Mount sees the
+# wrapper as 2-arg and calls it with `(event_obj, id)`; the inner dispatch
+# fans out per source handler.
+compose_handlers <- function(handlers) {
+  arities <- vapply(handlers, function(h) length(formals(h)), integer(1L))
+  function(event, id) {
+    for (i in seq_along(handlers)) {
+      h <- handlers[[i]]
+      a <- arities[[i]]
+      if (a == 0L) h()
+      else if (a == 1L) h(event)
+      else h(event, id)
+    }
+  }
+}
+
+# Merge pending events that share a DOM event name (e.g. auto-bind synthetic
+# `input` + explicit `onInput` on the same element). One merged entry per
+# DOM event means one observer and one JS listener; source-attribute order
+# is preserved inside the composed handler. The merged entry inherits
+# `autobind = TRUE` if any source entry was auto-bind, so the default-rule
+# resolution picks the auto-bind default (debounce 200ms).
+merge_pending_events <- function(pending_events) {
+  by_event <- list()
+  groups <- list()
+  for (e in pending_events) {
+    idx <- by_event[[e$event]]
+    if (is.null(idx)) {
+      idx <- length(groups) + 1L
+      by_event[[e$event]] <- idx
+      groups[[idx]] <- list(
+        event = e$event,
+        handlers = list(e$handler),
+        autobind = e$autobind
+      )
+    } else {
+      groups[[idx]]$handlers <- c(groups[[idx]]$handlers, list(e$handler))
+      groups[[idx]]$autobind <- groups[[idx]]$autobind || e$autobind
+    }
+  }
+  lapply(groups, function(g) {
+    handler <- if (length(g$handlers) == 1L) {
+      g$handlers[[1L]]
+    } else {
+      compose_handlers(g$handlers)
+    }
+    list(event = g$event, handler = handler, autobind = g$autobind)
+  })
+}
+
 #' Create a pair of HTML comment anchors bracketing a control-flow range
 #'
 #' Comment nodes are legal children of any element (including `<select>`,
@@ -259,6 +310,10 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         )
       }
     }
+
+    # Merge entries that share a DOM event (auto-bind synthetic + explicit
+    # `on*`) into a single composed entry — one observer, one JS listener.
+    pending_events <- merge_pending_events(pending_events)
 
     # Resolve timing per event entry (element-level .event > per-event
     # default rule) and propagate .prevent_default to every entry.

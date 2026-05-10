@@ -51,8 +51,9 @@ Walks the tag tree recursively and produces:
   should be inserted. Element-level config (`.event`, `.prevent_default`)
   is stripped before HTML serialization.
 - **`bindings`** — List of `{id, attr, fn}` for each reactive attribute.
-- **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce, prevent_default}`
-  for each event callback (auto-bind synthetic and explicit `on*`).
+- **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce, prevent_default}`,
+  one entry per `(id, DOM event)`. Auto-bind synthetic and explicit `on*`
+  on the same DOM event are merged into one composed handler.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   `Index`, or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
@@ -65,13 +66,14 @@ fires and the optimistic-update protocol echoes the current value back.
 1-arg+ callables receive `e$value` (or `e$checked` for `checked`).
 
 When the auto-bind synthetic event collides with an explicit `on*` handler
-(e.g. `value = rv` and `onInput = ...` on the same `<input>`), both event
-entries land on the same DOM event and share the same input id. The R side
-registers two `observeEvent`s on that input; the JS side attaches two
-listeners. Both run on every event — duplicate `Shiny.setInputValue` calls
-are harmless because the payload is identical. Observer execution order
-follows attribute source order (the entry whose attribute appears first in
-the user's tag call runs first).
+on the same DOM event (e.g. `value = rv` and `onInput = ...` on the same
+`<input>`), process_tags merges the two into a single event entry whose
+handler is composed of both source handlers in source-attribute order — the
+entry whose attribute appears first in the user's tag call runs first. One
+DOM listener, one observer, one force-send echo per event. The merged
+entry is treated as auto-bind for the per-event default rule (debounce
+200 ms), so `value = rv` + `onInput = ...` debounces the same as `value = rv`
+alone; element-level `.event` still overrides as a whole.
 
 Event timing comes from the element-level `.event` prop. A single
 `irid_event_config` applies to every event on the element; a named list
