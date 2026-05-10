@@ -30,6 +30,16 @@ OptimisticUpdates <- function() {
     set = \(v) text(substr(v, 1, max_chars))
   )
 
+  delay_int <- reactiveProxy(
+    get = delay_ms,
+    set = \(v) delay_ms(as.integer(v))
+  )
+
+  # Side-effect: keep the simulated-latency option in sync with delay_ms.
+  observe({
+    options(irid.debug.latency = delay_ms() / 1000)
+  })
+
   page_fluid(
     card(
       card_header("Optimistic Update Tests"),
@@ -76,11 +86,7 @@ OptimisticUpdates <- function() {
         tags$label(\() paste0("Delay: ", delay_ms(), " ms")),
         tags$input(
           type = "range", min = "0", max = "3000", step = "50",
-          onInput = \(event) {
-            val <- as.integer(event$value)
-            delay_ms(val)
-            options(irid.debug.latency = val / 1000)
-          }
+          value = delay_int
         )
       )
     )
