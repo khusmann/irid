@@ -60,8 +60,7 @@ Out:
 |------------|-----------|-----------------------|
 | `value`    | `input`   | text inputs, textarea |
 | `checked`  | `change`  | checkbox              |
-| `selected` | `input`   | select                |
-| `selected` | `change`  | radio                 |
+| `selected` | `change`  | select, radio         |
 
 Radio is bound per-element with value-based equality (see "Radio binding"
 under Implementation).
@@ -107,11 +106,14 @@ In the per-attribute loop ([process_tags.R:123-156](../../R/process_tags.R#L123-
    if `name %in% c("value", "checked", "selected")` and
    `is_irid_reactive(val)`:
    - Emit a binding (current behaviour — `attr = name`, `fn = val`).
-   - If `length(formals(val)) >= 1L`, append a synthetic event entry whose
-     handler is `\(e) val(e$value)` (or `e$checked` for `checked`). Tag the
+   - Always append a synthetic event entry — even for 0-arg callables.
+     The handler dispatches on arity at runtime: if
+     `length(formals(val)) >= 1L`, call `val(e$value)` (or `e$checked` for
+     `checked`); otherwise no-op. This makes the 0-arg case behave like
+     `reactiveProxy(set = NULL)` — the listener fires, the write is
+     dropped server-side, and the existing force-send-on-no-op protocol
+     echoes the current value back so the input snaps back. Tag the
      entry as auto-bind-origin for the timing-resolution step below.
-   - If 0-arg, no write entry — snap-back via the existing optimistic-update
-     protocol handles it.
 3. After collecting `pending_events` (both auto-bind synthetic and
    explicit `on*`), apply timing:
    - If `.event` is set on the tag, use it for every event entry on that
@@ -172,7 +174,7 @@ the `irid-attr` handler and the auto-bind event listener registration:
 
 | Element              | Read (`irid-attr`)                          | Write (DOM event)                                                  |
 |----------------------|---------------------------------------------|--------------------------------------------------------------------|
-| `<select>`           | `el.value = msg.value`                      | fire `binding(el.value)` on `input`                                |
+| `<select>`           | `el.value = msg.value`                      | fire `binding(el.value)` on `change`                               |
 | `<input type="radio">` | `el.checked = (msg.value === el.value)`   | fire `binding(el.value)` on `change`, only when `el.checked === true` |
 
 The "only when checked" guard avoids a stray write from the radio that
