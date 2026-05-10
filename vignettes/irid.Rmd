@@ -179,14 +179,21 @@ tags$button("Save", onClick = \() save(), .event = event_throttle(1000))
 tags$form(onSubmit = \(e) handle(e), .prevent_default = TRUE)
 ```
 
-`.event` also accepts a named list keyed by lowercase DOM event name to
-override timing per event:
+`.event` and `.prevent_default` both accept a named list keyed by
+lowercase DOM event name to override per event. Unmapped events fall
+back to the per-event timing default and `FALSE` respectively:
 
 ```r
 tags$input(
   value = field,
   onKeyDown = \(e) if (e$key == "Enter") submit(),
   .event = list(input = event_debounce(500))
+)
+
+tags$form(
+  onSubmit = \() submit(),
+  onClick = \(e) handle_click(e),
+  .prevent_default = list(submit = TRUE)
 )
 ```
 

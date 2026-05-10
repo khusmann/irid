@@ -84,7 +84,10 @@ name: `input` → `event_debounce(200)`, everything else →
 `event_immediate()`. The rule is the same whether the entry is an
 auto-bind synthetic or an explicit `on*` handler, so adding `value = rv`
 to an existing `onInput` doesn't silently shift its timing.
-`.prevent_default` propagates to every event entry on the element.
+`.prevent_default` follows the same shape as `.event`: a logical scalar
+broadcasts to every event entry; a named list keyed by lowercase DOM
+event name overrides per event, with unmapped events defaulting to
+`FALSE`.
 
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.

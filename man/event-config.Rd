@@ -58,8 +58,11 @@ the list fall back to the per-event default. Malformed \code{.event} values
 (a non-config, an unnamed list, or a list whose entries are not all
 configs) raise an error during tag processing.
 
-Use the element-level \code{.prevent_default = TRUE} prop to call
-\code{event.preventDefault()} in the browser before dispatch.
+Use the element-level \code{.prevent_default} prop to call
+\code{event.preventDefault()} in the browser before dispatch. Like \code{.event},
+it accepts either a logical scalar (broadcasts to every event on the
+element) or a named list keyed by DOM event for per-event overrides;
+unmapped events default to \code{FALSE}.
 }
 \section{The event object}{
 

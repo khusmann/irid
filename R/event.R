@@ -27,8 +27,11 @@
 #' (a non-config, an unnamed list, or a list whose entries are not all
 #' configs) raise an error during tag processing.
 #'
-#' Use the element-level `.prevent_default = TRUE` prop to call
-#' `event.preventDefault()` in the browser before dispatch.
+#' Use the element-level `.prevent_default` prop to call
+#' `event.preventDefault()` in the browser before dispatch. Like `.event`,
+#' it accepts either a logical scalar (broadcasts to every event on the
+#' element) or a named list keyed by DOM event for per-event overrides;
+#' unmapped events default to `FALSE`.
 #'
 #' @section The event object:
 #' The `event` argument passed to handlers is a list containing all

@@ -29,7 +29,9 @@
   `.event` accepts either a single config or a named list keyed by
   lowercase DOM event name for per-event overrides.
 * `prevent_default` moved off the event constructors and onto the element
-  as `.prevent_default = TRUE`.
+  as `.prevent_default`. Like `.event`, accepts either a logical scalar
+  (broadcasts to every event) or a named list keyed by DOM event for
+  per-event overrides; unmapped events default to `FALSE`.
 
 ## New features
 

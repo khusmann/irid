@@ -45,6 +45,40 @@ make_autobind_handler <- function(fn, attr_name) {
   }
 }
 
+# Shared validation for element-level keyed-list props (`.event`,
+# `.prevent_default`). Checks emptiness, full naming, and duplicate-after-
+# normalization, then returns the input list with names normalized to
+# lowercase DOM-event form (`onInput` → `input`). Per-entry value
+# validation is left to the caller, which has the type information.
+normalize_event_keyed_list <- function(x, prop_name) {
+  if (length(x) == 0L) {
+    stop(
+      "`", prop_name, "` list is empty; pass at least one entry, or omit ",
+      "`", prop_name, "`",
+      call. = FALSE
+    )
+  }
+  nms <- names(x)
+  if (is.null(nms) || any(!nzchar(nms))) {
+    stop(
+      "`", prop_name, "` list must be fully named, keyed by DOM event ",
+      "(e.g. `input`, `keydown`) or `on`-prop (e.g. `onInput`)",
+      call. = FALSE
+    )
+  }
+  normalized <- tolower(sub("^on", "", nms, ignore.case = TRUE))
+  dup <- duplicated(normalized)
+  if (any(dup)) {
+    stop(
+      "`", prop_name, "` has duplicate event names after normalization: ",
+      paste(unique(normalized[dup]), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  names(x) <- normalized
+  x
+}
+
 # Validate and normalize an element-level `.event` prop into a lookup
 # function: takes a lowercase DOM event name, returns the matching
 # `irid_event_config` or NULL. Keys accept either DOM-event form
@@ -66,41 +100,60 @@ normalize_element_event <- function(element_event) {
       call. = FALSE
     )
   }
-  if (length(element_event) == 0L) {
-    stop(
-      "`.event` list is empty; pass at least one entry, or omit `.event` ",
-      "to fall back to the per-event default rule",
-      call. = FALSE
-    )
-  }
-  nms <- names(element_event)
-  if (is.null(nms) || any(!nzchar(nms))) {
-    stop(
-      "`.event` list must be fully named, keyed by DOM event ",
-      "(e.g. `input`, `keydown`) or `on`-prop (e.g. `onInput`)",
-      call. = FALSE
-    )
-  }
-  normalized <- tolower(sub("^on", "", nms, ignore.case = TRUE))
-  dup <- duplicated(normalized)
-  if (any(dup)) {
-    stop(
-      "`.event` has duplicate event names after normalization: ",
-      paste(unique(normalized[dup]), collapse = ", "),
-      call. = FALSE
-    )
-  }
+  orig_nms <- names(element_event)
+  element_event <- normalize_event_keyed_list(element_event, ".event")
   for (i in seq_along(element_event)) {
     if (!inherits(element_event[[i]], "irid_event_config")) {
       stop(
-        "`.event$", nms[[i]], "` must be an `irid_event_config`; got ",
+        "`.event$", orig_nms[[i]], "` must be an `irid_event_config`; got ",
         paste(class(element_event[[i]]), collapse = "/"),
         call. = FALSE
       )
     }
   }
-  names(element_event) <- normalized
   function(event_name) element_event[[event_name]]
+}
+
+# Validate and normalize an element-level `.prevent_default` prop into a
+# lookup function: takes a lowercase DOM event name, returns a logical
+# scalar. A scalar `TRUE`/`FALSE` broadcasts to every event on the element;
+# a named list (same key shape as `.event`) overrides per event with
+# unmapped events defaulting to `FALSE`.
+normalize_element_prevent_default <- function(prevent_default) {
+  if (is.null(prevent_default)) {
+    return(function(event_name) FALSE)
+  }
+  if (is.logical(prevent_default) && length(prevent_default) == 1L &&
+      !is.na(prevent_default)) {
+    val <- prevent_default
+    return(function(event_name) val)
+  }
+  if (!is.list(prevent_default)) {
+    stop(
+      "`.prevent_default` must be `TRUE`/`FALSE` or a named list of ",
+      "logicals keyed by DOM event; got ",
+      paste(class(prevent_default), collapse = "/"),
+      call. = FALSE
+    )
+  }
+  orig_nms <- names(prevent_default)
+  prevent_default <- normalize_event_keyed_list(
+    prevent_default, ".prevent_default"
+  )
+  for (i in seq_along(prevent_default)) {
+    v <- prevent_default[[i]]
+    if (!is.logical(v) || length(v) != 1L || is.na(v)) {
+      stop(
+        "`.prevent_default$", orig_nms[[i]], "` must be `TRUE` or `FALSE`; ",
+        "got ", paste(class(v), collapse = "/"),
+        call. = FALSE
+      )
+    }
+  }
+  function(event_name) {
+    v <- prevent_default[[event_name]]
+    if (is.null(v)) FALSE else v
+  }
 }
 
 # Per-event default timing — the same rule applies whether the event entry
@@ -284,7 +337,9 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     # validated and normalized into a lookup function up front so any
     # malformed input fails before bindings/events are emitted.
     element_event_lookup <- normalize_element_event(attribs[[".event"]])
-    element_prevent_default <- isTRUE(attribs[[".prevent_default"]])
+    element_prevent_default_lookup <- normalize_element_prevent_default(
+      attribs[[".prevent_default"]]
+    )
     attribs[[".event"]] <- NULL
     attribs[[".prevent_default"]] <- NULL
 
@@ -365,7 +420,8 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     pending_events <- merge_pending_events(pending_events)
 
     # Resolve timing per event entry (element-level .event > per-event
-    # default rule) and propagate .prevent_default to every entry.
+    # default rule) and resolve .prevent_default per event (scalar
+    # broadcasts; named list overrides per event, unmapped → FALSE).
     for (i in seq_along(pending_events)) {
       e <- pending_events[[i]]
       cfg <- resolve_event_config(e$event, element_event_lookup)
@@ -373,7 +429,9 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       pending_events[[i]]$ms <- cfg$ms
       pending_events[[i]]$leading <- cfg$leading
       pending_events[[i]]$coalesce <- cfg$coalesce
-      pending_events[[i]]$prevent_default <- element_prevent_default
+      pending_events[[i]]$prevent_default <- element_prevent_default_lookup(
+        e$event
+      )
     }
 
     if (length(pending_bindings) > 0L || length(pending_events) > 0L) {
