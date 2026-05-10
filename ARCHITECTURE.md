@@ -68,12 +68,14 @@ fires and the optimistic-update protocol echoes the current value back.
 When the auto-bind synthetic event collides with an explicit `on*` handler
 on the same DOM event (e.g. `value = rv` and `onInput = ...` on the same
 `<input>`), process_tags merges the two into a single event entry whose
-handler is composed of both source handlers in source-attribute order — the
-entry whose attribute appears first in the user's tag call runs first. One
-DOM listener, one observer, one force-send echo per event. The merged
-entry is treated as auto-bind for the per-event default rule (debounce
-200 ms), so `value = rv` + `onInput = ...` debounces the same as `value = rv`
-alone; element-level `.event` still overrides as a whole.
+handler composes both source handlers. One DOM listener, one observer,
+one force-send echo per event. **Auto-bind synthetic handlers always run
+before explicit `on*` handlers**, so an explicit handler observes the
+updated state and cosmetic attribute reordering can't change behavior;
+within each tier, source-attribute order is preserved. The merged entry
+is treated as auto-bind for the per-event default rule (debounce 200 ms),
+so `value = rv` + `onInput = ...` debounces the same as `value = rv` alone;
+element-level `.event` still overrides as a whole.
 
 Event timing comes from the element-level `.event` prop. A single
 `irid_event_config` applies to every event on the element; a named list

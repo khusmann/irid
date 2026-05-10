@@ -230,6 +230,11 @@ reactiveProxy(get = name)
 A 0-arg function (e.g. `\() toupper(name())`) behaves the same as
 `reactiveProxy(get = name)` (read-only with snap-back).
 
+If you combine an auto-bound state-binding prop with an explicit `on*`
+handler for the same DOM event (e.g. `value = rv, onInput = \(e) ...`),
+the auto-bind write always runs first. Your handler observes the updated
+state regardless of attribute order.
+
 *See the [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
 ## Control flow

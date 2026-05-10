@@ -121,10 +121,13 @@ compose_handlers <- function(handlers) {
 
 # Merge pending events that share a DOM event name (e.g. auto-bind synthetic
 # `input` + explicit `onInput` on the same element). One merged entry per
-# DOM event means one observer and one JS listener; source-attribute order
-# is preserved inside the composed handler. The merged entry inherits
-# `autobind = TRUE` if any source entry was auto-bind, so the default-rule
-# resolution picks the auto-bind default (debounce 200ms).
+# DOM event means one observer and one JS listener. Within a merged group,
+# auto-bind synthetic handlers run before explicit `on*` handlers so an
+# explicit handler always observes the new state — cosmetic attribute
+# reordering can't change behavior. Within each tier, source order is
+# preserved. The merged entry inherits `autobind = TRUE` if any source
+# entry was auto-bind, so the default-rule resolution picks the auto-bind
+# default (debounce 200ms).
 merge_pending_events <- function(pending_events) {
   by_event <- list()
   groups <- list()
@@ -136,18 +139,21 @@ merge_pending_events <- function(pending_events) {
       groups[[idx]] <- list(
         event = e$event,
         handlers = list(e$handler),
+        autobinds = e$autobind,
         autobind = e$autobind
       )
     } else {
       groups[[idx]]$handlers <- c(groups[[idx]]$handlers, list(e$handler))
+      groups[[idx]]$autobinds <- c(groups[[idx]]$autobinds, e$autobind)
       groups[[idx]]$autobind <- groups[[idx]]$autobind || e$autobind
     }
   }
   lapply(groups, function(g) {
-    handler <- if (length(g$handlers) == 1L) {
-      g$handlers[[1L]]
+    handlers <- c(g$handlers[g$autobinds], g$handlers[!g$autobinds])
+    handler <- if (length(handlers) == 1L) {
+      handlers[[1L]]
     } else {
-      compose_handlers(g$handlers)
+      compose_handlers(handlers)
     }
     list(event = g$event, handler = handler, autobind = g$autobind)
   })
