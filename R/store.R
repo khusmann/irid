@@ -3,21 +3,14 @@
 #' Builds a callable hierarchical state tree from a nested list. The shape
 #' rule is simple: a bare named list (length > 0) becomes a navigable
 #' `reactiveStore` node (every sub-tree is itself a `reactiveStore`);
-#' everything else becomes a `reactiveLeaf` backed by a single
-#' [shiny::reactiveVal()] that accepts any value on write. To force a
-#' bare named list to be treated as a leaf instead of a store, wrap it
-#' in [base::I()].
+#' everything else becomes a plain [shiny::reactiveVal()] leaf that accepts
+#' any value on write. To force a bare named list to be treated as a leaf
+#' instead of a store, wrap it in [base::I()].
 #'
 #' Every node is callable: `node()` reads, `node(value)` writes. Leaves
 #' replace; store nodes patch (only the keys present in the patch are
 #' updated). Unknown keys on a store-node patch are an error. Types are
 #' not enforced.
-#'
-#' `length()` on a leaf returns `1` (the leaf is a single callable), not
-#' the length of the underlying value — `length.reactiveLeaf` is unset
-#' deliberately so htmltools can construct attributes from `value =
-#' state$leaf` without tripping. Use `length(leaf())` for the underlying
-#' length.
 #'
 #' @param initial A bare named list describing the initial shape.
 #'   Sub-positions classify as follows: bare named lists (length > 0)
@@ -25,8 +18,8 @@
 #'   unnamed/empty bare lists, classed lists, or any value wrapped in
 #'   `I()`) becomes a leaf. Partially-named bare lists are an error.
 #' @return A callable `reactiveStore` node with class
-#'   `c("reactiveStore", "function")`. Sub-trees share the same class;
-#'   leaf positions are `c("reactiveLeaf", "function")`.
+#'   `c("reactiveStore", "reactive", "function")`. Sub-trees share the
+#'   same class; leaf positions are plain `shiny::reactiveVal()`s.
 #' @export
 reactiveStore <- function(initial) {
   build_node(initial, "", root = TRUE)
@@ -92,9 +85,7 @@ build_node <- function(value, path, root = FALSE) {
 }
 
 make_leaf <- function(initial_value) {
-  rv <- shiny::reactiveVal(initial_value)
-  class(rv) <- c("reactiveLeaf", class(rv))
-  rv
+  shiny::reactiveVal(initial_value)
 }
 
 make_store <- function(children, keys, path) {
@@ -122,7 +113,7 @@ make_store <- function(children, keys, path) {
 # store write paths so a downstream rejection (e.g., an unknown key five
 # levels deep) leaves siblings unmodified.
 validate_write <- function(node, value) {
-  if (inherits(node, "reactiveLeaf")) return(invisible())
+  if (!inherits(node, "reactiveStore")) return(invisible())
   env <- environment(node)
   label <- env$label
   if (!is.list(value)) {
@@ -155,15 +146,6 @@ validate_write <- function(node, value) {
 #' @export
 `$.reactiveStore` <- function(x, name) {
   environment(x)$children[[name]]
-}
-
-#' @export
-`$.reactiveLeaf` <- function(x, name) {
-  stop(
-    "`$` is not defined for a reactiveStore leaf. ",
-    "Use `leaf()$", name, "` to read a field of the underlying value.",
-    call. = FALSE
-  )
 }
 
 # ---- Store-node introspection ----------------------------------------------
@@ -280,45 +262,3 @@ str.reactiveStore <- function(object, indent.str = "", ...) {
   invisible()
 }
 
-# ---- Leaf introspection (errors that point at the right call) --------------
-
-#' @export
-print.reactiveLeaf <- function(x, ...) {
-  val <- shiny::isolate(x())
-  if (is.null(val)) {
-    cat("<reactiveStore leaf> = NULL\n")
-  } else if (is.atomic(val) && length(val) == 1L) {
-    cat(sprintf("<reactiveStore leaf> = %s\n", format(val)))
-  } else if (!is.null(dim(val))) {
-    cat(sprintf(
-      "<reactiveStore leaf> [%s, %s]\n",
-      paste(class(val), collapse = "/"),
-      paste(dim(val), collapse = " x ")
-    ))
-  } else {
-    cat(sprintf(
-      "<reactiveStore leaf> [%s, length %d]\n",
-      paste(class(val), collapse = "/"), length(val)
-    ))
-  }
-  invisible(x)
-}
-
-#' @export
-names.reactiveLeaf <- function(x) {
-  stop(
-    "`names()` is not defined for a reactiveStore leaf. ",
-    "Use `names(leaf())` to read the underlying value's names.",
-    call. = FALSE
-  )
-}
-
-#' @export
-`[[.reactiveLeaf` <- function(x, i) {
-  stop(
-    "`[[` is not defined for a reactiveStore leaf. ",
-    "Use `leaf()[[i]]` for a snapshot read, or `Each()` to iterate ",
-    "an atomic-list leaf reactively.",
-    call. = FALSE
-  )
-}

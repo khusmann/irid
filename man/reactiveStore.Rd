@@ -15,26 +15,20 @@ unnamed/empty bare lists, classed lists, or any value wrapped in
 }
 \value{
 A callable \code{reactiveStore} node with class
-\code{c("reactiveStore", "function")}. Sub-trees share the same class;
-leaf positions are \code{c("reactiveLeaf", "function")}.
+\code{c("reactiveStore", "reactive", "function")}. Sub-trees share the
+same class; leaf positions are plain \code{shiny::reactiveVal()}s.
 }
 \description{
 Builds a callable hierarchical state tree from a nested list. The shape
 rule is simple: a bare named list (length > 0) becomes a navigable
 \code{reactiveStore} node (every sub-tree is itself a \code{reactiveStore});
-everything else becomes a \code{reactiveLeaf} backed by a single
-\code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} that accepts any value on write. To force a
-bare named list to be treated as a leaf instead of a store, wrap it
-in \code{\link[base:AsIs]{base::I()}}.
+everything else becomes a plain \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} leaf that accepts
+any value on write. To force a bare named list to be treated as a leaf
+instead of a store, wrap it in \code{\link[base:AsIs]{base::I()}}.
 }
 \details{
 Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
 replace; store nodes patch (only the keys present in the patch are
 updated). Unknown keys on a store-node patch are an error. Types are
 not enforced.
-
-\code{length()} on a leaf returns \code{1} (the leaf is a single callable), not
-the length of the underlying value — \code{length.reactiveLeaf} is unset
-deliberately so htmltools can construct attributes from \code{value = state$leaf} without tripping. Use \code{length(leaf())} for the underlying
-length.
 }
