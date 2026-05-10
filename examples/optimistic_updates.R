@@ -30,11 +30,6 @@ OptimisticUpdates <- function() {
     set = \(v) text(substr(v, 1, max_chars))
   )
 
-  delay_int <- reactiveProxy(
-    get = delay_ms,
-    set = \(v) delay_ms(as.integer(v))
-  )
-
   # Side-effect: keep the simulated-latency option in sync with delay_ms.
   observe({
     options(irid.debug.latency = delay_ms() / 1000)
@@ -86,7 +81,10 @@ OptimisticUpdates <- function() {
         tags$label(\() paste0("Delay: ", delay_ms(), " ms")),
         tags$input(
           type = "range", min = "0", max = "3000", step = "50",
-          value = delay_int
+          value = reactiveProxy(
+            get = delay_ms,
+            set = \(v) delay_ms(as.integer(v))
+          )
         )
       )
     )

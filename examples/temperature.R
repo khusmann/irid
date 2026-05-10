@@ -16,7 +16,6 @@ f_to_c <- function(f) round((f - 32) * 5 / 9, 1)
 # Range inputs deliver strings on write. Coercing here means callers can pass
 # any numeric callable without thinking about DOM types.
 Thermometer <- function(label, value, min, max) {
-  numeric_value <- reactiveProxy(get = value, set = \(v) value(as.numeric(v)))
   tags$div(
     class = "text-center",
     tags$label(class = "form-label fw-semibold", label),
@@ -26,7 +25,7 @@ Thermometer <- function(label, value, min, max) {
       tags$input(
         type = "range", min = min, max = max,
         style = "appearance: slider-vertical; height: 200px; width: 30px;",
-        value = numeric_value,
+        value = reactiveProxy(get = value, set = \(v) value(as.numeric(v))),
         .event = event_throttle(100)
       ),
       tags$small(class = "text-muted", min)
