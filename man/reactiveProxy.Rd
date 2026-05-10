@@ -35,6 +35,7 @@ Pass \code{set = NULL} (or omit it) to make the proxy read-only — writes
 are silently dropped. With auto-bind, this lets the input snap back
 to the current value via the optimistic-update protocol.
 
-Proxies compose: a proxy is itself a callable, so another
-\code{reactiveProxy} can use it as its \code{get}.
+Proxies compose: a proxy is itself a callable (0-arg → \code{get}, 1-arg →
+\code{set}), so another \code{reactiveProxy} can use it as either its \code{get} or
+its \code{set}.
 }

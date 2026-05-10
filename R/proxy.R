@@ -16,8 +16,9 @@
 #' are silently dropped. With auto-bind, this lets the input snap back
 #' to the current value via the optimistic-update protocol.
 #'
-#' Proxies compose: a proxy is itself a callable, so another
-#' `reactiveProxy` can use it as its `get`.
+#' Proxies compose: a proxy is itself a callable (0-arg → `get`, 1-arg →
+#' `set`), so another `reactiveProxy` can use it as either its `get` or
+#' its `set`.
 #'
 #' @param get A 0-arg callable returning the read value. Typically a
 #'   `reactiveVal`, a `reactiveStore` leaf, another `reactiveProxy`, or
