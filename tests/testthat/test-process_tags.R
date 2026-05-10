@@ -14,17 +14,16 @@ autobind_handler_for <- function(callable) {
   result$events[[1]]$handler
 }
 
-# Pulls the underlying handler out of a single-source merged event entry.
-# `merge_pending_events` always wraps even single handlers when they share
-# a DOM event, but for the no-collision case it returns the original closure.
-expect_writes <- function(handler, callable, value) {
+# Invoke an autobind handler with a synthetic DOM-event payload. Just a
+# call — the surrounding test asserts the resulting state.
+invoke_write <- function(handler, value) {
   shiny::isolate(handler(list(value = value)))
 }
 
 test_that("reactiveVal (1 formal) gets a write handler", {
   rv <- shiny::reactiveVal("init")
   h <- autobind_handler_for(rv)
-  expect_writes(h, rv, "typed")
+  invoke_write(h, "typed")
   expect_equal(shiny::isolate(rv()), "typed")
 })
 
@@ -113,6 +112,26 @@ test_that("checked reads from e$checked, value reads from e$value", {
   expect_equal(res_value$events[[1]]$event, "input")
   res_value$events[[1]]$handler(list(value = "opt-2"))
   expect_equal(shiny::isolate(rv_value()), "opt-2")
+})
+
+test_that("autobind handler reads correct key when prop is not last", {
+  # Regression: `make_autobind_handler` used to capture `attr_name` lazily,
+  # so the closure resolved it via the for-loop's final `name` binding —
+  # any non-reactive attribute after `value`/`checked` would silently
+  # redirect the read to the wrong event field.
+  rv_value <- shiny::reactiveVal("init")
+  res_value <- process_tags(
+    tags$input(value = rv_value, class = "form-control")
+  )
+  res_value$events[[1]]$handler(list(value = "typed", class = "irrelevant"))
+  expect_equal(shiny::isolate(rv_value()), "typed")
+
+  rv_checked <- shiny::reactiveVal(FALSE)
+  res_checked <- process_tags(
+    tags$input(type = "checkbox", checked = rv_checked, class = "x")
+  )
+  res_checked$events[[1]]$handler(list(checked = TRUE, class = "irrelevant"))
+  expect_true(shiny::isolate(rv_checked()))
 })
 
 # --- Misuse: irid construct passed as an attribute value ---------------------

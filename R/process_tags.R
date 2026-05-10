@@ -36,6 +36,8 @@ can_accept_write <- function(fn) {
 # get a no-op handler — the listener still fires so the optimistic-update
 # protocol echoes the current server value back, snapping the input.
 make_autobind_handler <- function(fn, attr_name) {
+  force(fn)
+  force(attr_name)
   if (can_accept_write(fn)) {
     function(e) fn(e[[attr_name]])
   } else {
