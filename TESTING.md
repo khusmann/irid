@@ -142,6 +142,59 @@ the write back through the callable.
 - [ ] Auto-bind + explicit `onInput` on same element — both run
 - [ ] Focused-input echo skipping continues to work for auto-bind value updates
 
+### Collision merge & handler ordering
+
+When auto-bind synthetic and explicit `on*` collide on the same DOM event,
+process_tags merges them into one event entry (one observer, one JS
+listener). Auto-bind handlers run before explicit `on*` handlers; within
+each tier, source-attribute order is preserved.
+
+- [ ] `value = rv` + `onInput` on same `<input>` produces a single event
+      entry on `input` (not two)
+- [ ] `selected = rv` + `onChange` on same `<select>` produces a single
+      event entry on `change`
+- [ ] No collision (e.g. `value = rv` + `onClick`) leaves the two as
+      separate event entries
+- [ ] Merged composed handler has `length(formals(handler)) == 2L` and is
+      called by mount as `handler(event_obj, id)`
+- [ ] Auto-bind write lands before explicit `on*` runs, regardless of
+      attribute source order (`value = rv, onInput = h` and
+      `onInput = h, value = rv` both have the explicit handler observe
+      the post-write state)
+- [ ] Two explicit handlers on the same DOM event (rare) compose in
+      source order
+- [ ] Merged entry inherits `autobind = TRUE`, so the per-event default
+      rule picks `event_debounce(200)`
+- [ ] Explicit-handler arity is preserved through composition
+      (0-arg/1-arg/2-arg source handlers each get their own dispatch)
+
+Smoke-test recipe (verified manually, not yet in testthat — use as a
+starting point for tests):
+
+```r
+devtools::load_all()
+
+# Autobind-first regardless of source order
+rv <- shiny::reactiveVal("init")
+result <- irid:::process_tags(
+  tags$input(
+    onInput = \(e) cat("user reads rv:", shiny::isolate(rv()), "\n"),
+    value = rv
+  )
+)
+stopifnot(length(result$events) == 1L)
+result$events[[1]]$handler(list(value = "typed"), "id")
+shiny::isolate(stopifnot(rv() == "typed"))
+# Expect: "user reads rv: typed" — handler observed the post-autobind state
+
+# No-collision case keeps separate entries
+rv2 <- shiny::reactiveVal("")
+result2 <- irid:::process_tags(
+  tags$input(value = rv2, onClick = \() NULL)
+)
+stopifnot(length(result2$events) == 2L)
+```
+
 ### Client-side `selected` polymorphism
 
 - [ ] `selected` on `<select>`: `irid-attr` sets `el.value = msg.value`
