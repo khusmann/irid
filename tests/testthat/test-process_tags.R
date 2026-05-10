@@ -53,12 +53,9 @@ test_that("reactiveProxy(get) (read-only) silently drops writes", {
   expect_equal(shiny::isolate(rv()), "x")
 })
 
-test_that("store leaf gets a write handler", {
-  # Built directly because `length.reactiveLeaf` throws, which trips
-  # htmltools' attribute-dropping pass. The arity-dispatch logic is what
-  # we're pinning here, not the htmltools integration.
+test_that("store leaf gets a write handler (end-to-end through process_tags)", {
   state <- reactiveStore(list(name = "Alice"))
-  h <- make_autobind_handler(state$name, "value")
+  h <- autobind_handler_for(state$name)
   shiny::isolate(h(list(value = "Bob")))
   expect_equal(shiny::isolate(state$name()), "Bob")
 })
@@ -132,6 +129,179 @@ test_that("autobind handler reads correct key when prop is not last", {
   )
   res_checked$events[[1]]$handler(list(checked = TRUE, class = "irrelevant"))
   expect_true(shiny::isolate(rv_checked()))
+})
+
+# --- Collision merge & handler ordering --------------------------------------
+#
+# When auto-bind synthetic and explicit `on*` collide on the same DOM event,
+# process_tags merges them into one event entry (one observer, one JS
+# listener). Auto-bind handlers run before explicit `on*` handlers; within
+# each tier, source-attribute order is preserved.
+
+test_that("value + onInput merges into one entry on `input`", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, onInput = function(e) NULL)
+  )
+  expect_length(result$events, 1L)
+  expect_equal(result$events[[1]]$event, "input")
+})
+
+test_that("checked + onChange on a checkbox merges into one entry on `change`", {
+  rv <- shiny::reactiveVal(FALSE)
+  result <- process_tags(
+    tags$input(type = "checkbox", checked = rv, onChange = function(e) NULL)
+  )
+  expect_length(result$events, 1L)
+  expect_equal(result$events[[1]]$event, "change")
+})
+
+test_that("value + onChange on a <select> does NOT merge (different DOM events)", {
+  # `value`'s synthetic event is `input`, the explicit handler is `change`,
+  # so they stay as two separate event entries.
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$select(value = rv, onChange = function(e) NULL)
+  )
+  expect_length(result$events, 2L)
+  events <- vapply(result$events, function(e) e$event, character(1L))
+  expect_setequal(events, c("input", "change"))
+})
+
+test_that("value + onClick stays as two separate entries (no collision)", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, onClick = function() NULL)
+  )
+  expect_length(result$events, 2L)
+  events <- vapply(result$events, function(e) e$event, character(1L))
+  expect_setequal(events, c("input", "click"))
+})
+
+test_that("merged composed handler has 2 formals and is called as `(event, id)`", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, onInput = function(e, id) NULL)
+  )
+  expect_length(result$events, 1L)
+  expect_equal(length(formals(result$events[[1]]$handler)), 2L)
+})
+
+test_that("auto-bind write lands before explicit `on*` regardless of source order", {
+  # The explicit handler must observe the post-autobind state — cosmetic
+  # attribute reordering can't change behavior.
+  for (build in list(
+    function(rv, h) tags$input(value = rv, onInput = h),
+    function(rv, h) tags$input(onInput = h, value = rv)
+  )) {
+    rv <- shiny::reactiveVal("init")
+    observed <- NULL
+    h <- function(e) observed <<- shiny::isolate(rv())
+    result <- process_tags(build(rv, h))
+    expect_length(result$events, 1L)
+    result$events[[1]]$handler(list(value = "typed"), "id")
+    expect_equal(shiny::isolate(rv()), "typed")
+    expect_equal(observed, "typed")
+  }
+})
+
+test_that("two explicit handlers on the same DOM event compose in source order", {
+  # Rare but supported — htmltools allows duplicate attribute names in a
+  # single tag() call, so a user could attach two `onInput`s and both must
+  # run. Source order is preserved within the explicit tier.
+  calls <- character()
+  h1 <- function(e) calls <<- c(calls, "h1")
+  h2 <- function(e) calls <<- c(calls, "h2")
+  result <- process_tags(
+    htmltools::tag("input", list(onInput = h1, onInput = h2))
+  )
+  expect_length(result$events, 1L)
+  result$events[[1]]$handler(list(value = "x"), "id")
+  expect_equal(calls, c("h1", "h2"))
+})
+
+test_that("explicit-handler arity is preserved through composition", {
+  rv <- shiny::reactiveVal("")
+  saw_zero <- FALSE
+  saw_one <- NULL
+  saw_two <- NULL
+  zero <- function() saw_zero <<- TRUE
+  one  <- function(e) saw_one <<- e$value
+  two  <- function(e, id) saw_two <<- id
+  # Stack three explicit `onInput` handlers (different arities) plus a
+  # `value = rv` autobind. The composed handler must dispatch each by its
+  # own arity.
+  result <- process_tags(
+    htmltools::tag("input", list(
+      value = rv, onInput = zero, onInput = one, onInput = two
+    ))
+  )
+  expect_length(result$events, 1L)
+  result$events[[1]]$handler(list(value = "typed"), "el-id")
+  expect_equal(shiny::isolate(rv()), "typed")
+  expect_true(saw_zero)
+  expect_equal(saw_one, "typed")
+  expect_equal(saw_two, "el-id")
+})
+
+# --- Per-event default timing ------------------------------------------------
+#
+# The default rule is keyed only on the DOM event name, so a standalone
+# `onInput` and an auto-bind `value = rv` resolve to the same default —
+# adding `value = rv` to an existing `onInput` doesn't shift its timing.
+
+test_that("explicit onInput defaults to event_debounce(200)", {
+  result <- process_tags(tags$input(onInput = function(e) NULL))
+  expect_equal(result$events[[1]]$mode, "debounce")
+  expect_equal(result$events[[1]]$ms, 200)
+})
+
+test_that("explicit onChange defaults to event_immediate()", {
+  result <- process_tags(tags$input(onChange = function(e) NULL))
+  expect_equal(result$events[[1]]$mode, "immediate")
+})
+
+test_that("explicit onClick defaults to event_immediate()", {
+  result <- process_tags(tags$button(onClick = function() NULL))
+  expect_equal(result$events[[1]]$mode, "immediate")
+})
+
+test_that("autobind value defaults to event_debounce(200) (input event)", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(tags$input(value = rv))
+  expect_equal(result$events[[1]]$mode, "debounce")
+  expect_equal(result$events[[1]]$ms, 200)
+})
+
+test_that("autobind checked defaults to event_immediate() (change event)", {
+  rv <- shiny::reactiveVal(FALSE)
+  result <- process_tags(tags$input(type = "checkbox", checked = rv))
+  expect_equal(result$events[[1]]$mode, "immediate")
+})
+
+test_that("merged value + onInput inherits the input-event default (debounce 200)", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, onInput = function(e) NULL)
+  )
+  expect_equal(result$events[[1]]$mode, "debounce")
+  expect_equal(result$events[[1]]$ms, 200)
+})
+
+test_that("merged checked + onChange resolves to immediate (change-event default)", {
+  rv <- shiny::reactiveVal(FALSE)
+  result <- process_tags(
+    tags$input(type = "checkbox", checked = rv, onChange = function(e) NULL)
+  )
+  expect_equal(result$events[[1]]$mode, "immediate")
+})
+
+test_that("element-level .event overrides the per-event default", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, .event = event_immediate())
+  )
+  expect_equal(result$events[[1]]$mode, "immediate")
 })
 
 # --- Misuse: irid construct passed as an attribute value ---------------------

@@ -74,16 +74,16 @@ handler composes both source handlers. One DOM listener, one observer,
 one force-send echo per event. **Auto-bind synthetic handlers always run
 before explicit `on*` handlers**, so an explicit handler observes the
 updated state and cosmetic attribute reordering can't change behavior;
-within each tier, source-attribute order is preserved. The merged entry
-is treated as auto-bind for the per-event default rule (debounce 200 ms),
-so `value = rv` + `onInput = ...` debounces the same as `value = rv` alone;
-element-level `.event` still overrides as a whole.
+within each tier, source-attribute order is preserved.
 
 Event timing comes from the element-level `.event` prop. A single
 `irid_event_config` applies to every event on the element; a named list
 keyed by lowercase DOM event name overrides per event. With no covering
-`.event`, the per-event default rule applies: auto-bind synthetic →
-`event_debounce(200)`, everything else → `event_immediate()`.
+`.event`, the per-event default rule applies, keyed only on the DOM event
+name: `input` → `event_debounce(200)`, everything else →
+`event_immediate()`. The rule is the same whether the entry is an
+auto-bind synthetic or an explicit `on*` handler, so adding `value = rv`
+to an existing `onInput` doesn't silently shift its timing.
 `.prevent_default` propagates to every event entry on the element.
 
 The tag tree is now plain HTML that can be sent to the client. All reactive

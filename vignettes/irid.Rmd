@@ -190,8 +190,12 @@ tags$input(
 )
 ```
 
-When `.event` is omitted, auto-bind synthetic events default to
-`event_debounce(200)` and everything else to `event_immediate()`.
+When `.event` is omitted, irid applies a per-event default keyed on the
+DOM event name: `input` events default to `event_debounce(200)` (typing
+floods the wire with intermediate values), every other event to
+`event_immediate()`. The rule is the same for auto-bind synthetic events
+and explicit `on*` handlers — adding `value = rv` to an existing
+`onInput` doesn't change its timing.
 
 ## Controlled inputs
 

@@ -42,9 +42,12 @@ event is active.
 before firing.
 }
 
-When \code{.event} is omitted, irid applies a per-event default:
-\code{event_debounce(200)} for auto-bind synthetic events,
-\code{event_immediate()} for everything else.
+When \code{.event} is omitted, irid applies a per-event default keyed on the
+DOM event name: \code{input} → \code{event_debounce(200)} (typing produces a flood
+of intermediate values), every other event → \code{event_immediate()}. The
+rule is the same whether the event entry came from an auto-bind synthetic
+or an explicit \verb{on*} handler, so adding \code{value = rv} to an existing
+\code{onInput} doesn't silently shift its timing.
 
 \code{.event} accepts either a single config struct (applies to every event
 on the element) or a named list for per-event overrides. List keys may

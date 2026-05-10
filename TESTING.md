@@ -11,7 +11,7 @@ static HTML.
 - [ ] Reactive attribute is extracted into `$bindings` with correct `id`, `attr`, `fn`
 - [ ] Event handler (`onInput`, `onClick`, etc.) is extracted into `$events`
 - [ ] Event name conversion: `onInput` → `input`, `onClick` → `click` (strip `on`, lowercase)
-- [ ] Bare function handlers default to `event_immediate()` per the per-event default rule
+- [ ] Bare function handlers follow the per-event default rule (`onInput` → debounce(200), everything else → immediate)
 - [ ] Element-level `.event` config supplies `mode`, `ms`, `leading`, `coalesce` to every event entry on the element
 - [ ] Element with existing `id` attribute keeps it (not overwritten by auto-ID)
 - [ ] Element with both reactive attrs and events shares one ID
@@ -169,37 +169,11 @@ each tier, source-attribute order is preserved.
       the post-write state)
 - [ ] Two explicit handlers on the same DOM event (rare) compose in
       source order
-- [ ] Merged entry inherits `autobind = TRUE`, so the per-event default
-      rule picks `event_debounce(200)`
+- [ ] Merged entry's timing is resolved by DOM event name only, the same
+      as if no autobind were involved (e.g. `value = rv` + `onInput` → 
+      `event_debounce(200)`; `checked = rv` + `onChange` → `event_immediate()`)
 - [ ] Explicit-handler arity is preserved through composition
       (0-arg/1-arg/2-arg source handlers each get their own dispatch)
-
-Smoke-test recipe (verified manually, not yet in testthat — use as a
-starting point for tests):
-
-```r
-devtools::load_all()
-
-# Autobind-first regardless of source order
-rv <- shiny::reactiveVal("init")
-result <- irid:::process_tags(
-  tags$input(
-    onInput = \(e) cat("user reads rv:", shiny::isolate(rv()), "\n"),
-    value = rv
-  )
-)
-stopifnot(length(result$events) == 1L)
-result$events[[1]]$handler(list(value = "typed"), "id")
-shiny::isolate(stopifnot(rv() == "typed"))
-# Expect: "user reads rv: typed" — handler observed the post-autobind state
-
-# No-collision case keeps separate entries
-rv2 <- shiny::reactiveVal("")
-result2 <- irid:::process_tags(
-  tags$input(value = rv2, onClick = \() NULL)
-)
-stopifnot(length(result2$events) == 2L)
-```
 
 ### Client-side state-binding application
 
@@ -218,9 +192,9 @@ configure timing and transport for all events on the element.
 - [ ] `.event = list(input = event_debounce(500), keydown = event_immediate())` applies per-event override
 - [ ] Events not present in a `.event` named list fall back to the per-event default rule
 - [ ] `.prevent_default = TRUE` propagates to every event entry on the element
-- [ ] Auto-bind synthetic event without explicit `.event` defaults to `event_debounce(200)`
-- [ ] Non-auto-bound events without explicit `.event` default to `event_immediate()`
-- [ ] `.event = event_immediate()` on an auto-bound input overrides the 200ms debounce default
+- [ ] Without `.event`, `input` events (autobind `value` synthetic or explicit `onInput`) default to `event_debounce(200)`
+- [ ] Without `.event`, every other event (autobind `checked` synthetic or any explicit `on*`) defaults to `event_immediate()`
+- [ ] `.event = event_immediate()` on an auto-bound text input overrides the 200ms debounce default
 - [ ] Multiple events on the same element (e.g. `onInput` + `onKeyDown`) share the element's `.event` config
 - [ ] `.event` named-list keys accept either DOM-event form (`input`) or `on`-prop form (`onInput`); both normalize to the lowercase DOM event
 - [ ] Malformed `.event` errors at process time: a non-config / non-list value, an unnamed list, a partially-named list, a list whose entries are not all `irid_event_config`, or a list with duplicate event names after normalization

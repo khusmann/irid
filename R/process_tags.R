@@ -103,13 +103,21 @@ normalize_element_event <- function(element_event) {
   function(event_name) element_event[[event_name]]
 }
 
+# Per-event default timing — the same rule applies whether the event entry
+# came from an auto-bind synthetic or an explicit `on*` handler, so adding
+# `value = rv` to an existing `onInput` doesn't silently shift its timing.
+# Typing produces a flood of `input` events so the bare default is debounce;
+# everything else fires once per user action and goes immediate.
+default_for_event <- function(event_name) {
+  if (event_name == "input") event_debounce(200) else event_immediate()
+}
+
 # Resolve the `irid_event_config` for a single event entry. Element-level
-# `.event` wins; otherwise fall back to the per-event default (auto-bind
-# synthetic → debounce 200ms, anything else → immediate).
-resolve_event_config <- function(event_name, autobind_origin, lookup) {
+# `.event` wins; otherwise fall back to the per-event default.
+resolve_event_config <- function(event_name, lookup) {
   cfg <- lookup(event_name)
   if (!is.null(cfg)) return(cfg)
-  if (autobind_origin) event_debounce(200) else event_immediate()
+  default_for_event(event_name)
 }
 
 # Compose multiple event handlers into a single 2-arg function. Each source
@@ -135,9 +143,7 @@ compose_handlers <- function(handlers) {
 # auto-bind synthetic handlers run before explicit `on*` handlers so an
 # explicit handler always observes the new state — cosmetic attribute
 # reordering can't change behavior. Within each tier, source order is
-# preserved. The merged entry inherits `autobind = TRUE` if any source
-# entry was auto-bind, so the default-rule resolution picks the auto-bind
-# default (debounce 200ms).
+# preserved.
 merge_pending_events <- function(pending_events) {
   by_event <- list()
   groups <- list()
@@ -149,13 +155,11 @@ merge_pending_events <- function(pending_events) {
       groups[[idx]] <- list(
         event = e$event,
         handlers = list(e$handler),
-        autobinds = e$autobind,
-        autobind = e$autobind
+        autobinds = e$autobind
       )
     } else {
       groups[[idx]]$handlers <- c(groups[[idx]]$handlers, list(e$handler))
       groups[[idx]]$autobinds <- c(groups[[idx]]$autobinds, e$autobind)
-      groups[[idx]]$autobind <- groups[[idx]]$autobind || e$autobind
     }
   }
   lapply(groups, function(g) {
@@ -165,7 +169,7 @@ merge_pending_events <- function(pending_events) {
     } else {
       compose_handlers(handlers)
     }
-    list(event = g$event, handler = handler, autobind = g$autobind)
+    list(event = g$event, handler = handler)
   })
 }
 
@@ -288,8 +292,15 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     pending_bindings <- list()
     pending_events <- list()
 
-    for (name in names(attribs)) {
-      val <- attribs[[name]]
+    # Iterate by position rather than `for (name in names(attribs))` —
+    # htmltools allows duplicate attribute names (e.g. two `onInput`s on
+    # one tag) and `attribs[[name]]` would collapse them all to the first
+    # match. Position-indexed access preserves every entry so the merge
+    # step can compose them in source order.
+    attrib_names <- names(attribs)
+    for (i in seq_along(attribs)) {
+      name <- attrib_names[[i]]
+      val <- attribs[[i]]
 
       # Catch misuse of irid constructs as attribute values. Without this
       # guard they fall through to `kept_attribs` and get serialized as
@@ -361,13 +372,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     # default rule) and propagate .prevent_default to every entry.
     for (i in seq_along(pending_events)) {
       e <- pending_events[[i]]
-      cfg <- resolve_event_config(e$event, e$autobind, element_event_lookup)
+      cfg <- resolve_event_config(e$event, element_event_lookup)
       pending_events[[i]]$mode <- cfg$mode
       pending_events[[i]]$ms <- cfg$ms
       pending_events[[i]]$leading <- cfg$leading
       pending_events[[i]]$coalesce <- cfg$coalesce
       pending_events[[i]]$prevent_default <- element_prevent_default
-      pending_events[[i]]$autobind <- NULL
     }
 
     if (length(pending_bindings) > 0L || length(pending_events) > 0L) {

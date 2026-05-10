@@ -11,9 +11,12 @@
 #' - `event_debounce()`: Waits until the user pauses for `ms` milliseconds
 #'   before firing.
 #'
-#' When `.event` is omitted, irid applies a per-event default:
-#' `event_debounce(200)` for auto-bind synthetic events,
-#' `event_immediate()` for everything else.
+#' When `.event` is omitted, irid applies a per-event default keyed on the
+#' DOM event name: `input` → `event_debounce(200)` (typing produces a flood
+#' of intermediate values), every other event → `event_immediate()`. The
+#' rule is the same whether the event entry came from an auto-bind synthetic
+#' or an explicit `on*` handler, so adding `value = rv` to an existing
+#' `onInput` doesn't silently shift its timing.
 #'
 #' `.event` accepts either a single config struct (applies to every event
 #' on the element) or a named list for per-event overrides. List keys may
