@@ -274,7 +274,10 @@
 
   // Radios only fire `change` on the newly-checked element in practice,
   // but gate defensively so a stray deselect-change can't write a stale
-  // value through auto-bind.
+  // value through auto-bind. Applies to every `change` listener on the
+  // radio (auto-bind synthetic AND any explicit `onChange`); browsers
+  // don't fire deselect-change in modern UAs, so this is invisible in
+  // practice but rules out one class of stale-value bug.
   function shouldSkip(el, eventName) {
     return eventName === 'change' &&
            el.tagName === 'INPUT' && el.type === 'radio' &&

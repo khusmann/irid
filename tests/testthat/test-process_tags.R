@@ -183,6 +183,26 @@ test_that("error message mentions the offending attribute name", {
   )
 })
 
+test_that("normalize_element_event(list()) errors with an emptiness hint", {
+  # `htmltools::tag()` drops empty-list attribs before process_tags sees
+  # them, so this branch is reachable only via a hand-built tag or a
+  # direct call. Test via the helper so we still pin the message shape
+  # for the defensive path.
+  expect_error(normalize_element_event(list()), "empty")
+})
+
+test_that("`.event` with unnamed entries errors with a naming hint", {
+  expect_error(
+    process_tags(
+      tags$input(
+        value = shiny::reactiveVal(""),
+        .event = list(event_debounce(100))
+      )
+    ),
+    "fully named"
+  )
+})
+
 test_that("event_*() is still valid as the `.event` element prop", {
   # `.event` is stripped before the per-attribute loop, so a config there
   # must NOT trigger the misuse error.

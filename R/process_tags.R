@@ -70,8 +70,15 @@ normalize_element_event <- function(element_event) {
       call. = FALSE
     )
   }
+  if (length(element_event) == 0L) {
+    stop(
+      "`.event` list is empty; pass at least one entry, or omit `.event` ",
+      "to fall back to the per-event default rule",
+      call. = FALSE
+    )
+  }
   nms <- names(element_event)
-  if (length(element_event) == 0L || is.null(nms) || any(!nzchar(nms))) {
+  if (is.null(nms) || any(!nzchar(nms))) {
     stop(
       "`.event` list must be fully named, keyed by DOM event ",
       "(e.g. `input`, `keydown`) or `on`-prop (e.g. `onInput`)",
