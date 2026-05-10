@@ -2,14 +2,10 @@
 #
 # A classic reactive UI challenge: two inputs representing the same value in
 # different units, where editing either one should update the other. In
-# traditional Shiny this requires careful coordination to avoid feedback loops.
-# With irid's controlled inputs, the solution is straightforward — one
-# `reactiveVal` holds the canonical Celsius value, and the Fahrenheit
-# thermometer derives from it via a closure. Both thermometers stay in
-# sync automatically.
-#
-# The app is composed from two reusable components: `Thermometer` (a labeled
-# vertical slider) and `TemperatureDisplay` (a readout with a zone badge).
+# traditional Shiny this needs careful coordination to avoid feedback loops.
+# With irid the canonical Celsius value lives in a single `reactiveVal`, and
+# Fahrenheit is a `reactiveProxy` view that converts in both directions —
+# auto-bind keeps both thermometers in sync without any extra wiring.
 
 library(irid)
 library(bslib)
@@ -17,7 +13,10 @@ library(bslib)
 c_to_f <- function(c) round(c * 9 / 5 + 32, 1)
 f_to_c <- function(f) round((f - 32) * 5 / 9, 1)
 
+# Range inputs deliver strings on write. Coercing here means callers can pass
+# any numeric callable without thinking about DOM types.
 Thermometer <- function(label, value, min, max) {
+  numeric_value <- reactiveProxy(value, set = \(v) value(as.numeric(v)))
   tags$div(
     class = "text-center",
     tags$label(class = "form-label fw-semibold", label),
@@ -27,7 +26,7 @@ Thermometer <- function(label, value, min, max) {
       tags$input(
         type = "range", min = min, max = max,
         style = "appearance: slider-vertical; height: 200px; width: 30px;",
-        value = value,
+        value = numeric_value,
         .event = event_throttle(100)
       ),
       tags$small(class = "text-muted", min)
@@ -35,17 +34,15 @@ Thermometer <- function(label, value, min, max) {
   )
 }
 
-TemperatureDisplay <- function(celsius, fahrenheit) {
-  temp_zone <- function(c) {
-    zones <- list(
-      list(max = 0, label = "Freezing", color = "info"),
-      list(max = 15, label = "Cold", color = "primary"),
-      list(max = 30, label = "Comfortable", color = "success"),
-      list(max = Inf, label = "Hot", color = "danger")
-    )
-    Find(\(z) c <= z$max, zones)
-  }
+zones <- list(
+  list(max = 0,   label = "Freezing",    color = "info"),
+  list(max = 15,  label = "Cold",        color = "primary"),
+  list(max = 30,  label = "Comfortable", color = "success"),
+  list(max = Inf, label = "Hot",         color = "danger")
+)
 
+TemperatureDisplay <- function(celsius, fahrenheit) {
+  zone <- reactive(Find(\(z) celsius() <= z$max, zones))
   tags$div(
     class = "text-center mb-3",
     tags$div(
@@ -55,11 +52,8 @@ TemperatureDisplay <- function(celsius, fahrenheit) {
     tags$div(
       class = "mt-1",
       tags$span(
-        class = \() {
-          z <- temp_zone(celsius())
-          paste("badge fs-6", paste0("bg-", z$color))
-        },
-        \() temp_zone(celsius())$label
+        class = \() paste0("badge fs-6 bg-", zone()$color),
+        \() zone()$label
       )
     )
   )
@@ -67,20 +61,18 @@ TemperatureDisplay <- function(celsius, fahrenheit) {
 
 TemperatureApp <- function() {
   celsius <- reactiveVal(20)
-  celsius_num <- reactiveProxy(celsius, set = \(v) celsius(as.numeric(v)))
   fahrenheit <- reactiveProxy(celsius,
-    get = \(c) c_to_f(c),
-    set = \(f) celsius(f_to_c(as.numeric(f)))
+    get = c_to_f,
+    set = \(f) celsius(f_to_c(f))
   )
 
   page_fluid(
     card(
       card_body(
         TemperatureDisplay(celsius, fahrenheit),
-
         tags$div(
           class = "d-flex justify-content-evenly align-items-center",
-          Thermometer("Celsius", celsius_num, -40, 60),
+          Thermometer("Celsius", celsius, -40, 60),
           Thermometer("Fahrenheit", fahrenheit, -40, 140)
         )
       )
