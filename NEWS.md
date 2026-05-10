@@ -1,3 +1,40 @@
+# irid (development version)
+
+## Breaking changes
+
+* Auto-bind: `value`, `checked`, and `selected` now accept any callable
+  (`reactiveVal`, store leaf, `reactiveProxy`, plain function) and
+  automatically two-way bind. Reads populate the prop; DOM events on the
+  element write back through the same callable. Explicit `onInput` /
+  `onChange` write handlers can be removed when auto-bind covers them.
+* `event_immediate()`, `event_throttle()`, `event_debounce()` no longer
+  wrap a handler. They return a config struct used with the new
+  element-level `.event` prop. Per-handler timing is gone — set timing on
+  the element instead:
+
+  ```r
+  # OLD
+  tags$input(value = field, onInput = event_debounce(\(e) field(e$value), ms = 500))
+
+  # NEW
+  tags$input(value = field, .event = event_debounce(500))
+  ```
+
+  `.event` accepts either a single config or a named list keyed by
+  lowercase DOM event name for per-event overrides.
+* `prevent_default` moved off the event constructors and onto the element
+  as `.prevent_default = TRUE`.
+* On `<select>` and `<input type="radio">`, two-way binding now uses the
+  `selected` prop (not `value`). `selected` is polymorphic: on a
+  `<select>` it sets `el.value`; on a radio it mirrors via
+  `el.checked = (value === el.value)`.
+
+## New features
+
+* `reactiveProxy()` — wrap a callable with custom read/write behavior for
+  validation, transforms, and read-only views at component boundaries.
+* `reactiveStore()` — hierarchical reactive state container.
+
 # irid 0.1.0
 
 Initial release.

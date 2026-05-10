@@ -11,8 +11,8 @@ static HTML.
 - [ ] Reactive attribute is extracted into `$bindings` with correct `id`, `attr`, `fn`
 - [ ] Event handler (`onInput`, `onClick`, etc.) is extracted into `$events`
 - [ ] Event name conversion: `onInput` → `input`, `onClick` → `click` (strip `on`, lowercase)
-- [ ] Bare function handlers are wrapped in `event_immediate()`
-- [ ] `event_throttle`/`event_debounce` handlers preserve `mode`, `ms`, `leading`, `coalesce`
+- [ ] Bare function handlers default to `event_immediate()` per the per-event default rule
+- [ ] Element-level `.event` config supplies `mode`, `ms`, `leading`, `coalesce` to every event entry on the element
 - [ ] Element with existing `id` attribute keeps it (not overwritten by auto-ID)
 - [ ] Element with both reactive attrs and events shares one ID
 - [ ] Multiple event handlers on one element (e.g. both `onInput` and `onClick`)
@@ -123,10 +123,10 @@ the write back through the callable.
 ### `process_tags` extraction
 
 - [ ] `value = reactiveVal()` on text input produces both a binding (`attr = "value"`) and a synthetic `input` event entry with handler `\(e) val(e$value)`
-- [ ] `checked = reactiveVal()` on checkbox produces both a binding and a synthetic `change` event entry
-- [ ] `selected = reactiveVal()` on `<select>` produces both a binding and a synthetic `input` event entry
+- [ ] `checked = reactiveVal()` on checkbox produces both a binding and a synthetic `change` event entry with handler `\(e) val(e$checked)`
+- [ ] `selected = reactiveVal()` on `<select>` produces both a binding and a synthetic `change` event entry
 - [ ] `selected = reactiveVal()` on `<input type="radio">` produces both a binding and a synthetic `change` event entry
-- [ ] 0-arg callable in `value` produces only a binding (no write event entry)
+- [ ] 0-arg callable in `value` produces both a binding and a synthetic event entry with a no-op handler (write-attempt + force-send echoes current value back)
 - [ ] Auto-bind synthetic event coexists with explicit `onInput`/`onChange` on the same element
 
 ### Write-back
@@ -146,7 +146,7 @@ the write back through the callable.
 
 - [ ] `selected` on `<select>`: `irid-attr` sets `el.value = msg.value`
 - [ ] `selected` on `<input type="radio">`: `irid-attr` sets `el.checked = (msg.value === el.value)`
-- [ ] `<select>` write-back listens on `input`, not `change`
+- [ ] `<select>` write-back listens on `change`
 - [ ] Radio write-back listens on `change`; only fires when `el.checked === true`
 
 ## `.event` element config
@@ -156,8 +156,10 @@ configure timing and transport for all events on the element.
 
 - [ ] `.event` and `.prevent_default` are stripped from output HTML attributes
 - [ ] `.event = event_debounce(500)` applies to every event entry on the element (auto-bind synthetic + explicit `on*`)
+- [ ] `.event = list(input = event_debounce(500), keydown = event_immediate())` applies per-event override
+- [ ] Events not present in a `.event` named list fall back to the per-event default rule
 - [ ] `.prevent_default = TRUE` propagates to every event entry on the element
-- [ ] Auto-bound `value` without explicit `.event` defaults to `event_debounce(200)`
+- [ ] Auto-bind synthetic event without explicit `.event` defaults to `event_debounce(200)`
 - [ ] Non-auto-bound events without explicit `.event` default to `event_immediate()`
 - [ ] `.event = event_immediate()` on an auto-bound input overrides the 200ms debounce default
 - [ ] Multiple events on the same element (e.g. `onInput` + `onKeyDown`) share the element's `.event` config

@@ -48,19 +48,28 @@ Walks the tag tree recursively and produces:
   attributes are replaced by stable auto-generated element IDs. Control-flow
   nodes become a pair of HTML **comment anchors**
   (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
-  should be inserted.
+  should be inserted. Element-level config (`.event`, `.prevent_default`)
+  is stripped before HTML serialization.
 - **`bindings`** — List of `{id, attr, fn}` for each reactive attribute.
-- **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce}` for
-  each event callback.
+- **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce, prevent_default}`
+  for each event callback (auto-bind synthetic and explicit `on*`).
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   `Index`, or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
 
-Bare functions are wrapped with a default event mode: `onInput` uses
-`event_debounce(ms = 200)` (since intermediate values during typing are
-noise), all other events use `event_immediate()`. Explicit wrappers
-(`event_immediate()`, `event_throttle()`, `event_debounce()`) override the
-default.
+When a state-binding prop (`value`, `checked`, `selected`) holds a callable,
+process_tags emits both a binding (server → client read) and a synthetic
+event entry (client → server write). The synthetic handler is
+arity-dispatched: 0-arg callables get a no-op handler so the listener still
+fires and the optimistic-update protocol echoes the current value back.
+1-arg+ callables receive `e$value` (or `e$checked` for `checked`).
+
+Event timing comes from the element-level `.event` prop. A single
+`irid_event_config` applies to every event on the element; a named list
+keyed by lowercase DOM event name overrides per event. With no covering
+`.event`, the per-event default rule applies: auto-bind synthetic →
+`event_debounce(200)`, everything else → `event_immediate()`.
+`.prevent_default` propagates to every event entry on the element.
 
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.
@@ -351,18 +360,21 @@ returns silently produce unexpected output.
 
 ### Client-side event filtering (planned)
 
-Add a `filter` argument to `event_immediate()`, `event_throttle()`, and
-`event_debounce()` that accepts a JS expression string. The expression is
-evaluated client-side with the DOM event object as `e` — if falsy, the event is
-never sent to the server (zero round-trips). This avoids flooding the server
-with events the handler doesn't care about (e.g. `onKeyDown` that only handles
-Enter).
+Add a `filter` argument to the event-config constructors that accepts a JS
+expression string. The expression is evaluated client-side with the DOM
+event object as `e` — if falsy, the event is never sent to the server
+(zero round-trips). This avoids flooding the server with events the
+handler doesn't care about (e.g. `onKeyDown` that only handles Enter).
 
 A `key_filter()` helper would generate the JS expression for common key
 matching:
 
 ```r
-onKeyDown = event_immediate(\(e) submit(), filter = key_filter("Enter"))
+tags$input(
+  value = field,
+  onKeyDown = \(e) submit(),
+  .event = list(keydown = event_immediate(filter = key_filter("Enter")))
+)
 ```
 
 Once `filter` is available, the todo example's `onKeyDown = \(event) if (event$key == "Enter") add_todo()` can be restored. It was removed in the interim because without client-side filtering, every keydown is sent to the server — which, combined with the missing event queue ordering (see `dev/client-event-queue-design.md`), causes Enter to race ahead of the pending `onInput` debounce and submit an incomplete value.

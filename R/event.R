@@ -1,15 +1,27 @@
-#' Event handler wrappers
+#' Event timing and transport config
 #'
-#' Control how event callbacks are dispatched from the browser to the server.
+#' Configure how event callbacks are dispatched from the browser to the
+#' server. Pass the result to an element's `.event` prop to control timing
+#' for **all** events on that element (auto-bind synthetic write-back plus
+#' any explicit `on*` handlers).
 #'
-#' - `event_immediate()`: Fires on every event with no rate limiting. Bare
-#'   functions passed as event handlers are implicitly wrapped with
-#'   `event_immediate()`, except for `onInput` which defaults to
-#'   `event_debounce(ms = 200)`.
+#' - `event_immediate()`: Fires on every event with no rate limiting.
 #' - `event_throttle()`: Fires at most every `ms` milliseconds while the
 #'   event is active.
 #' - `event_debounce()`: Waits until the user pauses for `ms` milliseconds
 #'   before firing.
+#'
+#' When `.event` is omitted, irid applies a per-event default:
+#' `event_debounce(200)` for auto-bind synthetic events,
+#' `event_immediate()` for everything else.
+#'
+#' `.event` accepts either a single config struct (applies to every event
+#' on the element) or a named list keyed by lowercase DOM event name
+#' (`input`, `change`, `keydown`, ...) for per-event overrides. Events
+#' not covered by the list fall back to the per-event default.
+#'
+#' Use the element-level `.prevent_default = TRUE` prop to call
+#' `event.preventDefault()` in the browser before dispatch.
 #'
 #' @section The event object:
 #' The `event` argument passed to handlers is a list containing all
@@ -25,41 +37,41 @@
 #' Keyboard events additionally include `key`, `code`, `ctrlKey`,
 #' `shiftKey`, `altKey`, and `metaKey`.
 #'
-#' @param fn An event handler function receiving `(event)` or `(event, id)`.
 #' @param coalesce If `TRUE`, gate on server idle so events never queue
 #'   faster than the server can process them. Defaults to `FALSE` for
 #'   `event_immediate()` and `TRUE` for `event_throttle()`/`event_debounce()`.
-#' @param prevent_default If `TRUE`, call `event.preventDefault()` in the
-#'   browser before dispatching. Defaults to `FALSE`.
 #' @param ms Minimum interval (throttle) or quiet period (debounce) in
 #'   milliseconds.
 #' @param leading If `TRUE` (default), fire immediately on the first
 #'   event. If `FALSE`, wait for the timer before firing.
-#' @return A wrapped handler.
+#' @return An `irid_event_config` struct.
 #'
-#' @name event-wrappers
+#' @name event-config
 NULL
 
-#' @rdname event-wrappers
+#' @rdname event-config
 #' @export
-event_immediate <- function(fn, coalesce = FALSE, prevent_default = FALSE) {
-  structure(fn, class = c("irid_event", "function"),
-            mode = "immediate", coalesce = coalesce,
-            prevent_default = prevent_default)
+event_immediate <- function(coalesce = FALSE) {
+  structure(
+    list(mode = "immediate", coalesce = coalesce),
+    class = "irid_event_config"
+  )
 }
 
-#' @rdname event-wrappers
+#' @rdname event-config
 #' @export
-event_throttle <- function(fn, ms, leading = TRUE, coalesce = TRUE, prevent_default = FALSE) {
-  structure(fn, class = c("irid_event", "function"),
-            mode = "throttle", ms = ms, leading = leading,
-            coalesce = coalesce, prevent_default = prevent_default)
+event_throttle <- function(ms, leading = TRUE, coalesce = TRUE) {
+  structure(
+    list(mode = "throttle", ms = ms, leading = leading, coalesce = coalesce),
+    class = "irid_event_config"
+  )
 }
 
-#' @rdname event-wrappers
+#' @rdname event-config
 #' @export
-event_debounce <- function(fn, ms, coalesce = TRUE, prevent_default = FALSE) {
-  structure(fn, class = c("irid_event", "function"),
-            mode = "debounce", ms = ms, coalesce = coalesce,
-            prevent_default = prevent_default)
+event_debounce <- function(ms, coalesce = TRUE) {
+  structure(
+    list(mode = "debounce", ms = ms, coalesce = coalesce),
+    class = "irid_event_config"
+  )
 }

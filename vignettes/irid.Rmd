@@ -86,8 +86,7 @@ Counter <- function(label, count) {
       ),
       tags$input(
         type = "range", min = 0, max = 100,
-        value = count,
-        onInput = \(event) count(event$valueAsNumber)
+        value = reactiveProxy(count, set = \(v) count(as.numeric(v)))
       ),
       tags$button(
         class = "btn btn-outline-secondary btn-sm",
@@ -165,38 +164,71 @@ primitive-valued properties from the browser event, plus element properties
 like `value`, `valueAsNumber`, and `checked`:
 
 ```r
-onInput = \(event) threshold(event$valueAsNumber)  # event object
+onClick = \(event) handle_click(event)              # event object
 onClick = \(event, id) handle_click(id)             # event + element id
 onClick = \() count(count() + 1)                    # neither
 ```
 
-Bare `onInput` callbacks are automatically debounced (200 ms). All other
-events fire immediately. Override with explicit wrappers:
+Event timing and `event.preventDefault()` live on the **element**, not the
+handler. Use `.event` to set the timing for every event on the element, and
+`.prevent_default = TRUE` to call `preventDefault` before dispatch:
 
 ```r
-onInput = event_immediate(\(event) name(event$value))
-onInput = event_throttle(\(event) threshold(event$valueAsNumber), 100)
-onInput = event_debounce(\(event) name(event$value), 500)
+tags$input(value = field, .event = event_debounce(500))
+tags$button("Save", onClick = \() save(), .event = event_throttle(1000))
+tags$form(onSubmit = \(e) handle(e), .prevent_default = TRUE)
 ```
+
+`.event` also accepts a named list keyed by lowercase DOM event name to
+override timing per event:
+
+```r
+tags$input(
+  value = field,
+  onKeyDown = \(e) if (e$key == "Enter") submit(),
+  .event = list(input = event_debounce(500))
+)
+```
+
+When `.event` is omitted, auto-bind synthetic events default to
+`event_debounce(200)` and everything else to `event_immediate()`.
 
 ## Controlled inputs
 
-Inputs are controlled by binding their `value` attribute to a `reactiveVal`.
-The reactive is the single source of truth — setting it from anywhere updates
-every input bound to it:
+Bind a state-binding prop (`value`, `checked`, `selected`) to a callable to
+get two-way binding for free. The callable can be a `reactiveVal`, a store
+leaf, a `reactiveProxy`, or any function:
 
 ```r
 name <- reactiveVal("")
 
-tags$input(
-  type = "text",
-  value = name,
-  onInput = \(event) name(event$value)
-)
+tags$input(type = "text", value = name)
 ```
 
-Multiple inputs can share the same `reactiveVal`. Type in one, the others
-update. No `updateTextInput`. No `freezeReactiveValue`.
+The read fills the input; DOM events on the element write back through the
+same callable. Multiple inputs can share the same `reactiveVal` — type in
+one, the others update. No `updateTextInput`. No `freezeReactiveValue`. No
+`onInput` write handler.
+
+If you need to transform reads or gate writes, wrap the callable in a
+`reactiveProxy`:
+
+```r
+# Coerce the string from a range slider into a number on write
+reactiveProxy(count, set = \(v) count(as.numeric(v)))
+
+# Bidirectional transform — display Fahrenheit, store Celsius
+reactiveProxy(celsius,
+  get = \(c) c * 9/5 + 32,
+  set = \(f) celsius((as.numeric(f) - 32) * 5/9)
+)
+
+# Read-only view — writes silently dropped, input snaps back to current value
+reactiveProxy(name, set = NULL)
+```
+
+A 0-arg function (e.g. `\() toupper(name())`) behaves the same as
+`reactiveProxy(set = NULL)`: read-only with snap-back.
 
 *See the [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
@@ -295,8 +327,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$input(
         type = "range", min = 0, max = 1, step = 0.1,
-        value = threshold,
-        onInput = \(event) threshold(event$valueAsNumber)
+        value = reactiveProxy(threshold, set = \(v) threshold(as.numeric(v)))
       ),
       tags$span(\() paste("Threshold:", threshold()))
     )

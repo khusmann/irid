@@ -23,11 +23,11 @@ CountDisplay <- function(count) {
 }
 
 CountControls <- function(count) {
+  count_num <- reactiveProxy(count, set = \(v) count(as.numeric(v)))
   tags$div(
     tags$input(
       type = "range", min = 0, max = 100,
-      value = count,
-      onInput = \(event) count(event$valueAsNumber)
+      value = count_num
     ),
     tags$button(
       class = "btn btn-outline-secondary btn-sm",

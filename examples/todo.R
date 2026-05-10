@@ -81,8 +81,7 @@ TodoApp <- function() {
             type = "text",
             class = "form-control",
             placeholder = "What needs to be done?",
-            value = new_text,
-            onInput = \(event) new_text(event$value)
+            value = new_text
           ),
           tags$button(
             class = "btn btn-primary",

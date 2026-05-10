@@ -13,7 +13,9 @@ is_irid_reactive(x)
 Logical.
 }
 \description{
-Returns \code{TRUE} for plain functions, Shiny reactives, and rate-limited
-handlers created by \code{\link[=event_throttle]{event_throttle()}} or \code{\link[=event_debounce]{event_debounce()}}.
+Returns \code{TRUE} for any callable irid treats as reactive — plain
+functions, Shiny reactives, store nodes/leaves, and \code{reactiveProxy}
+wrappers. Used by \code{\link[=process_tags]{process_tags()}} to decide which attributes participate
+in auto-bind / event extraction.
 }
 \keyword{internal}

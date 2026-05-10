@@ -17,7 +17,7 @@ library(bslib)
 c_to_f <- function(c) round(c * 9 / 5 + 32, 1)
 f_to_c <- function(f) round((f - 32) * 5 / 9, 1)
 
-Thermometer <- function(label, value, on_change, min, max) {
+Thermometer <- function(label, value, min, max) {
   tags$div(
     class = "text-center",
     tags$label(class = "form-label fw-semibold", label),
@@ -28,7 +28,7 @@ Thermometer <- function(label, value, on_change, min, max) {
         type = "range", min = min, max = max,
         style = "appearance: slider-vertical; height: 200px; width: 30px;",
         value = value,
-        onInput = event_throttle(\(event) on_change(event$valueAsNumber), 100)
+        .event = event_throttle(100)
       ),
       tags$small(class = "text-muted", min)
     )
@@ -67,7 +67,11 @@ TemperatureDisplay <- function(celsius, fahrenheit) {
 
 TemperatureApp <- function() {
   celsius <- reactiveVal(20)
-  fahrenheit <- \() c_to_f(celsius())
+  celsius_num <- reactiveProxy(celsius, set = \(v) celsius(as.numeric(v)))
+  fahrenheit <- reactiveProxy(celsius,
+    get = \(c) c_to_f(c),
+    set = \(f) celsius(f_to_c(as.numeric(f)))
+  )
 
   page_fluid(
     card(
@@ -76,8 +80,8 @@ TemperatureApp <- function() {
 
         tags$div(
           class = "d-flex justify-content-evenly align-items-center",
-          Thermometer("Celsius", celsius, celsius, -40, 60),
-          Thermometer("Fahrenheit", fahrenheit, \(f) celsius(f_to_c(f)), -40, 140)
+          Thermometer("Celsius", celsius_num, -40, 60),
+          Thermometer("Fahrenheit", fahrenheit, -40, 140)
         )
       )
     )

@@ -25,6 +25,19 @@ OptimisticUpdates <- function() {
   max_chars <- 10L
   delay_ms <- reactiveVal(0L)
 
+  truncated <- reactiveProxy(text,
+    get = \(v) substr(v, 1, max_chars),
+    set = \(v) text(substr(v, 1, max_chars))
+  )
+
+  delay_proxy <- reactiveProxy(delay_ms,
+    set = \(v) {
+      val <- as.integer(v)
+      delay_ms(val)
+      options(irid.debug.latency = val / 1000)
+    }
+  )
+
   page_fluid(
     card(
       card_header("Optimistic Update Tests"),
@@ -36,8 +49,7 @@ OptimisticUpdates <- function() {
           tags$input(
             type = "text", class = "form-control",
             placeholder = "Type here...",
-            value = text,
-            onInput = \(event) text(event$value)
+            value = text
           ),
           tags$button(
             class = "btn btn-outline-secondary",
@@ -50,15 +62,14 @@ OptimisticUpdates <- function() {
         tags$p(class = "text-muted", "Type past the limit. Server truncates to 10 chars."),
         tags$input(
           type = "text", class = "form-control mb-3",
-          value = \() substr(text(), 1, max_chars),
-          onInput = \(event) text(substr(event$value, 1, max_chars))
+          value = truncated
         ),
 
         tags$h6("3. Server echo (mirror)"),
         tags$p(class = "text-muted", "Read-only mirror. Should always match server state."),
         tags$input(
           type = "text", class = "form-control mb-3",
-          value = text, disabled = \() TRUE
+          value = text, disabled = TRUE
         ),
 
         tags$p(
@@ -73,12 +84,7 @@ OptimisticUpdates <- function() {
         tags$label(\() paste0("Delay: ", delay_ms(), " ms")),
         tags$input(
           type = "range", min = "0", max = "3000", step = "50",
-          value = delay_ms,
-          onInput = \(event) {
-            val <- as.integer(event$value)
-            delay_ms(val)
-            options(irid.debug.latency = val / 1000)
-          }
+          value = delay_proxy
         )
       )
     )

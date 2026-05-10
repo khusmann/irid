@@ -10,6 +10,7 @@ library(bslib)
 
 OldFaithful <- function() {
   bins <- reactiveVal(30L)
+  bins_int <- reactiveProxy(bins, set = \(v) bins(as.integer(v)))
 
   page_fluid(
     card(
@@ -17,8 +18,7 @@ OldFaithful <- function() {
         tags$label(\() paste0("Number of bins: ", bins())),
         tags$input(
           type = "range", min = "1", max = "50",
-          value = bins,
-          onInput = \(event) bins(as.integer(event$value))
+          value = bins_int
         ),
         PlotOutput(\() {
           x <- faithful$waiting

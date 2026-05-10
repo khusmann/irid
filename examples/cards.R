@@ -44,6 +44,15 @@ App <- function() {
   selected_columns <- reactiveVal(character(0))
   choice <- reactiveVal("")
 
+  add_column <- reactiveProxy(choice,
+    set = \(v) {
+      if (nzchar(v)) {
+        selected_columns(c(selected_columns(), v))
+        choice("")
+      }
+    }
+  )
+
   dataset <- \() all_datasets[[dataset_name()]]
   available <- \() setdiff(names(dataset()), selected_columns())
 
@@ -60,21 +69,14 @@ App <- function() {
     tags$label(class = "form-label", "Select a dataset:"),
     tags$select(
       class = "form-select mb-3",
-      value = dataset_name,
-      onChange = \(event) dataset_name(event$value),
+      selected = dataset_name,
       Each(\() names(all_datasets), \(name) tags$option(value = name, name))
     ),
 
     tags$label(class = "form-label", "Add a column:"),
     tags$select(
       class = "form-select mb-3",
-      value = choice,
-      onChange = \(event) {
-        if (nzchar(event$value)) {
-          selected_columns(c(selected_columns(), event$value))
-          choice("")
-        }
-      },
+      selected = add_column,
       tags$option(value = "", "Select a column..."),
       Each(available, \(col) tags$option(value = col, col))
     ),

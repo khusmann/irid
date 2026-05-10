@@ -151,6 +151,20 @@
     }
   });
 
+  // `selected` is polymorphic on element type: `<select>` reads/writes
+  // `el.value`; a radio input mirrors the bound value via `el.checked`
+  // (each radio in the group gets its own binding and lights up only when
+  // its `value` matches). Falls back to `el.selected` for `<option>`.
+  function applySelected(el, value) {
+    if (el.tagName === 'SELECT') {
+      el.value = value;
+    } else if (el.tagName === 'INPUT' && el.type === 'radio') {
+      el.checked = (value === el.value);
+    } else {
+      el.selected = value;
+    }
+  }
+
   Shiny.addCustomMessageHandler('irid-attr', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
@@ -163,7 +177,9 @@
       // Programmatic (no sequence) or up-to-date: apply, but skip no-op
       if (el.value === msg.value) return;
     }
-    if (PROP_ATTRS[msg.attr]) {
+    if (msg.attr === 'selected') {
+      applySelected(el, msg.value);
+    } else if (PROP_ATTRS[msg.attr]) {
       el[msg.attr] = msg.value;
     } else if (msg.value === false || msg.value === null) {
       el.removeAttribute(msg.attr);
@@ -255,6 +271,15 @@
   });
 
   // --- Event payload construction ---
+
+  // Radios only fire `change` on the newly-checked element in practice,
+  // but gate defensively so a stray deselect-change can't write a stale
+  // value through auto-bind.
+  function shouldSkip(el, eventName) {
+    return eventName === 'change' &&
+           el.tagName === 'INPUT' && el.type === 'radio' &&
+           !el.checked;
+  }
 
   function buildPayload(e, el, id) {
     var payload = {};
@@ -351,6 +376,7 @@
     managed[msg.inputId] = s;
 
     el.addEventListener(msg.event, function(e) {
+      if (shouldSkip(el, msg.event)) return;
       if (msg.preventDefault) e.preventDefault();
       s.payload = buildPayload(e, el, msg.id);
       if (!s.timerRunning) {
@@ -404,6 +430,7 @@
     managed[msg.inputId] = s;
 
     el.addEventListener(msg.event, function(e) {
+      if (shouldSkip(el, msg.event)) return;
       if (msg.preventDefault) e.preventDefault();
       s.payload = buildPayload(e, el, msg.id);
       s.timerReady = false;
@@ -438,12 +465,14 @@
       managed[msg.inputId] = s;
 
       el.addEventListener(msg.event, function(e) {
+        if (shouldSkip(el, msg.event)) return;
         if (msg.preventDefault) e.preventDefault();
         s.payload = buildPayload(e, el, msg.id);
         s.maybeSend();
       });
     } else {
       el.addEventListener(msg.event, function(e) {
+        if (shouldSkip(el, msg.event)) return;
         if (msg.preventDefault) e.preventDefault();
         sendPayload(msg.inputId, buildPayload(e, el, msg.id));
       });

@@ -11,6 +11,7 @@ library(irid)
 library(bslib)
 
 Counter <- function(label, count) {
+  count_num <- reactiveProxy(count, set = \(v) count(as.numeric(v)))
   card(
     card_header(label),
     card_body(
@@ -20,8 +21,7 @@ Counter <- function(label, count) {
       ),
       tags$input(
         type = "range", min = 0, max = 100,
-        value = count,
-        onInput = \(event) count(event$valueAsNumber)
+        value = count_num
       ),
       tags$button(
         class = "btn btn-outline-secondary btn-sm",
