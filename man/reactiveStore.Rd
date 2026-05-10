@@ -32,4 +32,9 @@ Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
 replace; store nodes patch (only the keys present in the patch are
 updated). Unknown keys on a store-node patch are an error. Types are
 not enforced.
+
+\code{length()} on a leaf returns \code{1} (the leaf is a single callable), not
+the length of the underlying value — \code{length.reactiveLeaf} is unset
+deliberately so htmltools can construct attributes from \code{value = state$leaf} without tripping. Use \code{length(leaf())} for the underlying
+length.
 }

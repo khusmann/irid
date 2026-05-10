@@ -92,6 +92,18 @@ normalize_element_event <- function(element_event) {
   if (inherits(element_event, "irid_event_config")) {
     return(function(event_name) element_event)
   }
+  # Catch other irid constructs (control-flow nodes, outputs) up front —
+  # they're lists too and would otherwise fail with a confusing
+  # `.event$<key>` error from the keyed-list path below.
+  irid_class <- grep("^irid_", class(element_event), value = TRUE)
+  if (length(irid_class) > 0L) {
+    stop(
+      "`.event` got an irid construct (`",
+      paste(irid_class, collapse = "/"),
+      "`); these belong as children, not as `.event`",
+      call. = FALSE
+    )
+  }
   if (!is.list(element_event)) {
     stop(
       "`.event` must be an `irid_event_config` (from `event_immediate()`, ",
@@ -127,6 +139,18 @@ normalize_element_prevent_default <- function(prevent_default) {
       !is.na(prevent_default)) {
     val <- prevent_default
     return(function(event_name) val)
+  }
+  # Catch irid constructs up front — `irid_event_config`, control-flow nodes,
+  # and outputs are all lists, so the generic keyed-list error below would be
+  # misleading.
+  irid_class <- grep("^irid_", class(prevent_default), value = TRUE)
+  if (length(irid_class) > 0L) {
+    stop(
+      "`.prevent_default` got an irid construct (`",
+      paste(irid_class, collapse = "/"),
+      "`); pass `TRUE`/`FALSE` or a named list of logicals",
+      call. = FALSE
+    )
   }
   if (!is.list(prevent_default)) {
     stop(
@@ -365,7 +389,15 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       irid_class <- grep("^irid_", class(val), value = TRUE)
       if (length(irid_class) > 0L) {
         hint <- if ("irid_event_config" %in% irid_class) {
-          "Pass event timing via the element-level `.event` prop."
+          if (grepl("^on[A-Z]", name)) {
+            paste0(
+              "`event_*()` returns a timing config, not a handler wrapper. ",
+              "Pass the handler directly to `", name, "` and put the config ",
+              "on the element-level `.event` prop."
+            )
+          } else {
+            "Event configs belong on the element-level `.event` prop."
+          }
         } else {
           paste0(
             "Constructs of class `", irid_class[[1]],

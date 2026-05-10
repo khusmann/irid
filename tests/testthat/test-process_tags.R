@@ -311,14 +311,25 @@ test_that("element-level .event overrides the per-event default", {
 # As an attribute value it would silently fall through to `kept_attribs` and
 # get serialized as raw HTML; process_tags must reject this loudly.
 
-test_that("event_immediate() on an `on*` prop errors with migration hint", {
+test_that("event_immediate() on an `on*` prop errors with a tailored hint", {
   expect_error(
     process_tags(tags$button(onClick = event_immediate())),
     "irid_event_config"
   )
+  # The hint names the offending prop and points at both halves of the
+  # split: handler goes on `on*`, timing config goes on `.event`.
   expect_error(
     process_tags(tags$button(onClick = event_immediate())),
-    "\\.event"
+    "timing config, not a handler wrapper.*onClick.*\\.event"
+  )
+})
+
+test_that("event config on a non-`on*` attribute uses a generic hint", {
+  # `class = event_immediate()` is misuse but not a migration shape — the
+  # `on*`-tailored hint would be misleading, so the generic message kicks in.
+  expect_error(
+    process_tags(tags$div(class = event_immediate())),
+    "Event configs belong on the element-level `\\.event` prop"
   )
 })
 
@@ -521,6 +532,21 @@ test_that(".event list with a non-config entry errors with the offending key", {
   )
 })
 
+test_that(".event = irid construct errors with a children-belong hint", {
+  # Control-flow nodes are lists, so without the up-front irid-class check
+  # they'd reach the keyed-list path and surface a confusing
+  # `.event$<internal-field>` error.
+  expect_error(
+    process_tags(
+      tags$input(
+        value = shiny::reactiveVal(""),
+        .event = Each(\() 1:3, \(i) tags$span(i))
+      )
+    ),
+    "irid_each.*children"
+  )
+})
+
 test_that(".event with duplicate keys after normalization errors", {
   # `input` and `onInput` collapse to the same DOM event — must not silently
   # pick one. The error names the duplicate.
@@ -649,6 +675,30 @@ test_that(".prevent_default with unnamed entries errors with a naming hint", {
       )
     ),
     "fully named"
+  )
+})
+
+test_that(".prevent_default = irid construct errors before the keyed-list path", {
+  # Both irid_event_config (a wrong-type misuse) and control-flow nodes are
+  # lists, so without the up-front irid-class check they'd surface confusing
+  # `.prevent_default$<internal-field>` errors from the keyed-list branch.
+  expect_error(
+    process_tags(
+      tags$input(
+        value = shiny::reactiveVal(""),
+        .prevent_default = event_immediate()
+      )
+    ),
+    "irid_event_config.*TRUE.*FALSE"
+  )
+  expect_error(
+    process_tags(
+      tags$div(
+        onClick = function(e) NULL,
+        .prevent_default = Each(\() 1:3, \(i) tags$span(i))
+      )
+    ),
+    "irid_each.*TRUE.*FALSE"
   )
 })
 

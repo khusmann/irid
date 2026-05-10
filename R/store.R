@@ -13,6 +13,12 @@
 #' updated). Unknown keys on a store-node patch are an error. Types are
 #' not enforced.
 #'
+#' `length()` on a leaf returns `1` (the leaf is a single callable), not
+#' the length of the underlying value — `length.reactiveLeaf` is unset
+#' deliberately so htmltools can construct attributes from `value =
+#' state$leaf` without tripping. Use `length(leaf())` for the underlying
+#' length.
+#'
 #' @param initial A bare named list describing the initial shape.
 #'   Sub-positions classify as follows: bare named lists (length > 0)
 #'   become store sub-nodes; anything else (scalars, vectors, `NULL`,
