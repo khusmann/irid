@@ -49,7 +49,7 @@ reactiveProxy <- function(target, get = identity, set = \(v) target(v)) {
       invisible(NULL)
     }
   }
-  class(fn) <- c("reactiveProxy", "function")
+  class(fn) <- c("reactiveProxy", "reactive", "function")
   fn
 }
 

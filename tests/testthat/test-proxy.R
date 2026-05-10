@@ -9,6 +9,12 @@ test_that("returns a callable with class reactiveProxy/function", {
   expect_s3_class(p, "reactiveProxy")
 })
 
+test_that("inherits from 'reactive' so process_tags' is_irid_reactive accepts it", {
+  rv <- shiny::reactiveVal(1)
+  p <- reactiveProxy(rv)
+  expect_s3_class(p, "reactive")
+})
+
 test_that("non-callable target errors", {
   expect_error(reactiveProxy(1), "callable")
   expect_error(reactiveProxy("hi"), "callable")
