@@ -46,7 +46,8 @@ QuestionEditor <- function(question) {
   # always has the correct shape for its variant. The compound Each key
   # (id + qtype) ensures the old mini-store is torn down and a fresh one
   # mounted rather than patching a differently-shaped record.
-  qtype_proxy <- reactiveProxy(question$qtype,
+  qtype_proxy <- reactiveProxy(
+    get = question$qtype,
     set = \(v) question(new_question(question()$id, v, text = question()$text))
   )
 

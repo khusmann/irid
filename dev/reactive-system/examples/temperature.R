@@ -12,8 +12,8 @@ TemperatureInput <- function(temp, label = "Temperature") {
 TemperatureApp <- function() {
   temp_c <- reactiveVal(20)
 
-  temp_f <- reactiveProxy(temp_c,
-    get = \(c) c * 9/5 + 32,
+  temp_f <- reactiveProxy(
+    get = \() temp_c() * 9/5 + 32,
     set = \(f) temp_c((as.numeric(f) - 32) * 5/9)
   )
 

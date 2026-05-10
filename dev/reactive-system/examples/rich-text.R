@@ -22,7 +22,8 @@ RichTextApp <- function() {
   ))
   content_error <- reactiveVal(NULL)
 
-  constrained_content <- reactiveProxy(state$content,
+  constrained_content <- reactiveProxy(
+    get = state$content,
     set = \(v) {
       n <- char_count(v)
       if (n <= MAX_CHARS) {

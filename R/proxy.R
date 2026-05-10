@@ -1,49 +1,43 @@
-#' Wrap a callable with custom read and write behavior
+#' Wrap a reader and optional writer as a callable
 #'
-#' Wraps a target callable with optional `get` (read transform) and `set`
-#' (write handler). The proxy is itself a callable: `proxy()` reads through
-#' `get`, `proxy(value)` calls `set`. Auto-bind treats the proxy like any
-#' other callable, so it composes with `value`/`checked`/`selected` props
-#' without any special handling.
+#' Builds a callable proxy from a 0-arg `get` reader and an optional
+#' 1-arg `set` writer. The proxy is itself a callable: `proxy()` invokes
+#' `get()`, `proxy(value)` invokes `set(value)`. Auto-bind treats the
+#' proxy like any other callable, so it composes with `value`/`checked`/
+#' `selected` props without any special handling.
 #'
-#' `set` is a side-effectful handler, not a pure transform. It receives the
-#' incoming value and decides what to do — write to the target, write a
-#' transformed value, set an error flag, trigger a side effect, or drop the
-#' write entirely. Because `set` is a closure, it can read sibling state for
-#' cross-field validation.
+#' `set` is a side-effectful handler, not a pure transform. It receives
+#' the incoming value and decides what to do — write to a target, write
+#' a transformed value, set an error flag, trigger a side effect, or
+#' drop the write entirely. Because `set` is a closure, it can read
+#' sibling state for cross-field validation.
 #'
-#' Pass `set = NULL` to make the proxy read-only — writes are silently
-#' dropped. With auto-bind, this lets the input snap back to the current
-#' value via the optimistic-update protocol.
+#' Pass `set = NULL` (or omit it) to make the proxy read-only — writes
+#' are silently dropped. With auto-bind, this lets the input snap back
+#' to the current value via the optimistic-update protocol.
 #'
-#' Proxies compose: another `reactiveProxy` can wrap the result of one,
-#' since a proxy is itself a callable.
+#' Proxies compose: a proxy is itself a callable, so another
+#' `reactiveProxy` can use it as its `get`.
 #'
-#' @param target A callable (function). Typically a `reactiveVal`, a
-#'   `reactiveStore` leaf, or another `reactiveProxy`.
-#' @param get A unary function applied to `target()` on read. Defaults to
-#'   [base::identity()] (no read transform).
-#' @param set A unary function called with the incoming value on write, or
-#'   `NULL` to drop writes silently. Defaults to `\(v) target(v)`
-#'   (pass-through write to the target).
-#' @return A callable with class `c("reactiveProxy", "function")`.
+#' @param get A 0-arg callable returning the read value. Typically a
+#'   `reactiveVal`, a `reactiveStore` leaf, another `reactiveProxy`, or
+#'   a closure like `\() transform(rv())`.
+#' @param set A 1-arg function called with the incoming value on write,
+#'   or `NULL` for a read-only proxy. Defaults to `NULL`.
+#' @return A callable with class `c("reactiveProxy", "reactive", "function")`.
 #' @export
-reactiveProxy <- function(target, get = identity, set = \(v) target(v)) {
-  if (!is.function(target)) {
-    stop("`target` must be a callable (function)", call. = FALSE)
-  }
+reactiveProxy <- function(get, set = NULL) {
   if (!is.function(get)) {
     stop("`get` must be a function", call. = FALSE)
   }
   if (!is.null(set) && !is.function(set)) {
     stop("`set` must be a function or NULL", call. = FALSE)
   }
-  force(target)
   force(get)
   force(set)
   fn <- function(...) {
     if (missing(..1)) {
-      get(target())
+      get()
     } else {
       if (!is.null(set)) set(..1)
       invisible(NULL)

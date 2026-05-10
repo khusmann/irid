@@ -74,7 +74,8 @@ Any named arg can be wrapped in a `reactiveProxy` to validate, transform, or rej
 ```r
 xrange <- reactiveVal(NULL)
 
-gated <- reactiveProxy(xrange,
+gated <- reactiveProxy(
+  get = xrange,
   set = \(v) if (is.null(v) || v[2] - v[1] > 1) xrange(v)
 )
 
@@ -253,7 +254,8 @@ Wrap any named arg in a proxy to intercept writes:
 xrange <- reactiveVal(NULL)
 
 # Reject zooms narrower than 1 unit
-gated <- reactiveProxy(xrange,
+gated <- reactiveProxy(
+  get = xrange,
   set = \(v) if (is.null(v) || v[2] - v[1] > 1) xrange(v)
 )
 
@@ -267,7 +269,7 @@ To suppress write-back entirely (the plot displays the range but user interactio
 ```r
 PlotlyOutput(
   \() plot_ly(...),
-  xaxis_range = reactiveProxy(xrange, set = NULL)
+  xaxis_range = reactiveProxy(get = xrange)
 )
 ```
 

@@ -4,57 +4,52 @@ flushReact <- function() shiny:::flushReact()
 
 test_that("returns a callable with class reactiveProxy/function", {
   rv <- shiny::reactiveVal(1)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   expect_true(is.function(p))
   expect_s3_class(p, "reactiveProxy")
 })
 
 test_that("inherits from 'reactive' so process_tags' is_irid_reactive accepts it", {
   rv <- shiny::reactiveVal(1)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   expect_s3_class(p, "reactive")
 })
 
-test_that("non-callable target errors", {
-  expect_error(reactiveProxy(1), "callable")
-  expect_error(reactiveProxy("hi"), "callable")
-  expect_error(reactiveProxy(NULL), "callable")
-})
-
-test_that("non-function get errors", {
-  rv <- shiny::reactiveVal(1)
-  expect_error(reactiveProxy(rv, get = 1), "`get` must be a function")
+test_that("non-callable get errors", {
+  expect_error(reactiveProxy(1), "`get` must be a function")
+  expect_error(reactiveProxy("hi"), "`get` must be a function")
+  expect_error(reactiveProxy(NULL), "`get` must be a function")
 })
 
 test_that("set must be a function or NULL", {
   rv <- shiny::reactiveVal(1)
-  expect_error(reactiveProxy(rv, set = 1), "function or NULL")
+  expect_error(reactiveProxy(get = rv, set = 1), "function or NULL")
 })
 
 # --- Default pass-through ----------------------------------------------------
 
 test_that("default proxy reads the target's current value", {
   rv <- shiny::reactiveVal(42)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   expect_equal(shiny::isolate(p()), 42)
 })
 
 test_that("default proxy writes through to the target", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   p(7)
   expect_equal(shiny::isolate(rv()), 7)
 })
 
 test_that("write returns invisibly", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   expect_invisible(p(1))
 })
 
 test_that("writing NULL through the default proxy writes NULL to target", {
   rv <- shiny::reactiveVal(1)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   p(NULL)
   expect_null(shiny::isolate(rv()))
 })
@@ -63,7 +58,7 @@ test_that("writing NULL through the default proxy writes NULL to target", {
 
 test_that("proxy over a store leaf reads and writes through it", {
   state <- reactiveStore(list(name = "Alice"))
-  p <- reactiveProxy(state$name)
+  p <- reactiveProxy(get = state$name, set = state$name)
   expect_equal(shiny::isolate(p()), "Alice")
   p("Bob")
   expect_equal(shiny::isolate(state$name()), "Bob")
@@ -71,7 +66,7 @@ test_that("proxy over a store leaf reads and writes through it", {
 
 test_that("proxy over a store node reads a snapshot and patches on write", {
   state <- reactiveStore(list(user = list(name = "Alice", age = 30)))
-  p <- reactiveProxy(state$user)
+  p <- reactiveProxy(get = state$user, set = state$user)
   expect_equal(shiny::isolate(p()), list(name = "Alice", age = 30))
   p(list(name = "Bob"))
   expect_equal(shiny::isolate(state$user$name()), "Bob")
@@ -82,7 +77,7 @@ test_that("proxy over a store node reads a snapshot and patches on write", {
 
 test_that("get transforms reads", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv, get = \(c) c * 9 / 5 + 32)
+  p <- reactiveProxy(get = \() rv() * 9 / 5 + 32)
   expect_equal(shiny::isolate(p()), 32)
   rv(100)
   expect_equal(shiny::isolate(p()), 212)
@@ -90,7 +85,10 @@ test_that("get transforms reads", {
 
 test_that("get does not affect writes", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv, get = \(c) c * 9 / 5 + 32)
+  p <- reactiveProxy(
+    get = \() rv() * 9 / 5 + 32,
+    set = \(v) rv(v)
+  )
   p(50)
   expect_equal(shiny::isolate(rv()), 50)
 })
@@ -100,7 +98,7 @@ test_that("get does not affect writes", {
 test_that("set handler is called with the incoming write", {
   rv <- shiny::reactiveVal("")
   seen <- NULL
-  p <- reactiveProxy(rv, set = \(v) {
+  p <- reactiveProxy(get = rv, set = \(v) {
     seen <<- v
     rv(v)
   })
@@ -111,7 +109,7 @@ test_that("set handler is called with the incoming write", {
 
 test_that("set can drop a write conditionally (validation gate)", {
   rv <- shiny::reactiveVal("ok")
-  p <- reactiveProxy(rv, set = \(v) if (nchar(v) <= 5L) rv(v))
+  p <- reactiveProxy(get = rv, set = \(v) if (nchar(v) <= 5L) rv(v))
   p("short")
   expect_equal(shiny::isolate(rv()), "short")
   p("too long for the gate")
@@ -120,7 +118,7 @@ test_that("set can drop a write conditionally (validation gate)", {
 
 test_that("set can transform before writing", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv, set = \(v) rv(v * 2))
+  p <- reactiveProxy(get = rv, set = \(v) rv(v * 2))
   p(5)
   expect_equal(shiny::isolate(rv()), 10)
 })
@@ -129,8 +127,8 @@ test_that("set can transform before writing", {
 
 test_that("get/set together support bidirectional transforms", {
   temp_c <- shiny::reactiveVal(0)
-  temp_f <- reactiveProxy(temp_c,
-    get = \(c) c * 9 / 5 + 32,
+  temp_f <- reactiveProxy(
+    get = \() temp_c() * 9 / 5 + 32,
     set = \(f) temp_c((f - 32) * 5 / 9)
   )
   expect_equal(shiny::isolate(temp_f()), 32)
@@ -143,20 +141,20 @@ test_that("get/set together support bidirectional transforms", {
 
 test_that("set = NULL drops writes silently", {
   rv <- shiny::reactiveVal("Alice")
-  p <- reactiveProxy(rv, set = NULL)
+  p <- reactiveProxy(get = rv)
   p("Bob")
   expect_equal(shiny::isolate(rv()), "Alice")
 })
 
 test_that("set = NULL still reads through get", {
   rv <- shiny::reactiveVal("alice")
-  p <- reactiveProxy(rv, get = toupper, set = NULL)
+  p <- reactiveProxy(get = \() toupper(rv()))
   expect_equal(shiny::isolate(p()), "ALICE")
 })
 
 test_that("write to a read-only proxy returns invisibly", {
   rv <- shiny::reactiveVal(1)
-  p <- reactiveProxy(rv, set = NULL)
+  p <- reactiveProxy(get = rv)
   expect_invisible(p(2))
 })
 
@@ -164,7 +162,7 @@ test_that("write to a read-only proxy returns invisibly", {
 
 test_that("reading a proxy subscribes to the underlying target", {
   rv <- shiny::reactiveVal(1)
-  p <- reactiveProxy(rv)
+  p <- reactiveProxy(get = rv, set = rv)
   fired <- 0L
   obs <- shiny::observe({
     p()
@@ -181,7 +179,7 @@ test_that("reading a proxy subscribes to the underlying target", {
 
 test_that("writing through a proxy fires observers of the target leaf", {
   state <- reactiveStore(list(name = "A"))
-  p <- reactiveProxy(state$name)
+  p <- reactiveProxy(get = state$name, set = state$name)
   fired <- 0L
   obs <- shiny::observe({
     state$name()
@@ -198,7 +196,7 @@ test_that("writing through a proxy fires observers of the target leaf", {
 
 test_that("read with custom get re-fires when the target changes", {
   rv <- shiny::reactiveVal(0)
-  p <- reactiveProxy(rv, get = \(x) x + 1)
+  p <- reactiveProxy(get = \() rv() + 1)
   fired <- 0L
   last <- NA
   obs <- shiny::observe({
@@ -218,7 +216,7 @@ test_that("read with custom get re-fires when the target changes", {
 
 test_that("dropped writes do not invalidate target observers", {
   state <- reactiveStore(list(name = "A"))
-  p <- reactiveProxy(state$name, set = NULL)
+  p <- reactiveProxy(get = state$name)
   fired <- 0L
   obs <- shiny::observe({
     state$name()
@@ -236,7 +234,8 @@ test_that("dropped writes do not invalidate target observers", {
 
 test_that("set closure can read sibling state for cross-field validation", {
   state <- reactiveStore(list(start = 1, end = 5))
-  end_proxy <- reactiveProxy(state$end,
+  end_proxy <- reactiveProxy(
+    get = state$end,
     set = \(v) if (v > shiny::isolate(state$start())) state$end(v)
   )
   end_proxy(10)
@@ -249,11 +248,12 @@ test_that("set closure can read sibling state for cross-field validation", {
 
 test_that("a reactiveProxy can wrap another reactiveProxy", {
   rv <- shiny::reactiveVal(100)
-  dollars <- reactiveProxy(rv,
-    get = \(c) sprintf("$%.2f", c / 100),
+  dollars <- reactiveProxy(
+    get = \() sprintf("$%.2f", rv() / 100),
     set = \(v) rv(round(as.numeric(gsub("[$,]", "", v)) * 100))
   )
-  capped <- reactiveProxy(dollars,
+  capped <- reactiveProxy(
+    get = dollars,
     set = \(v) {
       n <- as.numeric(gsub("[$,]", "", v))
       if (!is.na(n) && n <= 50) dollars(v)
@@ -273,12 +273,12 @@ test_that("a reactiveProxy can wrap another reactiveProxy", {
 
 test_that("print(proxy) is non-empty", {
   rv <- shiny::reactiveVal(1)
-  out <- capture.output(print(reactiveProxy(rv)))
+  out <- capture.output(print(reactiveProxy(get = rv, set = rv)))
   expect_true(any(grepl("reactiveProxy", out)))
 })
 
 test_that("print(proxy) marks read-only when set = NULL", {
   rv <- shiny::reactiveVal(1)
-  out <- capture.output(print(reactiveProxy(rv, set = NULL)))
+  out <- capture.output(print(reactiveProxy(get = rv)))
   expect_true(any(grepl("read-only", out)))
 })

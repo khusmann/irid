@@ -2,42 +2,39 @@
 % Please edit documentation in R/proxy.R
 \name{reactiveProxy}
 \alias{reactiveProxy}
-\title{Wrap a callable with custom read and write behavior}
+\title{Wrap a reader and optional writer as a callable}
 \usage{
-reactiveProxy(target, get = identity, set = function(v) target(v))
+reactiveProxy(get, set = NULL)
 }
 \arguments{
-\item{target}{A callable (function). Typically a \code{reactiveVal}, a
-\code{reactiveStore} leaf, or another \code{reactiveProxy}.}
+\item{get}{A 0-arg callable returning the read value. Typically a
+\code{reactiveVal}, a \code{reactiveStore} leaf, another \code{reactiveProxy}, or
+a closure like \verb{\\() transform(rv())}.}
 
-\item{get}{A unary function applied to \code{target()} on read. Defaults to
-\code{\link[base:identity]{base::identity()}} (no read transform).}
-
-\item{set}{A unary function called with the incoming value on write, or
-\code{NULL} to drop writes silently. Defaults to \verb{\\(v) target(v)}
-(pass-through write to the target).}
+\item{set}{A 1-arg function called with the incoming value on write,
+or \code{NULL} for a read-only proxy. Defaults to \code{NULL}.}
 }
 \value{
-A callable with class \code{c("reactiveProxy", "function")}.
+A callable with class \code{c("reactiveProxy", "reactive", "function")}.
 }
 \description{
-Wraps a target callable with optional \code{get} (read transform) and \code{set}
-(write handler). The proxy is itself a callable: \code{proxy()} reads through
-\code{get}, \code{proxy(value)} calls \code{set}. Auto-bind treats the proxy like any
-other callable, so it composes with \code{value}/\code{checked}/\code{selected} props
-without any special handling.
+Builds a callable proxy from a 0-arg \code{get} reader and an optional
+1-arg \code{set} writer. The proxy is itself a callable: \code{proxy()} invokes
+\code{get()}, \code{proxy(value)} invokes \code{set(value)}. Auto-bind treats the
+proxy like any other callable, so it composes with \code{value}/\code{checked}/
+\code{selected} props without any special handling.
 }
 \details{
-\code{set} is a side-effectful handler, not a pure transform. It receives the
-incoming value and decides what to do — write to the target, write a
-transformed value, set an error flag, trigger a side effect, or drop the
-write entirely. Because \code{set} is a closure, it can read sibling state for
-cross-field validation.
+\code{set} is a side-effectful handler, not a pure transform. It receives
+the incoming value and decides what to do — write to a target, write
+a transformed value, set an error flag, trigger a side effect, or
+drop the write entirely. Because \code{set} is a closure, it can read
+sibling state for cross-field validation.
 
-Pass \code{set = NULL} to make the proxy read-only — writes are silently
-dropped. With auto-bind, this lets the input snap back to the current
-value via the optimistic-update protocol.
+Pass \code{set = NULL} (or omit it) to make the proxy read-only — writes
+are silently dropped. With auto-bind, this lets the input snap back
+to the current value via the optimistic-update protocol.
 
-Proxies compose: another \code{reactiveProxy} can wrap the result of one,
-since a proxy is itself a callable.
+Proxies compose: a proxy is itself a callable, so another
+\code{reactiveProxy} can use it as its \code{get}.
 }

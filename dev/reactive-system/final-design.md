@@ -11,7 +11,7 @@ irid's state and rendering model is built on six concepts:
 1. **`reactiveStore`** — hierarchical reactive state.
 2. **Auto-bind** — state-binding props (`value`, `checked`, `selected`)
    accept a callable and automatically two-way bind.
-3. **`reactiveProxy`** — wraps a callable with custom read/write behavior.
+3. **`reactiveProxy`** — builds a callable from a reader and optional writer.
    The single mechanism for validation, transforms, side effects, and
    read-only views at component boundaries.
 4. **`Each`** — collection iteration with per-item mini-stores.
@@ -244,7 +244,7 @@ Auto-bind reads (`f()`) for rendering and writes (`f(value)`) on the
 corresponding DOM event. If the callable is 0-arg (no write path), auto-bind
 still sends the value to the server, where the write is silently dropped and
 the server echoes back the current value — the optimistic update protocol snaps
-the input back. This is the same behavior as `reactiveProxy(x, set = NULL)`.
+the input back. This is the same behavior as `reactiveProxy(get = x)`.
 
 No tagging or class checks needed. `reactiveVal` is 0-or-1 by construction;
 store leaves are the same; `\() expr()` is effectively read-only with snap-back.
@@ -283,7 +283,7 @@ Auto-bind sends the value, the write is dropped, the input snaps back:
 
 ```r
 tags$input(value = \() toupper(state$user$name()))
-tags$input(value = reactiveProxy(state$email, set = NULL))
+tags$input(value = reactiveProxy(get = state$email))
 ```
 
 To prevent user interaction entirely, disable the element:
@@ -296,25 +296,30 @@ tags$input(value = \() state$email(), disabled = TRUE)
 
 ## `reactiveProxy`
 
-Wraps a callable with custom `get` (read transform) and `set` (write handler).
-The result is a callable — `proxy()` reads through `get`, `proxy(value)` calls
-`set`. Auto-bind works unchanged because a proxy is just another callable.
+Builds a callable from a 0-arg `get` reader and an optional 1-arg `set` writer.
+The result is a callable — `proxy()` invokes `get()`, `proxy(value)` invokes
+`set(value)`. Auto-bind works unchanged because a proxy is just another callable.
 
 ```r
-reactiveProxy(target, get = identity, set = \(v) target(v))
+reactiveProxy(get, set = NULL)
 ```
 
+`get` is required: any 0-arg callable (a `reactiveVal`, a `reactiveStore` leaf,
+another `reactiveProxy`, or a closure like `\() transform(rv())`).
+
 `set` is a side-effectful handler, not a pure transform. It receives the
-incoming value and decides what to do — write to the target, write a transformed
+incoming value and decides what to do — write to a target, write a transformed
 value, set an error flag, trigger a side effect, or drop the write entirely.
 Because `set` is a closure, it can read sibling state for cross-field validation.
+Omit `set` (or pass `NULL`) for a read-only proxy.
 
 ### Use cases
 
 **Validation gate:**
 
 ```r
-reactiveProxy(state$username,
+reactiveProxy(
+  get = state$username,
   set = \(v) if (nchar(v) <= 20L) state$username(v)
 )
 ```
@@ -322,8 +327,8 @@ reactiveProxy(state$username,
 **Bidirectional transform:**
 
 ```r
-reactiveProxy(state$temp_c,
-  get = \(c) c * 9/5 + 32,
+reactiveProxy(
+  get = \() state$temp_c() * 9/5 + 32,
   set = \(f) state$temp_c((f - 32) * 5/9)
 )
 ```
@@ -331,13 +336,14 @@ reactiveProxy(state$temp_c,
 **Read-only (writes dropped, input snaps back):**
 
 ```r
-reactiveProxy(state$email, set = NULL)
+reactiveProxy(get = state$email)
 ```
 
 **Side effect on write:**
 
 ```r
-reactiveProxy(state$search,
+reactiveProxy(
+  get = state$search,
   set = \(v) { state$search(v); log_search(v) }
 )
 ```
@@ -346,7 +352,8 @@ reactiveProxy(state$search,
 
 ```r
 username_error <- reactiveVal(NULL)
-reactiveProxy(state$username,
+reactiveProxy(
+  get = state$username,
   set = \(v) {
     if (nchar(v) <= 20L) { username_error(NULL); state$username(v) }
     else username_error("Username must be 20 characters or less")
@@ -357,7 +364,8 @@ reactiveProxy(state$username,
 **Cross-field validation (closure reads sibling):**
 
 ```r
-reactiveProxy(state$date_range$end,
+reactiveProxy(
+  get = state$date_range$end,
   set = \(v) if (v > state$date_range$start()) state$date_range$end(v)
 )
 ```
@@ -365,8 +373,8 @@ reactiveProxy(state$date_range$end,
 **Formatting:**
 
 ```r
-reactiveProxy(state$price_cents,
-  get = \(v) sprintf("$%.2f", v / 100),
+reactiveProxy(
+  get = \() sprintf("$%.2f", state$price_cents() / 100),
   set = \(v) state$price_cents(round(as.numeric(gsub("[$,]", "", v)) * 100))
 )
 ```
@@ -391,12 +399,12 @@ three limitations:
 not the element), handles both read and write transforms, and introduces no
 special-case interactions with auto-bind.
 
-| `onInput` pattern                               | `reactiveProxy` equivalent                       |
-|-------------------------------------------------|--------------------------------------------------|
-| `onInput = \(e) if (ok(e$value)) x(e$value)`   | `reactiveProxy(x, set = \(v) if (ok(v)) x(v))`  |
-| `onInput = \(e) x(parse(e$value))`              | `reactiveProxy(x, set = \(v) x(parse(v)))`       |
-| `onInput = \(e) { x(e$value); log(e$value) }`  | `reactiveProxy(x, set = \(v) { x(v); log(v) })` |
-| `value = \() format(x())` + `onInput` for parse | `reactiveProxy(x, get = format, set = parse)`    |
+| `onInput` pattern                               | `reactiveProxy` equivalent                                     |
+|-------------------------------------------------|----------------------------------------------------------------|
+| `onInput = \(e) if (ok(e$value)) x(e$value)`   | `reactiveProxy(get = x, set = \(v) if (ok(v)) x(v))`          |
+| `onInput = \(e) x(parse(e$value))`              | `reactiveProxy(get = x, set = \(v) x(parse(v)))`              |
+| `onInput = \(e) { x(e$value); log(e$value) }`  | `reactiveProxy(get = x, set = \(v) { x(v); log(v) })`         |
+| `value = \() format(x())` + `onInput` for parse | `reactiveProxy(get = \() format(x()), set = \(v) x(parse(v)))` |
 
 ### Composability
 
@@ -404,13 +412,14 @@ A proxy is a callable. Another proxy can wrap it:
 
 ```r
 # Currency formatting
-price_dollars <- reactiveProxy(state$price_cents,
-  get = \(v) sprintf("$%.2f", v / 100),
+price_dollars <- reactiveProxy(
+  get = \() sprintf("$%.2f", state$price_cents() / 100),
   set = \(v) state$price_cents(round(as.numeric(gsub("[$,]", "", v)) * 100))
 )
 
 # Max-value gate on top
-capped_price <- reactiveProxy(price_dollars,
+capped_price <- reactiveProxy(
+  get = price_dollars,
   set = \(v) if (as.numeric(gsub("[$,]", "", v)) <= 10000) price_dollars(v)
 )
 ```
@@ -426,7 +435,8 @@ MyEditor(field = state$user$name)
 **Validated:**
 
 ```r
-validated <- reactiveProxy(state$user$name,
+validated <- reactiveProxy(
+  get = state$user$name,
   set = \(v) if (nchar(v) <= 100) state$user$name(v)
 )
 MyEditor(field = validated)
@@ -435,7 +445,7 @@ MyEditor(field = validated)
 **Read-only (writes dropped, snaps back):**
 
 ```r
-MyEditor(field = reactiveProxy(state$user$name, set = NULL))
+MyEditor(field = reactiveProxy(get = state$user$name))
 # Or equivalently:
 MyEditor(field = \() state$user$name())
 ```
@@ -445,7 +455,8 @@ MyEditor(field = \() state$user$name())
 ```r
 # The component accepts a callable and writes to it.
 # Proxy intercepts without the component knowing.
-constrained <- reactiveProxy(state$content,
+constrained <- reactiveProxy(
+  get = state$content,
   set = \(v) if (nchar(v) <= 10000) state$content(v)
 )
 RichTextEditor(constrained)
@@ -552,7 +563,8 @@ A proxy can wrap a mini-store field for per-field write control:
 
 ```r
 Each(state$todos, by = \(t) t$id, \(todo) {
-  validated_text <- reactiveProxy(todo$text,
+  validated_text <- reactiveProxy(
+    get = todo$text,
     set = \(v) if (nchar(trimws(v)) > 0) todo$text(v)
   )
   tags$li(
@@ -634,7 +646,8 @@ new_question <- function(id, qtype, text = "") switch(qtype,
   choice = list(id = id, text = text, qtype = "choice", options = list(""))
 )
 
-qtype_proxy <- reactiveProxy(question$qtype,
+qtype_proxy <- reactiveProxy(
+  get = question$qtype,
   set = \(v) question(new_question(question()$id, v, text = question()$text))
 )
 ```
@@ -658,7 +671,7 @@ Switch(question,
 
 ### Read-only iteration
 
-`Each` on a derived reactive wraps it in a `reactiveProxy(set = <error>)`
+`Each` on a derived reactive wraps it in a `reactiveProxy(get = ..., set = <error>)`
 before iterating. Write attempts hit the proxy and error with a clear message.
 No special case in `Each` — it sees a callable either way.
 
@@ -888,7 +901,8 @@ They compose naturally through the callable:
 ```r
 # Component defines "is a port number" (inherent)
 PortInput <- function(port) {
-  validated <- reactiveProxy(port,
+  validated <- reactiveProxy(
+    get = port,
     set = \(v) {
       n <- as.integer(v)
       if (!is.na(n) && n >= 1L && n <= 65535L) port(n)
@@ -898,7 +912,8 @@ PortInput <- function(port) {
 }
 
 # Parent defines "must be above 1024" (policy)
-safe_port <- reactiveProxy(state$port,
+safe_port <- reactiveProxy(
+  get = state$port,
   set = \(v) if (as.integer(v) > 1024L) state$port(v)
 )
 PortInput(safe_port)
@@ -941,7 +956,8 @@ observe({
 })
 
 # GOOD — proxy rejects the write. Invalid state never exists.
-validated_username <- reactiveProxy(state$username,
+validated_username <- reactiveProxy(
+  get = state$username,
   set = \(v) if (nchar(v) <= 20L) state$username(v)
 )
 ```
@@ -1007,7 +1023,8 @@ NameInput(state$name)
 The parent wraps the callable in a proxy. The component is unchanged:
 
 ```r
-validated_name <- reactiveProxy(state$name,
+validated_name <- reactiveProxy(
+  get = state$name,
   set = \(v) if (nchar(v) <= 100L) state$name(v)
 )
 NameInput(validated_name)
@@ -1016,8 +1033,8 @@ NameInput(validated_name)
 ### Adding a bidirectional transform
 
 ```r
-temp_f <- reactiveProxy(state$temp_c,
-  get = \(c) c * 9/5 + 32,
+temp_f <- reactiveProxy(
+  get = \() state$temp_c() * 9/5 + 32,
   set = \(f) state$temp_c((f - 32) * 5/9)
 )
 TemperatureInput(temp_f, label = "Fahrenheit")
@@ -1027,7 +1044,8 @@ TemperatureInput(temp_f, label = "Fahrenheit")
 
 ```r
 Each(state$todos, by = \(t) t$id, \(todo) {
-  validated_text <- reactiveProxy(todo$text,
+  validated_text <- reactiveProxy(
+    get = todo$text,
     set = \(v) if (nchar(trimws(v)) > 0) todo$text(v)
   )
   tags$li(
@@ -1067,7 +1085,8 @@ reactive. Without purrr, the base R equivalent is
 ### Third-party component interception
 
 ```r
-constrained <- reactiveProxy(state$content,
+constrained <- reactiveProxy(
+  get = state$content,
   set = \(v) if (nchar(v) <= 10000) state$content(v)
 )
 RichTextEditor(constrained)  # can't modify, don't need to
@@ -1081,7 +1100,7 @@ RichTextEditor(constrained)  # can't modify, don't need to
    where `i` is a plain integer for `by = NULL` and the key value for `by = fn`.
 
 2. ~~**Read-only `Each` on derived reactives.**~~ Resolved: wrap in
-   `reactiveProxy(set = <error>)` before iterating. No separate primitive needed.
+   `reactiveProxy(get = ..., set = <error>)` before iterating. No separate primitive needed.
 
 3. **Multi-level synthetic setter chain.** When `Each` is nested inside `Each`,
    writes flow through two levels of synthetic setters. Each link uses the same

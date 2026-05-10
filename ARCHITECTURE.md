@@ -10,7 +10,7 @@ R/
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
-  proxy.R         reactiveProxy — callable wrapper with custom read/write
+  proxy.R         reactiveProxy — callable built from a reader and optional writer
   irid-package.R Package-level imports
 
 inst/js/
@@ -316,19 +316,21 @@ handler. The `optimistic_updates` example exposes this as a slider.
 
 ## Reactive Proxy
 
-`reactiveProxy(target, get, set)` wraps a callable with custom read and write
-behavior, while remaining callable itself. Auto-bind dispatches on
+`reactiveProxy(get, set = NULL)` builds a callable from a 0-arg `get` reader
+and an optional 1-arg `set` writer, while remaining callable itself.
+`proxy()` invokes `get()`; `proxy(value)` invokes `set(value)` when set is
+non-`NULL`, or drops the write silently. Auto-bind dispatches on
 `is.function()`, so a proxy slots into any prop that accepts a `reactiveVal`
-or store leaf without special handling. Proxies compose — wrapping another
-proxy is just wrapping another callable.
+or store leaf without special handling. Proxies compose — using another
+proxy as `get` is just using another callable.
 
-`set` is a side-effectful handler, not a pure transform: it can write to the
+`set` is a side-effectful handler, not a pure transform: it can write to a
 target, transform first, gate conditionally, or drop the write entirely.
 Because `set` is a closure, it can read sibling state for cross-field
-validation. With `set = NULL`, writes are silently dropped — paired with the
-optimistic-update protocol above, this makes a focused input snap back to
-the current server value, which is the read-only contract for controlled
-inputs.
+validation. With `set = NULL` (the default), writes are silently dropped —
+paired with the optimistic-update protocol above, this makes a focused input
+snap back to the current server value, which is the read-only contract for
+controlled inputs.
 
 ## Remaining Work
 

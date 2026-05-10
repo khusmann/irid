@@ -50,7 +50,8 @@ ColorApp <- function() {
     saturation = state$color$saturation()
   ))
 
-  constrained_hue <- reactiveProxy(state$color$hue,
+  constrained_hue <- reactiveProxy(
+    get = state$color$hue,
     set = \(v) {
       v <- as.numeric(v)
       if (!is.na(v) && v >= 0 && v <= 0.15) state$color$hue(v)

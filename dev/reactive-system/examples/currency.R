@@ -23,13 +23,13 @@ CurrencyApp <- function() {
     shipping_cents = 499L
   ))
 
-  price_display <- reactiveProxy(state$price_cents,
-    get = format_dollars,
+  price_display <- reactiveProxy(
+    get = \() format_dollars(state$price_cents()),
     set = \(v) state$price_cents(parse_dollars(v))
   )
 
-  shipping_display <- reactiveProxy(state$shipping_cents,
-    get = format_dollars,
+  shipping_display <- reactiveProxy(
+    get = \() format_dollars(state$shipping_cents()),
     set = \(v) state$shipping_cents(parse_dollars(v))
   )
 
