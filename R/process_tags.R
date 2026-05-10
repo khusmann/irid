@@ -12,18 +12,13 @@ is_irid_reactive <- function(x) {
   is.function(x) && (identical(class(x), "function") || inherits(x, "reactive"))
 }
 
-# DOM events synthesised for state-binding props
+# DOM events synthesised for state-binding props. Prop name doubles as the
+# field on the event object the synthetic write-back reads from — irid stays
+# close to the DOM IDL, where `value` and `checked` are both the prop and
+# the readable property.
 STATE_BIND_EVENT <- list(
   value = "input",
-  checked = "change",
-  selected = "change"
-)
-
-# The field on the event object the synthetic write-back reads from
-STATE_BIND_FIELD <- list(
-  value = "value",
-  checked = "checked",
-  selected = "value"
+  checked = "change"
 )
 
 # Can the callable accept a positional argument? Primitives have no
@@ -41,9 +36,8 @@ can_accept_write <- function(fn) {
 # get a no-op handler — the listener still fires so the optimistic-update
 # protocol echoes the current server value back, snapping the input.
 make_autobind_handler <- function(fn, attr_name) {
-  field <- STATE_BIND_FIELD[[attr_name]]
   if (can_accept_write(fn)) {
-    function(e) fn(e[[field]])
+    function(e) fn(e[[attr_name]])
   } else {
     function(e) NULL
   }

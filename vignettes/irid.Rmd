@@ -195,9 +195,9 @@ When `.event` is omitted, auto-bind synthetic events default to
 
 ## Controlled inputs
 
-Bind a state-binding prop (`value`, `checked`, `selected`) to a callable to
-get two-way binding for free. The callable can be a `reactiveVal`, a store
-leaf, a `reactiveProxy`, or any function:
+Bind a state-binding prop (`value`, `checked`) to a callable to get two-way
+binding for free. The callable can be a `reactiveVal`, a store leaf, a
+`reactiveProxy`, or any function:
 
 ```r
 name <- reactiveVal("")

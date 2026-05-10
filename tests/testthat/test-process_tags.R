@@ -1,7 +1,7 @@
 # --- Auto-bind handler arity dispatch ----------------------------------------
 #
 # `make_autobind_handler` decides whether a callable bound to a state-binding
-# prop (value/checked/selected) gets a write handler (`function(e) fn(e$value)`)
+# prop (value/checked) gets a write handler (`function(e) fn(e[[attr_name]])`)
 # or a no-op handler (`function(e) NULL`). The dispatch is arity-based and
 # must work consistently across every callable shape irid accepts.
 
@@ -97,18 +97,22 @@ test_that("primitive functions are treated as writable", {
   expect_true(can_accept_write(`+`))
 })
 
-test_that("checked uses e$checked, selected uses e$value", {
+test_that("checked reads from e$checked, value reads from e$value", {
+  # The synthetic handler reads the event field whose name matches the prop
+  # — this is the DOM-IDL alignment the autobind table encodes.
   rv_checked <- shiny::reactiveVal(FALSE)
   res_checked <- process_tags(
     tags$input(type = "checkbox", checked = rv_checked)
   )
+  expect_equal(res_checked$events[[1]]$event, "change")
   res_checked$events[[1]]$handler(list(checked = TRUE))
   expect_true(shiny::isolate(rv_checked()))
 
-  rv_selected <- shiny::reactiveVal("")
-  res_selected <- process_tags(tags$select(selected = rv_selected))
-  res_selected$events[[1]]$handler(list(value = "opt-2"))
-  expect_equal(shiny::isolate(rv_selected()), "opt-2")
+  rv_value <- shiny::reactiveVal("")
+  res_value <- process_tags(tags$select(value = rv_value))
+  expect_equal(res_value$events[[1]]$event, "input")
+  res_value$events[[1]]$handler(list(value = "opt-2"))
+  expect_equal(shiny::isolate(rv_value()), "opt-2")
 })
 
 # --- Misuse: irid construct passed as an attribute value ---------------------

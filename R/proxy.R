@@ -3,8 +3,8 @@
 #' Builds a callable proxy from a 0-arg `get` reader and an optional
 #' 1-arg `set` writer. The proxy is itself a callable: `proxy()` invokes
 #' `get()`, `proxy(value)` invokes `set(value)`. Auto-bind treats the
-#' proxy like any other callable, so it composes with `value`/`checked`/
-#' `selected` props without any special handling.
+#' proxy like any other callable, so it composes with `value` and
+#' `checked` props without any special handling.
 #'
 #' `set` is a side-effectful handler, not a pure transform. It receives
 #' the incoming value and decides what to do — write to a target, write

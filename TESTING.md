@@ -116,16 +116,19 @@ is correctly propagated from R to the client.
 
 ## Auto-bind (state-binding props)
 
-Verify that callable `value`/`checked`/`selected` props produce both a read
-binding and a write event entry, and that the corresponding DOM event fires
-the write back through the callable.
+Verify that callable `value`/`checked` props produce both a read binding and
+a write event entry, and that the corresponding DOM event fires the write
+back through the callable. Auto-bind aligns to the DOM IDL: prop name and
+event field name match (`value` ↔ `e$value`, `checked` ↔ `e$checked`).
+`<select>` binds via `value` (its DOM IDL property); radios bind via
+`checked` per-element.
 
 ### `process_tags` extraction
 
 - [ ] `value = reactiveVal()` on text input produces both a binding (`attr = "value"`) and a synthetic `input` event entry with handler `\(e) val(e$value)`
+- [ ] `value = reactiveVal()` on `<select>` produces both a binding and a synthetic `input` event entry
 - [ ] `checked = reactiveVal()` on checkbox produces both a binding and a synthetic `change` event entry with handler `\(e) val(e$checked)`
-- [ ] `selected = reactiveVal()` on `<select>` produces both a binding and a synthetic `change` event entry
-- [ ] `selected = reactiveVal()` on `<input type="radio">` produces both a binding and a synthetic `change` event entry
+- [ ] `checked = reactiveVal()` on `<input type="radio">` produces both a binding and a synthetic `change` event entry
 - [ ] 0-arg callable in `value` produces both a binding and a synthetic event entry with a no-op handler (write-attempt + force-send echoes current value back)
 - [ ] Auto-bind synthetic event coexists with explicit `onInput`/`onChange` on the same element
 
@@ -136,9 +139,9 @@ the write back through the callable.
 - [ ] `value = reactiveProxy(get = ..., set = ...)` — `set` is called on write
 - [ ] `value = reactiveProxy(get = ...)` — writes silently dropped
 - [ ] `value = \() expr()` (0-arg) — no write fires; client snaps back via the optimistic-update protocol
+- [ ] `value = state$theme` on `<select>` — selection fires `rv(value)`
 - [ ] `checked = reactiveVal(FALSE)` on checkbox — toggle fires `rv(TRUE/FALSE)`
-- [ ] `selected = state$theme` on `<select>` — selection fires `rv(value)`
-- [ ] `selected = state$choice` on `<input type="radio">` — selection fires `rv(value)`; deselected radio does not write
+- [ ] `checked = \() group() == "a"` on a radio (per-element boolean) — selecting fires through; deselected radio does not write (gated by `shouldSkip`)
 - [ ] Auto-bind + explicit `onInput` on same element — both run
 - [ ] Focused-input echo skipping continues to work for auto-bind value updates
 
@@ -151,8 +154,11 @@ each tier, source-attribute order is preserved.
 
 - [ ] `value = rv` + `onInput` on same `<input>` produces a single event
       entry on `input` (not two)
-- [ ] `selected = rv` + `onChange` on same `<select>` produces a single
-      event entry on `change`
+- [ ] `value = rv` + `onChange` on same `<select>` does NOT merge — `value`'s
+      synthetic event is `input`, the explicit handler is `change`, so they
+      stay as two separate event entries
+- [ ] `checked = rv` + `onChange` on same checkbox produces a single event
+      entry on `change`
 - [ ] No collision (e.g. `value = rv` + `onClick`) leaves the two as
       separate event entries
 - [ ] Merged composed handler has `length(formals(handler)) == 2L` and is
@@ -195,12 +201,12 @@ result2 <- irid:::process_tags(
 stopifnot(length(result2$events) == 2L)
 ```
 
-### Client-side `selected` polymorphism
+### Client-side state-binding application
 
-- [ ] `selected` on `<select>`: `irid-attr` sets `el.value = msg.value`
-- [ ] `selected` on `<input type="radio">`: `irid-attr` sets `el.checked = (msg.value === el.value)`
-- [ ] `<select>` write-back listens on `change`
-- [ ] Radio write-back listens on `change`; only fires when `el.checked === true`
+- [ ] `value` on `<select>`: `irid-attr` sets `el.value = msg.value`, picking the matching option
+- [ ] `checked` on `<input type="radio">`: `irid-attr` sets `el.checked = msg.value`
+- [ ] `<select>` write-back listens on `input` (the `value` autobind event)
+- [ ] Radio write-back listens on `change`; only fires when `el.checked === true` (gated by `shouldSkip` to defend against deselect-change)
 
 ## `.event` element config
 
@@ -356,7 +362,7 @@ coordinate with Shiny's binding lifecycle.
 
 ### `irid-attr` property vs attribute dispatch
 
-- [ ] `value`, `disabled`, `checked`, `selected`, `innerHTML` are set as JS properties (not `setAttribute`)
+- [ ] `value`, `disabled`, `checked`, `innerHTML` are set as JS properties (not `setAttribute`)
 - [ ] `textContent` is set via `.textContent` property
 - [ ] Other attributes use `setAttribute()`
 - [ ] `false`/`null` attribute values call `removeAttribute()`

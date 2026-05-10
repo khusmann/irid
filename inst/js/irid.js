@@ -1,7 +1,7 @@
 (function() {
   var defined = new Set();
   var sequences = {};  // element id -> latest sent sequence number
-  var PROP_ATTRS = { value: true, disabled: true, checked: true, selected: true, innerHTML: true };
+  var PROP_ATTRS = { value: true, disabled: true, checked: true, innerHTML: true };
   var anchors = new Map();  // id -> { start: CommentNode, end: CommentNode }
   var ANCHOR_RE = /^irid:(s|e):(.+)$/;
   var staleTimeout = null;  // ms before showing stale indicator (null = disabled)
@@ -151,20 +151,6 @@
     }
   });
 
-  // `selected` is polymorphic on element type: `<select>` reads/writes
-  // `el.value`; a radio input mirrors the bound value via `el.checked`
-  // (each radio in the group gets its own binding and lights up only when
-  // its `value` matches). Falls back to `el.selected` for `<option>`.
-  function applySelected(el, value) {
-    if (el.tagName === 'SELECT') {
-      el.value = value;
-    } else if (el.tagName === 'INPUT' && el.type === 'radio') {
-      el.checked = (value === el.value);
-    } else {
-      el.selected = value;
-    }
-  }
-
   Shiny.addCustomMessageHandler('irid-attr', function(msg) {
     var el = document.getElementById(msg.id);
     if (!el) return;
@@ -177,9 +163,7 @@
       // Programmatic (no sequence) or up-to-date: apply, but skip no-op
       if (el.value === msg.value) return;
     }
-    if (msg.attr === 'selected') {
-      applySelected(el, msg.value);
-    } else if (PROP_ATTRS[msg.attr]) {
+    if (PROP_ATTRS[msg.attr]) {
       el[msg.attr] = msg.value;
     } else if (msg.value === false || msg.value === null) {
       el.removeAttribute(msg.attr);
@@ -274,10 +258,10 @@
 
   // Radios only fire `change` on the newly-checked element in practice,
   // but gate defensively so a stray deselect-change can't write a stale
-  // value through auto-bind. Applies to every `change` listener on the
-  // radio (auto-bind synthetic AND any explicit `onChange`); browsers
-  // don't fire deselect-change in modern UAs, so this is invisible in
-  // practice but rules out one class of stale-value bug.
+  // value through any `change` listener (auto-bind `checked` synthetic or
+  // explicit `onChange`). Browsers don't fire deselect-change in modern
+  // UAs, so this is invisible in practice but rules out one class of
+  // stale-value bug.
   function shouldSkip(el, eventName) {
     return eventName === 'change' &&
            el.tagName === 'INPUT' && el.type === 'radio' &&

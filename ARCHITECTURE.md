@@ -58,12 +58,14 @@ Walks the tag tree recursively and produces:
   `Index`, or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
 
-When a state-binding prop (`value`, `checked`, `selected`) holds a callable,
-process_tags emits both a binding (server → client read) and a synthetic
-event entry (client → server write). The synthetic handler is
-arity-dispatched: 0-arg callables get a no-op handler so the listener still
-fires and the optimistic-update protocol echoes the current value back.
-1-arg+ callables receive `e$value` (or `e$checked` for `checked`).
+When a state-binding prop (`value`, `checked`) holds a callable, process_tags
+emits both a binding (server → client read) and a synthetic event entry
+(client → server write). The synthetic handler is arity-dispatched: 0-arg
+callables get a no-op handler so the listener still fires and the
+optimistic-update protocol echoes the current value back. 1-arg+ callables
+receive the event field of the same name as the prop (`e$value` for `value`,
+`e$checked` for `checked`) — irid stays close to the DOM IDL, so the prop
+name and the event field name always match.
 
 When the auto-bind synthetic event collides with an explicit `on*` handler
 on the same DOM event (e.g. `value = rv` and `onInput = ...` on the same
@@ -180,9 +182,9 @@ anchor references are preserved across moves.
 ```
 
 Sets a DOM property or attribute. Special-cased properties: `value`, `disabled`,
-`checked`, `selected`, `textContent` are set as JS properties (not HTML
-attributes). Skips the update if the target element has focus and the attribute
-is `value` (optimistic update).
+`checked`, `textContent` are set as JS properties (not HTML attributes).
+Skips the update if the target element has focus and the attribute is
+`value` (optimistic update).
 
 ### `irid-swap`
 

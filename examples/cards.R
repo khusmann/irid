@@ -53,7 +53,7 @@ App <- function() {
     tags$label(class = "form-label", "Select a dataset:"),
     tags$select(
       class = "form-select mb-3",
-      selected = dataset_name,
+      value = dataset_name,
       onChange = \() {
         selected_columns(character(0))
         choice("")
@@ -64,7 +64,7 @@ App <- function() {
     tags$label(class = "form-label", "Add a column:"),
     tags$select(
       class = "form-select mb-3",
-      selected = choice,
+      value = choice,
       onChange = \(event) {
         if (nzchar(event$value)) {
           selected_columns(c(selected_columns(), event$value))
