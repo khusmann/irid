@@ -419,3 +419,254 @@ test_that("control-flow nodes are still valid as children", {
   expect_length(result$control_flows, 1L)
   expect_equal(result$control_flows[[1]]$type, "each")
 })
+
+# --- Element-level `.event` overrides ----------------------------------------
+#
+# `.event` accepts either a single config (broadcasts to every event entry on
+# the element) or a named list keyed by lowercase DOM event name (or `on`-prop
+# form) for per-event overrides. Events absent from the list fall back to the
+# per-event default rule.
+
+# Find an event entry by DOM event name. Order isn't guaranteed once entries
+# are merged, so prefer name-based lookup over positional indexing.
+event_by_name <- function(result, event_name) {
+  matches <- Filter(function(e) e$event == event_name, result$events)
+  if (length(matches) != 1L) {
+    stop("expected exactly 1 event named '", event_name, "', got ",
+         length(matches))
+  }
+  matches[[1]]
+}
+
+test_that("scalar .event applies to every event entry on the element", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(
+      value = rv,
+      onKeyDown = function(e) NULL,
+      .event = event_throttle(500)
+    )
+  )
+  for (e in result$events) {
+    expect_equal(e$mode, "throttle")
+    expect_equal(e$ms, 500)
+  }
+})
+
+test_that("named .event overrides per event; unmapped events fall back to defaults", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(
+      value = rv,
+      onKeyDown = function(e) NULL,
+      onClick = function(e) NULL,
+      .event = list(
+        input = event_throttle(500),
+        keydown = event_immediate(coalesce = TRUE)
+      )
+    )
+  )
+  input_e <- event_by_name(result, "input")
+  expect_equal(input_e$mode, "throttle")
+  expect_equal(input_e$ms, 500)
+
+  keydown_e <- event_by_name(result, "keydown")
+  expect_equal(keydown_e$mode, "immediate")
+  expect_true(keydown_e$coalesce)
+
+  # `click` isn't in the .event list — falls back to the per-event default
+  # (immediate for non-input events).
+  click_e <- event_by_name(result, "click")
+  expect_equal(click_e$mode, "immediate")
+})
+
+test_that(".event keys accept both DOM-event and on-prop form, both normalize", {
+  # `onInput` and `input` should resolve to the same lookup entry.
+  rv1 <- shiny::reactiveVal("")
+  res_dom <- process_tags(
+    tags$input(value = rv1, .event = list(input = event_throttle(300)))
+  )
+  expect_equal(res_dom$events[[1]]$mode, "throttle")
+  expect_equal(res_dom$events[[1]]$ms, 300)
+
+  rv2 <- shiny::reactiveVal("")
+  res_on <- process_tags(
+    tags$input(value = rv2, .event = list(onInput = event_throttle(300)))
+  )
+  expect_equal(res_on$events[[1]]$mode, "throttle")
+  expect_equal(res_on$events[[1]]$ms, 300)
+})
+
+test_that(".event = scalar non-config errors with type hint", {
+  # A bare value that's neither a config nor a list — caught up front.
+  expect_error(
+    process_tags(
+      tags$input(value = shiny::reactiveVal(""), .event = 5)
+    ),
+    "must be an `irid_event_config`"
+  )
+})
+
+test_that(".event list with a non-config entry errors with the offending key", {
+  # The error message should name the original (pre-normalization) key so the
+  # user can find it in their source.
+  expect_error(
+    process_tags(
+      tags$input(
+        value = shiny::reactiveVal(""),
+        .event = list(input = event_immediate(), onClick = 5)
+      )
+    ),
+    "\\.event\\$onClick.*irid_event_config"
+  )
+})
+
+test_that(".event with duplicate keys after normalization errors", {
+  # `input` and `onInput` collapse to the same DOM event — must not silently
+  # pick one. The error names the duplicate.
+  expect_error(
+    process_tags(
+      tags$input(
+        value = shiny::reactiveVal(""),
+        .event = list(input = event_immediate(), onInput = event_throttle(100))
+      )
+    ),
+    "duplicate event names.*input"
+  )
+})
+
+# --- Element-level `.prevent_default` ----------------------------------------
+#
+# `.prevent_default` mirrors `.event`'s shape. A logical scalar broadcasts to
+# every event entry; a named list keyed by DOM event (or `on`-prop) overrides
+# per event. Unmapped events default to `FALSE`.
+
+test_that("without .prevent_default, every event entry has prevent_default = FALSE", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, onKeyDown = function(e) NULL)
+  )
+  for (e in result$events) expect_false(e$prevent_default)
+})
+
+test_that(".prevent_default = TRUE propagates to every event entry", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(
+      value = rv,
+      onKeyDown = function(e) NULL,
+      onClick = function(e) NULL,
+      .prevent_default = TRUE
+    )
+  )
+  for (e in result$events) expect_true(e$prevent_default)
+})
+
+test_that(".prevent_default = FALSE is accepted explicitly", {
+  rv <- shiny::reactiveVal("")
+  result <- process_tags(
+    tags$input(value = rv, .prevent_default = FALSE)
+  )
+  expect_false(result$events[[1]]$prevent_default)
+})
+
+test_that("named .prevent_default overrides per event; unmapped events default to FALSE", {
+  result <- process_tags(
+    tags$form(
+      onSubmit = function(e) NULL,
+      onClick = function(e) NULL,
+      .prevent_default = list(submit = TRUE)
+    )
+  )
+  expect_true(event_by_name(result, "submit")$prevent_default)
+  expect_false(event_by_name(result, "click")$prevent_default)
+})
+
+test_that(".prevent_default keys accept both DOM-event and on-prop form", {
+  res_dom <- process_tags(
+    tags$form(
+      onSubmit = function(e) NULL,
+      .prevent_default = list(submit = TRUE)
+    )
+  )
+  expect_true(res_dom$events[[1]]$prevent_default)
+
+  res_on <- process_tags(
+    tags$form(
+      onSubmit = function(e) NULL,
+      .prevent_default = list(onSubmit = TRUE)
+    )
+  )
+  expect_true(res_on$events[[1]]$prevent_default)
+})
+
+test_that(".prevent_default scalar must be logical (not coerced)", {
+  # The pre-named-list code used `isTRUE()`, which would silently coerce
+  # `1`/`"yes"` to FALSE. The named-list-aware normalize is strict —
+  # non-logical scalars error rather than fall through.
+  expect_error(
+    process_tags(
+      tags$input(value = shiny::reactiveVal(""), .prevent_default = 1)
+    ),
+    "`TRUE`/`FALSE` or a named list"
+  )
+  expect_error(
+    process_tags(
+      tags$input(value = shiny::reactiveVal(""), .prevent_default = "yes")
+    ),
+    "`TRUE`/`FALSE` or a named list"
+  )
+})
+
+test_that(".prevent_default = NA errors", {
+  # Single NA is logical but not a useful answer — error rather than guess.
+  expect_error(
+    process_tags(
+      tags$input(value = shiny::reactiveVal(""), .prevent_default = NA)
+    ),
+    "`TRUE`/`FALSE` or a named list"
+  )
+})
+
+test_that(".prevent_default list with a non-logical entry errors with the offending key", {
+  expect_error(
+    process_tags(
+      tags$form(
+        onSubmit = function(e) NULL,
+        .prevent_default = list(submit = "yes")
+      )
+    ),
+    "\\.prevent_default\\$submit.*`TRUE` or `FALSE`"
+  )
+})
+
+test_that(".prevent_default with unnamed entries errors with a naming hint", {
+  expect_error(
+    process_tags(
+      tags$form(
+        onSubmit = function(e) NULL,
+        .prevent_default = list(TRUE)
+      )
+    ),
+    "fully named"
+  )
+})
+
+test_that(".prevent_default with duplicate keys after normalization errors", {
+  expect_error(
+    process_tags(
+      tags$form(
+        onSubmit = function(e) NULL,
+        .prevent_default = list(submit = TRUE, onSubmit = FALSE)
+      )
+    ),
+    "duplicate event names.*submit"
+  )
+})
+
+test_that("normalize_element_prevent_default(list()) errors with an emptiness hint", {
+  # Same defensive-path note as the `.event` empty-list test: htmltools
+  # drops empty-list attribs before process_tags sees them, so this branch
+  # is reachable only via the helper or a hand-built tag.
+  expect_error(normalize_element_prevent_default(list()), "empty")
+})
