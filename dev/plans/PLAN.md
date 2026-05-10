@@ -35,11 +35,15 @@ In:
     branch) → both read and write.
 - Orthogonality with `on*` handlers — providing `onInput` does not disable
   auto-bind. Both fire on the same DOM event.
-- `.event` element prop, accepting one of `event_debounce(ms)`,
-  `event_throttle(ms, leading)`, `event_immediate()`.
+- `.event` element prop, accepting either:
+  - A single config struct (`event_debounce(ms)`, `event_throttle(ms, leading)`,
+    or `event_immediate()`) — applies to every event on the element.
+  - A named list keyed by DOM event name (e.g.
+    `list(input = event_debounce(500), keydown = event_immediate())`) — per-event
+    override. Events not in the list fall back to the per-event default rule.
 - `.prevent_default` element prop, boolean.
-- Defaults:
-  - Auto-bound `value` → `event_debounce(200)`.
+- Per-event default rule (when no `.event` entry covers an event):
+  - Auto-bind synthetic event → `event_debounce(200)`.
   - Everything else → `event_immediate()`.
 - Breaking API change: `event_*()` constructors no longer wrap a handler.
   They return a plain config struct.
@@ -49,8 +53,6 @@ Out:
   with whatever callables `reactiveStore` and `reactiveProxy` already
   produce.
 - Client-side event filtering (planned, separate PR).
-- Per-event timing on the same element. `.event` is element-scoped; if a
-  real use case forces per-event override, that's a separate decision.
 - Checkbox groups. Multi-select via `selected` on a vector-valued callable
   is a different shape and defers to a follow-up.
 
@@ -74,6 +76,13 @@ tags$input(value = field, onInput = event_debounce(\(e) ..., ms = 500))
 # NEW — element-level config; auto-bind handles write-back
 tags$input(value = field, .event = event_debounce(500))
 
+# Per-event override (debounce write-back, keep keydown immediate)
+tags$input(
+  value = field,
+  onKeyDown = \(e) if (e$key == "Enter") submit(),
+  .event = list(input = event_debounce(500))
+)
+
 # Form preventDefault
 tags$form(onSubmit = \(e) submit(), .prevent_default = TRUE)
 ```
@@ -87,6 +96,15 @@ structure(list(mode = "...", ms = ..., leading = ..., coalesce = ...),
 
 No handler argument. No `prevent_default` argument either — that moves to
 `.prevent_default` on the element.
+
+`.event` accepts a single config struct (applies to all events on the
+element) or a named list keyed by DOM event name (per-event override).
+Keys are lowercase DOM event names (`input`, `change`, `click`, `keydown`,
+…), not prop names — they identify the listener, which is per-DOM-event
+regardless of whether listeners came from auto-bind, an explicit `on*`
+prop, or both. Events not covered by the list fall back to the per-event
+default rule (auto-bind synthetic → `event_debounce(200)`, else
+`event_immediate()`).
 
 ## Implementation
 
@@ -115,11 +133,13 @@ In the per-attribute loop ([process_tags.R:123-156](../../R/process_tags.R#L123-
      echoes the current value back so the input snaps back. Tag the
      entry as auto-bind-origin for the timing-resolution step below.
 3. After collecting `pending_events` (both auto-bind synthetic and
-   explicit `on*`), apply timing:
-   - If `.event` is set on the tag, use it for every event entry on that
-     element.
-   - Else, use `event_debounce(200)` for any event marked
-     auto-bind-origin; `event_immediate()` for the rest.
+   explicit `on*`), apply timing — for each event entry, in priority order:
+   - If `.event` is a named list and contains the entry's DOM event name,
+     use that config.
+   - Else if `.event` is a single config struct, use it.
+   - Else (no covering `.event`), apply the per-event default:
+     `event_debounce(200)` for auto-bind-origin entries, `event_immediate()`
+     for everything else.
 4. Apply `.prevent_default` to every event entry on the element.
 5. Drop the existing per-handler wrapping at
    [process_tags.R:135-141](../../R/process_tags.R#L135-L141) — handlers no
@@ -215,30 +235,23 @@ know it's element config, not a DOM attribute.
    under Implementation. No tag-tree introspection, no new mechanism on
    the R side.
 
-2. **`<select>` event** — `input`, not `change`. Modern browsers fire
-   `input` on selection; using it everywhere `value` semantics apply
-   keeps the table coherent (`change` reserved for checkbox/radio).
-
-3. **Component-boundary forwarding** — a component that takes `field` and
+2. **Component-boundary forwarding** — a component that takes `field` and
    forwards it as `value = field` gets auto-bind for free. Documentation
    note only; no code work.
 
-4. **Default timing for the synthetic event entry** — auto-bound `value`
-   gets `event_debounce(200)`; everything else gets `event_immediate()`.
-   `.event` overrides per element. Confirm in implementation that
-   `.event = event_immediate()` on an auto-bound input genuinely produces
-   immediate write-back, not the 200ms default.
+3. **Per-event default rule** — `event_debounce(200)` for auto-bind-origin
+   entries, `event_immediate()` for everything else. `.event` overrides
+   per element (scalar) or per event (named list).
+
+4. **`.event` named-list keys are lowercase DOM event names** (`input`,
+   `change`, `click`, `keydown`), not prop names. Timing is decided
+   per-listener, and a listener is per-DOM-event regardless of whether it
+   came from auto-bind, an explicit `on*` prop, or both. Keying by DOM
+   event identifies the listener unambiguously.
 
 ## Open questions
 
-1. **Per-event override.** A reasonable user request will eventually be:
-   debounce `onInput` 500ms but keep `onKeyDown` immediate on the same
-   `<input>`. Not solved here. The cleanest extension is allowing per-event
-   override via a named-list form on `.event` (e.g.
-   `.event = list(input = event_debounce(500), keydown = event_immediate())`),
-   but that's an additive future change and explicitly out of scope.
-
-2. **Naming.** `.event` is singular for an element-level scope that covers
-   all events. Plural (`.events`) reads better when more than one event
-   exists on the element. Keeping singular for now to match the design
-   document; flag as a soft naming decision.
+1. **Naming.** `.event` is singular but accepts both a single config and a
+   named list of per-event configs. `.events` reads better for the named-list
+   form. Keeping singular for now to match the design document; flag as a
+   soft naming decision.
