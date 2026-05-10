@@ -299,15 +299,6 @@ print.reactiveLeaf <- function(x, ...) {
 }
 
 #' @export
-length.reactiveLeaf <- function(x) {
-  stop(
-    "`length()` is not defined for a reactiveStore leaf. ",
-    "Use `length(leaf())` to read the underlying value's length.",
-    call. = FALSE
-  )
-}
-
-#' @export
 names.reactiveLeaf <- function(x) {
   stop(
     "`names()` is not defined for a reactiveStore leaf. ",

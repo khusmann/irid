@@ -636,9 +636,17 @@ test_that("[[ on a leaf errors and points at Each / leaf()", {
   expect_error(state$todos[[1L]], "Each|leaf\\(\\)")
 })
 
-test_that("length() and names() on a leaf error with hints", {
+test_that("length() on a leaf returns 1 (callable-as-singular)", {
+  # No custom `length.reactiveLeaf` — leaves inherit reactiveVal's default
+  # length-1 behavior. htmltools' `dropNullsOrEmpty` calls `length()` on
+  # every attribute value, so a throwing length method would prevent
+  # `value = state$leaf` from surviving tag construction.
   state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(length(state$todos), "length\\(leaf\\(\\)\\)")
+  expect_equal(length(state$todos), 1L)
+})
+
+test_that("names() on a leaf errors with a hint", {
+  state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_error(names(state$todos), "names\\(leaf\\(\\)\\)")
 })
 
