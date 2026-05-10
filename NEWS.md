@@ -7,6 +7,9 @@
   automatically two-way bind. Reads populate the prop; DOM events on the
   element write back through the same callable. Explicit `onInput` /
   `onChange` write handlers can be removed when auto-bind covers them.
+  When auto-bind coexists with an explicit `on*` handler on the same DOM
+  event, the auto-bind write always lands first — your handler observes
+  the post-write state regardless of attribute source order.
 * `event_immediate()`, `event_throttle()`, `event_debounce()` no longer
   wrap a handler. They return a config struct used with the new
   element-level `.event` prop. Per-handler timing is gone — set timing on
