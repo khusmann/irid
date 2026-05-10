@@ -112,7 +112,55 @@ is correctly propagated from R to the client.
 - [ ] `event_throttle()` sends `mode = "throttle"` with `ms`, `leading`, `coalesce`
 - [ ] `event_debounce()` sends `mode = "debounce"` with `ms`, `coalesce`
 - [ ] `prevent_default` flag is forwarded to the client
-- [ ] Bare function defaults to `event_immediate(coalesce = FALSE)`
+- [ ] `event_*()` constructors return config structs (no handler argument)
+
+## Auto-bind (state-binding props)
+
+Verify that callable `value`/`checked`/`selected` props produce both a read
+binding and a write event entry, and that the corresponding DOM event fires
+the write back through the callable.
+
+### `process_tags` extraction
+
+- [ ] `value = reactiveVal()` on text input produces both a binding (`attr = "value"`) and a synthetic `input` event entry with handler `\(e) val(e$value)`
+- [ ] `checked = reactiveVal()` on checkbox produces both a binding and a synthetic `change` event entry
+- [ ] `selected = reactiveVal()` on `<select>` produces both a binding and a synthetic `input` event entry
+- [ ] `selected = reactiveVal()` on `<input type="radio">` produces both a binding and a synthetic `change` event entry
+- [ ] 0-arg callable in `value` produces only a binding (no write event entry)
+- [ ] Auto-bind synthetic event coexists with explicit `onInput`/`onChange` on the same element
+
+### Write-back
+
+- [ ] `value = reactiveVal()` on text input — typing fires writes; `rv()` returns the typed value after flush
+- [ ] `value = state$leaf` (store leaf) — typing fires writes
+- [ ] `value = reactiveProxy(target, set = ...)` — `set` is called on write
+- [ ] `value = reactiveProxy(target, set = NULL)` — writes silently dropped
+- [ ] `value = \() expr()` (0-arg) — no write fires; client snaps back via the optimistic-update protocol
+- [ ] `checked = reactiveVal(FALSE)` on checkbox — toggle fires `rv(TRUE/FALSE)`
+- [ ] `selected = state$theme` on `<select>` — selection fires `rv(value)`
+- [ ] `selected = state$choice` on `<input type="radio">` — selection fires `rv(value)`; deselected radio does not write
+- [ ] Auto-bind + explicit `onInput` on same element — both run
+- [ ] Focused-input echo skipping continues to work for auto-bind value updates
+
+### Client-side `selected` polymorphism
+
+- [ ] `selected` on `<select>`: `irid-attr` sets `el.value = msg.value`
+- [ ] `selected` on `<input type="radio">`: `irid-attr` sets `el.checked = (msg.value === el.value)`
+- [ ] `<select>` write-back listens on `input`, not `change`
+- [ ] Radio write-back listens on `change`; only fires when `el.checked === true`
+
+## `.event` element config
+
+Verify that element-level `.event` and `.prevent_default` props correctly
+configure timing and transport for all events on the element.
+
+- [ ] `.event` and `.prevent_default` are stripped from output HTML attributes
+- [ ] `.event = event_debounce(500)` applies to every event entry on the element (auto-bind synthetic + explicit `on*`)
+- [ ] `.prevent_default = TRUE` propagates to every event entry on the element
+- [ ] Auto-bound `value` without explicit `.event` defaults to `event_debounce(200)`
+- [ ] Non-auto-bound events without explicit `.event` default to `event_immediate()`
+- [ ] `.event = event_immediate()` on an auto-bound input overrides the 200ms debounce default
+- [ ] Multiple events on the same element (e.g. `onInput` + `onKeyDown`) share the element's `.event` config
 
 ## `iridApp` rendering
 
