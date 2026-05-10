@@ -47,9 +47,13 @@ When \code{.event} is omitted, irid applies a per-event default:
 \code{event_immediate()} for everything else.
 
 \code{.event} accepts either a single config struct (applies to every event
-on the element) or a named list keyed by lowercase DOM event name
-(\code{input}, \code{change}, \code{keydown}, ...) for per-event overrides. Events
-not covered by the list fall back to the per-event default.
+on the element) or a named list for per-event overrides. List keys may
+use either the lowercase DOM event name (\code{input}, \code{change}, \code{keydown})
+or the matching \code{on}-prop name (\code{onInput}, \code{onChange}, \code{onKeyDown});
+both forms normalize to the lowercase DOM event. Events not covered by
+the list fall back to the per-event default. Malformed \code{.event} values
+(a non-config, an unnamed list, or a list whose entries are not all
+configs) raise an error during tag processing.
 
 Use the element-level \code{.prevent_default = TRUE} prop to call
 \code{event.preventDefault()} in the browser before dispatch.

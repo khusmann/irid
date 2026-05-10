@@ -42,21 +42,63 @@ make_autobind_handler <- function(fn, attr_name) {
   }
 }
 
-# Resolve the `irid_event_config` that applies to a single event entry.
-# Element-level `.event` wins (named-list per-event > single config struct);
-# otherwise fall back to the per-event default (auto-bind synthetic →
-# debounce 200ms, anything else → immediate).
-resolve_event_config <- function(event_name, autobind_origin, element_event) {
-  if (!is.null(element_event)) {
-    if (inherits(element_event, "irid_event_config")) {
-      return(element_event)
-    }
-    if (is.list(element_event) && !is.null(names(element_event)) &&
-        event_name %in% names(element_event)) {
-      cfg <- element_event[[event_name]]
-      if (inherits(cfg, "irid_event_config")) return(cfg)
+# Validate and normalize an element-level `.event` prop into a lookup
+# function: takes a lowercase DOM event name, returns the matching
+# `irid_event_config` or NULL. Keys accept either DOM-event form
+# (`input`, `keydown`) or `on`-prop form (`onInput`, `onKeyDown`); both
+# normalize to lowercase DOM-event names. Errors loudly on malformed
+# input rather than silently falling back to defaults.
+normalize_element_event <- function(element_event) {
+  if (is.null(element_event)) {
+    return(function(event_name) NULL)
+  }
+  if (inherits(element_event, "irid_event_config")) {
+    return(function(event_name) element_event)
+  }
+  if (!is.list(element_event)) {
+    stop(
+      "`.event` must be an `irid_event_config` (from `event_immediate()`, ",
+      "`event_throttle()`, or `event_debounce()`) or a named list of them; ",
+      "got ", paste(class(element_event), collapse = "/"),
+      call. = FALSE
+    )
+  }
+  nms <- names(element_event)
+  if (length(element_event) == 0L || is.null(nms) || any(!nzchar(nms))) {
+    stop(
+      "`.event` list must be fully named, keyed by DOM event ",
+      "(e.g. `input`, `keydown`) or `on`-prop (e.g. `onInput`)",
+      call. = FALSE
+    )
+  }
+  normalized <- tolower(sub("^on", "", nms, ignore.case = TRUE))
+  dup <- duplicated(normalized)
+  if (any(dup)) {
+    stop(
+      "`.event` has duplicate event names after normalization: ",
+      paste(unique(normalized[dup]), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  for (i in seq_along(element_event)) {
+    if (!inherits(element_event[[i]], "irid_event_config")) {
+      stop(
+        "`.event$", nms[[i]], "` must be an `irid_event_config`; got ",
+        paste(class(element_event[[i]]), collapse = "/"),
+        call. = FALSE
+      )
     }
   }
+  names(element_event) <- normalized
+  function(event_name) element_event[[event_name]]
+}
+
+# Resolve the `irid_event_config` for a single event entry. Element-level
+# `.event` wins; otherwise fall back to the per-event default (auto-bind
+# synthetic → debounce 200ms, anything else → immediate).
+resolve_event_config <- function(event_name, autobind_origin, lookup) {
+  cfg <- lookup(event_name)
+  if (!is.null(cfg)) return(cfg)
   if (autobind_origin) event_debounce(200) else event_immediate()
 }
 
@@ -167,8 +209,10 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     attribs <- node$attribs
 
     # Element-level event config and prevent_default — strip before the
-    # per-attribute loop so they never reach the HTML output.
-    element_event <- attribs[[".event"]]
+    # per-attribute loop so they never reach the HTML output. `.event` is
+    # validated and normalized into a lookup function up front so any
+    # malformed input fails before bindings/events are emitted.
+    element_event_lookup <- normalize_element_event(attribs[[".event"]])
     element_prevent_default <- isTRUE(attribs[[".prevent_default"]])
     attribs[[".event"]] <- NULL
     attribs[[".prevent_default"]] <- NULL
@@ -220,7 +264,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     # default rule) and propagate .prevent_default to every entry.
     for (i in seq_along(pending_events)) {
       e <- pending_events[[i]]
-      cfg <- resolve_event_config(e$event, e$autobind, element_event)
+      cfg <- resolve_event_config(e$event, e$autobind, element_event_lookup)
       pending_events[[i]]$mode <- cfg$mode
       pending_events[[i]]$ms <- cfg$ms
       pending_events[[i]]$leading <- cfg$leading

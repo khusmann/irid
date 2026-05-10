@@ -64,6 +64,15 @@ arity-dispatched: 0-arg callables get a no-op handler so the listener still
 fires and the optimistic-update protocol echoes the current value back.
 1-arg+ callables receive `e$value` (or `e$checked` for `checked`).
 
+When the auto-bind synthetic event collides with an explicit `on*` handler
+(e.g. `value = rv` and `onInput = ...` on the same `<input>`), both event
+entries land on the same DOM event and share the same input id. The R side
+registers two `observeEvent`s on that input; the JS side attaches two
+listeners. Both run on every event — duplicate `Shiny.setInputValue` calls
+are harmless because the payload is identical. Observer execution order
+follows attribute source order (the entry whose attribute appears first in
+the user's tag call runs first).
+
 Event timing comes from the element-level `.event` prop. A single
 `irid_event_config` applies to every event on the element; a named list
 keyed by lowercase DOM event name overrides per event. With no covering

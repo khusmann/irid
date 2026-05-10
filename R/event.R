@@ -16,9 +16,13 @@
 #' `event_immediate()` for everything else.
 #'
 #' `.event` accepts either a single config struct (applies to every event
-#' on the element) or a named list keyed by lowercase DOM event name
-#' (`input`, `change`, `keydown`, ...) for per-event overrides. Events
-#' not covered by the list fall back to the per-event default.
+#' on the element) or a named list for per-event overrides. List keys may
+#' use either the lowercase DOM event name (`input`, `change`, `keydown`)
+#' or the matching `on`-prop name (`onInput`, `onChange`, `onKeyDown`);
+#' both forms normalize to the lowercase DOM event. Events not covered by
+#' the list fall back to the per-event default. Malformed `.event` values
+#' (a non-config, an unnamed list, or a list whose entries are not all
+#' configs) raise an error during tag processing.
 #'
 #' Use the element-level `.prevent_default = TRUE` prop to call
 #' `event.preventDefault()` in the browser before dispatch.

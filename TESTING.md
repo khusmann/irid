@@ -111,7 +111,7 @@ is correctly propagated from R to the client.
 - [ ] `event_immediate()` sends `mode = "immediate"` with `coalesce` flag
 - [ ] `event_throttle()` sends `mode = "throttle"` with `ms`, `leading`, `coalesce`
 - [ ] `event_debounce()` sends `mode = "debounce"` with `ms`, `coalesce`
-- [ ] `prevent_default` flag is forwarded to the client
+- [ ] `.prevent_default = TRUE` is forwarded to every event entry on the client
 - [ ] `event_*()` constructors return config structs (no handler argument)
 
 ## Auto-bind (state-binding props)
@@ -163,6 +163,8 @@ configure timing and transport for all events on the element.
 - [ ] Non-auto-bound events without explicit `.event` default to `event_immediate()`
 - [ ] `.event = event_immediate()` on an auto-bound input overrides the 200ms debounce default
 - [ ] Multiple events on the same element (e.g. `onInput` + `onKeyDown`) share the element's `.event` config
+- [ ] `.event` named-list keys accept either DOM-event form (`input`) or `on`-prop form (`onInput`); both normalize to the lowercase DOM event
+- [ ] Malformed `.event` errors at process time: a non-config / non-list value, an unnamed list, a partially-named list, a list whose entries are not all `irid_event_config`, or a list with duplicate event names after normalization
 
 ## `iridApp` rendering
 
