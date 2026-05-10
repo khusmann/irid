@@ -133,8 +133,8 @@ the write back through the callable.
 
 - [ ] `value = reactiveVal()` on text input — typing fires writes; `rv()` returns the typed value after flush
 - [ ] `value = state$leaf` (store leaf) — typing fires writes
-- [ ] `value = reactiveProxy(target, set = ...)` — `set` is called on write
-- [ ] `value = reactiveProxy(target, set = NULL)` — writes silently dropped
+- [ ] `value = reactiveProxy(get = ..., set = ...)` — `set` is called on write
+- [ ] `value = reactiveProxy(get = ...)` — writes silently dropped
 - [ ] `value = \() expr()` (0-arg) — no write fires; client snaps back via the optimistic-update protocol
 - [ ] `checked = reactiveVal(FALSE)` on checkbox — toggle fires `rv(TRUE/FALSE)`
 - [ ] `selected = state$theme` on `<select>` — selection fires `rv(value)`

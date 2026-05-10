@@ -86,7 +86,7 @@ Counter <- function(label, count) {
       ),
       tags$input(
         type = "range", min = 0, max = 100,
-        value = reactiveProxy(count, set = \(v) count(as.numeric(v)))
+        value = reactiveProxy(get = count, set = \(v) count(as.numeric(v)))
       ),
       tags$button(
         class = "btn btn-outline-secondary btn-sm",
@@ -215,20 +215,20 @@ If you need to transform reads or gate writes, wrap the callable in a
 
 ```r
 # Coerce the string from a range slider into a number on write
-reactiveProxy(count, set = \(v) count(as.numeric(v)))
+reactiveProxy(get = count, set = \(v) count(as.numeric(v)))
 
 # Bidirectional transform — display Fahrenheit, store Celsius
-reactiveProxy(celsius,
-  get = \(c) c * 9/5 + 32,
+reactiveProxy(
+  get = \() celsius() * 9/5 + 32,
   set = \(f) celsius((as.numeric(f) - 32) * 5/9)
 )
 
 # Read-only view — writes silently dropped, input snaps back to current value
-reactiveProxy(name, set = NULL)
+reactiveProxy(get = name)
 ```
 
 A 0-arg function (e.g. `\() toupper(name())`) behaves the same as
-`reactiveProxy(set = NULL)`: read-only with snap-back.
+`reactiveProxy(get = name)` (read-only with snap-back).
 
 *See the [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
@@ -327,7 +327,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$input(
         type = "range", min = 0, max = 1, step = 0.1,
-        value = reactiveProxy(threshold, set = \(v) threshold(as.numeric(v)))
+        value = reactiveProxy(get = threshold, set = \(v) threshold(as.numeric(v)))
       ),
       tags$span(\() paste("Threshold:", threshold()))
     )

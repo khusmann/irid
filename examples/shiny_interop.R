@@ -23,7 +23,7 @@ CountDisplay <- function(count) {
 }
 
 CountControls <- function(count) {
-  count_num <- reactiveProxy(count, set = \(v) count(as.numeric(v)))
+  count_num <- reactiveProxy(get = count, set = \(v) count(as.numeric(v)))
   tags$div(
     tags$input(
       type = "range", min = 0, max = 100,

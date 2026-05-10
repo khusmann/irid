@@ -23,7 +23,7 @@ library(bslib)
 
 OldFaithful <- function() {
   bins <- reactiveVal(30L)
-  bins_int <- reactiveProxy(bins, set = \(v) bins(as.integer(v)))
+  bins_int <- reactiveProxy(get = bins, set = \(v) bins(as.integer(v)))
 
   page_fluid(
     card(

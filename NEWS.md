@@ -31,8 +31,9 @@
 
 ## New features
 
-* `reactiveProxy()` — wrap a callable with custom read/write behavior for
-  validation, transforms, and read-only views at component boundaries.
+* `reactiveProxy()` — build a callable from a `get` reader and optional
+  `set` writer for validation, transforms, and read-only views at
+  component boundaries.
 * `reactiveStore()` — hierarchical reactive state container.
 
 # irid 0.1.0

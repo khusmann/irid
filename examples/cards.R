@@ -44,7 +44,8 @@ App <- function() {
   selected_columns <- reactiveVal(character(0))
   choice <- reactiveVal("")
 
-  add_column <- reactiveProxy(choice,
+  add_column <- reactiveProxy(
+    get = choice,
     set = \(v) {
       if (nzchar(v)) {
         selected_columns(c(selected_columns(), v))

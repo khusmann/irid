@@ -25,12 +25,13 @@ OptimisticUpdates <- function() {
   max_chars <- 10L
   delay_ms <- reactiveVal(0L)
 
-  truncated <- reactiveProxy(text,
-    get = \(v) substr(v, 1, max_chars),
+  truncated <- reactiveProxy(
+    get = \() substr(text(), 1, max_chars),
     set = \(v) text(substr(v, 1, max_chars))
   )
 
-  delay_proxy <- reactiveProxy(delay_ms,
+  delay_proxy <- reactiveProxy(
+    get = delay_ms,
     set = \(v) {
       val <- as.integer(v)
       delay_ms(val)

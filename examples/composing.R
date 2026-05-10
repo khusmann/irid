@@ -11,7 +11,7 @@ library(irid)
 library(bslib)
 
 Counter <- function(label, count) {
-  count_num <- reactiveProxy(count, set = \(v) count(as.numeric(v)))
+  count_num <- reactiveProxy(get = count, set = \(v) count(as.numeric(v)))
   card(
     card_header(label),
     card_body(
