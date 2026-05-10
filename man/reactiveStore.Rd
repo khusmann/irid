@@ -16,7 +16,9 @@ unnamed/empty bare lists, classed lists, or any value wrapped in
 \value{
 A callable \code{reactiveStore} node with class
 \code{c("reactiveStore", "reactive", "function")}. Sub-trees share the
-same class; leaf positions are plain \code{shiny::reactiveVal()}s.
+same class. Leaf positions are plain \code{shiny::reactiveVal()}s with
+class \code{c("reactiveVal", "reactive", "function")} — the shared
+\code{"reactive"} class is what auto-bind dispatches on.
 }
 \description{
 Builds a callable hierarchical state tree from a nested list. The shape

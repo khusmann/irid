@@ -19,7 +19,9 @@
 #'   `I()`) becomes a leaf. Partially-named bare lists are an error.
 #' @return A callable `reactiveStore` node with class
 #'   `c("reactiveStore", "reactive", "function")`. Sub-trees share the
-#'   same class; leaf positions are plain `shiny::reactiveVal()`s.
+#'   same class. Leaf positions are plain `shiny::reactiveVal()`s with
+#'   class `c("reactiveVal", "reactive", "function")` — the shared
+#'   `"reactive"` class is what auto-bind dispatches on.
 #' @export
 reactiveStore <- function(initial) {
   build_node(initial, "", root = TRUE)
@@ -113,7 +115,14 @@ make_store <- function(children, keys, path) {
 # store write paths so a downstream rejection (e.g., an unknown key five
 # levels deep) leaves siblings unmodified.
 validate_write <- function(node, value) {
-  if (!inherits(node, "reactiveStore")) return(invisible())
+  if (inherits(node, "reactiveVal")) return(invisible())
+  if (!inherits(node, "reactiveStore")) {
+    stop(
+      "Internal error: validate_write expected a reactiveStore or reactiveVal, ",
+      "got an object of class ", paste(class(node), collapse = "/"),
+      call. = FALSE
+    )
+  }
   env <- environment(node)
   label <- env$label
   if (!is.list(value)) {
