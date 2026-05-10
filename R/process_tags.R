@@ -26,16 +26,23 @@ STATE_BIND_FIELD <- list(
   selected = "value"
 )
 
-# Build the synthetic write-back handler for a state-binding prop. Arity
-# of the user's callable selects between write (>= 1 formal — `reactiveVal`,
-# store leaf, `reactiveProxy`, branch, `\(v) ...`) and no-op (0 formals —
-# `\() expr()`, `reactive()`). Read-only callables still receive a listener
-# so the value reaches the server, where the no-op write combined with the
-# force-send-on-no-op protocol echoes the current value back, snapping the
-# input to whatever the server holds.
+# Can the callable accept a positional argument? Primitives have no
+# explicit formals but accept arguments at the C level; closures with at
+# least one formal (including `...`) can be called with the write value.
+# A 0-formal closure would error if called with an argument.
+can_accept_write <- function(fn) {
+  is.primitive(fn) || length(formals(fn)) >= 1L
+}
+
+# Build the synthetic write-back handler for a state-binding prop.
+# Writable callables (reactiveVal, store leaf, reactiveProxy, store node,
+# `\(v) ...`, `\(...) ...`, primitives) get a handler that calls
+# `fn(e$value/checked)`. Read-only callables (`\() expr()`, `reactive()`)
+# get a no-op handler — the listener still fires so the optimistic-update
+# protocol echoes the current server value back, snapping the input.
 make_autobind_handler <- function(fn, attr_name) {
   field <- STATE_BIND_FIELD[[attr_name]]
-  if (length(formals(fn)) >= 1L) {
+  if (can_accept_write(fn)) {
     function(e) fn(e[[field]])
   } else {
     function(e) NULL
@@ -280,6 +287,32 @@ process_tags <- function(tag, counter = irid_id_counter()) {
 
     for (name in names(attribs)) {
       val <- attribs[[name]]
+
+      # Catch misuse of irid constructs as attribute values. Without this
+      # guard they fall through to `kept_attribs` and get serialized as
+      # HTML attributes (or worse, silently coerced). Event configs belong
+      # on the element-level `.event` prop; control-flow / output nodes
+      # belong as children.
+      irid_class <- grep("^irid_", class(val), value = TRUE)
+      if (length(irid_class) > 0L) {
+        hint <- if ("irid_event_config" %in% irid_class) {
+          paste0(
+            "Pass event timing via the element-level `.event` prop, e.g. ",
+            "`tags$input(", name,
+            " = \\(e) ..., .event = event_debounce(500))`."
+          )
+        } else {
+          paste0(
+            "Constructs of class `", irid_class[[1]],
+            "` belong as children, not as attribute values."
+          )
+        }
+        stop(
+          "`", name, "` was set to an irid construct (`",
+          paste(irid_class, collapse = "/"), "`). ", hint,
+          call. = FALSE
+        )
+      }
 
       # Auto-bind: state-binding prop with a callable. Emit both a binding
       # (server → client read path) and a synthetic event entry (client →
