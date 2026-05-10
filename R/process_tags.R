@@ -310,11 +310,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       irid_class <- grep("^irid_", class(val), value = TRUE)
       if (length(irid_class) > 0L) {
         hint <- if ("irid_event_config" %in% irid_class) {
-          paste0(
-            "Pass event timing via the element-level `.event` prop, e.g. ",
-            "`tags$input(", name,
-            " = \\(e) ..., .event = event_debounce(500))`."
-          )
+          "Pass event timing via the element-level `.event` prop."
         } else {
           paste0(
             "Constructs of class `", irid_class[[1]],
