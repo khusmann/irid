@@ -96,7 +96,12 @@ and `Match` (record bound value) will share.
   - `mini()` → `get_record()`
   - `mini(record)` → `set_record(record)`
   - `mini$field()` → reads the corresponding leaf from `get_record()`
-  - `mini$field(v)` → synthetic setter: `set_record(modifyList(get_record(), list(field = v)))`
+  - `mini$field(v)` → synthetic setter: copy the current record, replace
+    the field via `[[<-`, hand to `set_record`. **Not** `modifyList`: that
+    function recurses when both sides of a key are list-shaped, which
+    silently keeps the original entries when the new value is shorter or
+    unnamed (e.g. replacing `options = list("Red", "Blue")` with
+    `list("Red", "Blue", "")` would no-op the third entry).
   - Fixed shape — derived from the record at construction; the projection
     fails on a write with unknown keys, same rule as `reactiveStore`.
 - Shape introspection (`names`, `length`, `[[`, `print`) reuses the

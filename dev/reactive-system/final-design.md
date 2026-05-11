@@ -117,7 +117,7 @@ library(purrr)
 
 # Toggle a single item by id
 state$todos(
-  modify_if(state$todos(), \(t) t$id == 1L, \(t) modifyList(t, list(done = TRUE)))
+  modify_if(state$todos(), \(t) t$id == 1L, \(t) { t$done <- TRUE; t })
 )
 
 # Remove an item
@@ -126,6 +126,11 @@ state$todos(keep(state$todos(), \(t) t$id != 2L))
 # Append
 state$todos(c(state$todos(), list(list(id = 3L, text = "New", done = FALSE))))
 ```
+
+(`{ t$done <- TRUE; t }` rather than `modifyList(t, list(done = TRUE))`
+even though both work here — the latter recurses into list-shaped
+fields, so reaching for it as a general pattern bites the moment a
+field is itself a list. See "One-way data flow" under `Each` below.)
 
 Fine-grained per-item reactivity is the responsibility of `Each`, not the store.
 
@@ -502,8 +507,11 @@ Each(state$todos, by = \(t) t$id, \(todo) {
 - `todo$done()`, `todo$text()` — fine-grained reactive reads.
 - `todo()` — reads the full record.
 - `todo(new_record)` — writes the whole item back to the parent.
-- `todo$done(TRUE)` — synthetic setter, internally does
-  `todo(modifyList(todo(), list(done = TRUE)))`.
+- `todo$done(TRUE)` — synthetic setter, internally copies the current
+  record, replaces `done` via `[[<-`, and hands the result to the
+  parent. (Not `modifyList`: it recurses into list-shaped fields, which
+  silently keeps original entries when the new value is shorter or
+  unnamed.)
 
 Auto-bind on mini-store fields uses the synthetic setter: `checked = todo$done`
 reads from the leaf and writes through the parent on user input.
@@ -549,8 +557,14 @@ parent. The leaf never holds independent state. The reactive graph is acyclic.
 # All three are equivalent — all write through the parent:
 tags$input(type = "checkbox", checked = todo$done)   # auto-bind
 todo$done(TRUE)                                       # synthetic setter
-todo(modifyList(todo(), list(done = TRUE)))            # manual
+todo({ r <- todo(); r$done <- TRUE; r })              # manual
 ```
+
+Avoid `modifyList(todo(), list(done = TRUE))` for the manual form,
+even though it works for scalar fields. `modifyList` recurses when both
+sides of a key are list-shaped, so reaching for it as a general
+"replace this slot" pattern bites the moment a field is itself a list
+(e.g. `options = list(...)`). The explicit `[[<-` is shape-agnostic.
 
 Two-way mini-stores (leaf writes go directly to the leaf then propagate to the
 parent) create circular reactive flow. One-way avoids it: the parent is the

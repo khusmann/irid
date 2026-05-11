@@ -1,6 +1,16 @@
 # Finding: `Index` read/write asymmetry
 
-**Status:** Captured, not triaged.
+**Status:** Resolved by the `Each` redesign (PLAN phases 2–5,
+May 2026). `Index` has been removed; the new `Each` passes a per-item
+mini-store (records) or scalar accessor (atomics) that supports
+synthetic write-back through the parent collection. The body of this
+document is preserved as the original problem statement that
+motivated the redesign.
+
+The pre-redesign code samples below use `modifyList(t, list(done =
+e$checked))` for record patching — that pattern works for scalar
+fields but is unsafe for list-shaped fields (it recurses); the
+post-redesign synthetic-setter chain uses `[[<-` for the same reason.
 **Surfaced:** April 2026, during the state-primitive stress test
 (`dev/stores/state-stress-test-plan.md`).
 

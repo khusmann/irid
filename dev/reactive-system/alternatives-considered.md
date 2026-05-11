@@ -249,13 +249,17 @@ experience is identical.
 **Key discussion points:** One-way mini-stores are projections of collection
 items. Each per-key entry in `Each`'s internal map holds a read-only
 `reactiveStore(item)` (for records) or a `reactiveVal` (for scalars). Writes
-through a mini-store leaf (e.g. `todo$done(TRUE)`) use a synthetic setter that
-internally does `todo(modifyList(todo(), list(done = TRUE)))` — routing the write
-through the parent collection. The reconcile pass that follows flows strictly
-parent → mini-store, patching only changed leaves. No circular flow, no guard
-flags. From the user's perspective `todo$done(TRUE)`, `todo(modifyList(...))`,
-and `checked = todo$done` (auto-bind) are all equivalent — the data-flow
-direction is invisible.
+through a mini-store leaf (e.g. `todo$done(TRUE)`) use a synthetic setter
+that copies the current record, replaces the field via `[[<-`, and hands
+the result to the parent — routing the write through the parent
+collection. The reconcile pass that follows flows strictly parent →
+mini-store, patching only changed leaves. No circular flow, no guard
+flags. From the user's perspective `todo$done(TRUE)` and
+`checked = todo$done` (auto-bind) are equivalent — the data-flow
+direction is invisible. (Implementation note: the synthetic setter
+deliberately uses `[[<-` rather than `modifyList`, since `modifyList`
+recurses into list-shaped fields and silently keeps original entries
+when the new value is shorter or unnamed.)
 
 ---
 
