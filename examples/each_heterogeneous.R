@@ -77,16 +77,18 @@ App <- function() {
   }
 
   # A `reactiveProxy` over the block's current `type`. The read side
-  # is a normal leaf read; the write side swaps the WHOLE record so
-  # the shape matches the new kind. Writing through `block` (the
-  # per-item callable from Each) routes the new record up through the
-  # mini-store's synthetic setter chain to the parent collection.
-  # The Each reconciler then sees the entry's shape signature
-  # changed, tears down this entry's mini-store + scope + DOM, and
-  # rebuilds with the new shape — same flush.
+  # is just the `type` leaf accessor — subscribing only to type
+  # changes, not the whole record. The write side swaps the WHOLE
+  # record so the shape matches the new kind (todo gains `done`,
+  # the others don't). Writing through `block` (the per-item callable
+  # from Each) routes the new record up through the mini-store's
+  # synthetic setter chain to the parent collection. The Each
+  # reconciler then sees the entry's shape signature changed, tears
+  # down this entry's mini-store + scope + DOM, and rebuilds with
+  # the new shape — same flush.
   kind_proxy <- function(block) {
     reactiveProxy(
-      get = function() block()$type,
+      get = block$type,
       set = function(new_type) {
         v <- shiny::isolate(block())
         block(block_for_type(v$id, new_type, text = v$text))
