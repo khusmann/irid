@@ -12,14 +12,17 @@
 # own keys. The Match inside the Each body dispatches on `type` and
 # renders the right editor for each kind.
 #
-# Changing a block's kind via the dropdown swaps the whole record (a
-# todo's `done` field can't dangle on a paragraph). The new record has
-# a different leaf tree from the old one, so the Each reconciler
-# detects the shape transition for that one entry, tears down the
-# old mini-store + scope + DOM range, and rebuilds with a fresh
-# mini-store of the new shape — emitted as a single irid-mutate
-# carrying the new range plus `order`. Sibling blocks keep their state
-# and focus.
+# Changing a block's kind via the dropdown reshapes the slot in the
+# parent collection (the `blocks` reactiveVal). A direct write
+# through the per-item mini-store would be rejected as a shape
+# violation — mini-stores are strict about their leaf tree, same as
+# `reactiveStore`. Shape changes are *parent-level* operations:
+# write the new collection through `blocks(...)`. The Each reconciler
+# observes the parent change, sees the entry's shape signature
+# changed, tears down the old mini-store + scope + DOM, and rebuilds
+# with a fresh mini-store of the new shape — emitted as a single
+# irid-mutate carrying the new range plus `order`. Sibling blocks
+# keep their state and focus.
 #
 # Try in the running app:
 #   - Edit a block's text — only that one input re-renders; siblings
@@ -78,20 +81,24 @@ App <- function() {
 
   # A `reactiveProxy` over the block's current `type`. The read side
   # is just the `type` leaf accessor — subscribing only to type
-  # changes, not the whole record. The write side swaps the WHOLE
-  # record so the shape matches the new kind (todo gains `done`,
-  # the others don't). Writing through `block` (the per-item callable
-  # from Each) routes the new record up through the mini-store's
-  # synthetic setter chain to the parent collection. The Each
-  # reconciler then sees the entry's shape signature changed, tears
-  # down this entry's mini-store + scope + DOM, and rebuilds with
-  # the new shape — same flush.
+  # changes, not the whole record. The write side reshapes the slot
+  # in the parent collection (`blocks`), because the new kind has a
+  # different leaf tree than the old (todo adds `done`); a write
+  # through the mini-store would be rejected as a shape violation.
+  # Writing through `blocks` makes the parent-mediated nature of the
+  # operation explicit. The Each reconciler observes the parent
+  # change, sees the entry's shape signature changed, tears down
+  # this entry's mini-store + scope + DOM, and rebuilds — same flush.
   kind_proxy <- function(block) {
     reactiveProxy(
       get = block$type,
       set = function(new_type) {
-        v <- shiny::isolate(block())
-        block(block_for_type(v$id, new_type, text = v$text))
+        id <- shiny::isolate(block$id())
+        text <- shiny::isolate(block$text())
+        bs <- shiny::isolate(blocks())
+        idx <- which(vapply(bs, function(b) b$id, integer(1L)) == id)
+        bs[[idx]] <- block_for_type(id, new_type, text = text)
+        blocks(bs)
       }
     )
   }

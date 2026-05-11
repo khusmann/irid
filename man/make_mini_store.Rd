@@ -45,6 +45,14 @@ branch-vs-leaf rules as \code{\link[=reactiveStore]{reactiveStore()}} (\code{is_
 \code{strip_asis} are reused), and the same recursive \code{\link[=validate_write]{validate_write()}}
 enforces "no unknown keys" at every level on whole-record writes.
 
+\strong{Shape is strict.} Writes are validated against the keys captured
+at construction — same contract as a \code{\link[=reactiveStore]{reactiveStore()}} branch.
+Callers that need to change a slot's shape reshape the \emph{parent
+collection} directly (e.g. for \code{Each(items, ...)}, write the new
+\code{items()} with the slot already replaced); the outer reconciler
+observes the parent change and rebuilds this mini-store with a
+fresh leaf tree of the new shape on the same flush.
+
 \strong{Replace, not patch.} Unlike \code{\link[=reactiveStore]{reactiveStore()}} branch writes,
 mini-store branch writes pass the value verbatim to \code{set_record}
 (and, for sub-branches, replace the slot via \verb{[[<-} in the parent's
@@ -56,17 +64,6 @@ per-field synthetic setters (\code{mini$user$name("X")}) or merge before
 writing. The asymmetry exists because the mini-store is a
 projection: it never owns the record, so it has no business
 deciding how to merge a partial write into the source of truth.
-
-\strong{Shape-changing writes are allowed.} A write whose value has a
-different \code{shape_signature} than the one captured at construction
-(different key set at any depth, or scalar↔record at a sub-branch)
-skips local validation and the in-place leaf sync, and just routes
-the new value to \code{set_record}. The outer container (\code{Each}'s
-reconciler, \code{Match}'s active-case detector) observes the parent
-change and rebuilds this mini-store with a fresh leaf tree of the
-new shape on the same flush. The write must still be a named-list
-record at the root — scalars and unnamed lists error rather than
-implicitly demoting the slot to a scalar accessor.
 
 Internally, every leaf holds a \code{reactiveVal} kept in sync with the
 parent by a single root-level propagating observer. The observer

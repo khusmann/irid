@@ -19,6 +19,14 @@
 #' `strip_asis` are reused), and the same recursive [validate_write()]
 #' enforces "no unknown keys" at every level on whole-record writes.
 #'
+#' **Shape is strict.** Writes are validated against the keys captured
+#' at construction — same contract as a [reactiveStore()] branch.
+#' Callers that need to change a slot's shape reshape the *parent
+#' collection* directly (e.g. for `Each(items, ...)`, write the new
+#' `items()` with the slot already replaced); the outer reconciler
+#' observes the parent change and rebuilds this mini-store with a
+#' fresh leaf tree of the new shape on the same flush.
+#'
 #' **Replace, not patch.** Unlike [reactiveStore()] branch writes,
 #' mini-store branch writes pass the value verbatim to `set_record`
 #' (and, for sub-branches, replace the slot via `[[<-` in the parent's
@@ -30,17 +38,6 @@
 #' writing. The asymmetry exists because the mini-store is a
 #' projection: it never owns the record, so it has no business
 #' deciding how to merge a partial write into the source of truth.
-#'
-#' **Shape-changing writes are allowed.** A write whose value has a
-#' different `shape_signature` than the one captured at construction
-#' (different key set at any depth, or scalar↔record at a sub-branch)
-#' skips local validation and the in-place leaf sync, and just routes
-#' the new value to `set_record`. The outer container (`Each`'s
-#' reconciler, `Match`'s active-case detector) observes the parent
-#' change and rebuilds this mini-store with a fresh leaf tree of the
-#' new shape on the same flush. The write must still be a named-list
-#' record at the root — scalars and unnamed lists error rather than
-#' implicitly demoting the slot to a scalar accessor.
 #'
 #' Internally, every leaf holds a `reactiveVal` kept in sync with the
 #' parent by a single root-level propagating observer. The observer
@@ -157,8 +154,7 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
       keys
     )
     fn <- make_mini_branch_fn(
-      fn_children, keys, path, set_self, set_internal,
-      initial_sig = shape_signature(initial)
+      fn_children, keys, path, set_self, set_internal
     )
 
     list(fn = fn, set_internal = set_internal)
@@ -195,53 +191,37 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
 
 # Builds a `reactiveStore`-classed branch callable. Reads recursively
 # call each child's `fn` (subscribing to all descendant leaves); writes
-# route through `set_self` and (for shape-stable writes) also into the
-# local leaves via `set_internal`. Factored out of `build_mini_node` so
-# the closure environment cleanly binds `children` (the named list of
-# child callables) to `fn_children` — this matches `make_store`'s shape
-# so [validate_write()] and `$.reactiveStore` work uniformly across
-# both store kinds.
+# validate against the locked shape and route through `set_self`.
+# Factored out of `build_mini_node` so the closure environment cleanly
+# binds `children` (the named list of child callables) to `fn_children`
+# — this matches `make_store`'s shape so [validate_write()] and
+# `$.reactiveStore` work uniformly across both store kinds.
 #
-# Two write modes:
-#  - Shape-stable write (new value's `shape_signature` matches the one
-#    captured at construction): validate keys, push into descendant
-#    leaves' local `rv`s synchronously via `set_internal`, then chain
-#    `set_self`. Same as a normal store branch write.
-#  - Shape-changing write (different signature): skip validation and
-#    `set_internal` — the local leaf tree can't represent the new
-#    shape — and just chain `set_self`. Mini-stores are projections,
-#    not the source of truth, so a shape-changing write is a request
-#    to replace the slot in the parent. The outer container (`Each`'s
-#    reconciler) observes the parent change and rebuilds this entry
-#    with a fresh mini-store of the new shape on the same flush.
-#    Skipping `set_internal` means the old leaves don't fire stale
-#    values during the brief window before rebuild — they're about
-#    to be torn down with the rest of the entry.
-make_mini_branch_fn <- function(children, keys, path, set_self,
-                                set_internal, initial_sig) {
+# Writes are shape-strict — the same contract as `reactiveStore`
+# branches. Both classes carry the same `reactiveStore` class, so a
+# component receiving "a store-like thing" sees one write contract
+# regardless of whether it's a real store or a per-item projection.
+# Shape transitions are reshaping operations on the *parent
+# collection*, not on the projection — callers express them by
+# writing the new collection through `items` (or, for Match, the
+# leading callable). The outer reconciler observes the parent change
+# and rebuilds this entry with a fresh mini-store of the new shape.
+make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
   label <- if (nzchar(path)) sprintf("'%s'", path) else "mini-store"
   fn <- function(...) {
     if (missing(..1)) {
       stats::setNames(lapply(keys, function(k) children[[k]]()), keys)
     } else {
       v <- ..1
-      if (identical(shape_signature(v), initial_sig)) {
-        validate_write(fn, v)
-        set_internal(v)
-        set_self(v)
-      } else {
-        # Permissive — must be a named list (a record) of some shape,
-        # else we'd silently allow a scalar to overwrite a record-
-        # shaped slot, which `Each`'s mixed-kind check would then
-        # reject on the next reconcile (worse error site).
-        if (!is_record(v)) {
-          stop(sprintf(
-            "Write to %s expected a named list (record), got %s",
-            label, paste(class(v), collapse = "/")
-          ), call. = FALSE)
-        }
-        set_self(v)
-      }
+      validate_write(fn, v)
+      # Push the record into descendant leaves' local `rv`s synchronously
+      # (set_internal recurses; only changed leaves invalidate). Then
+      # chain the write up through `set_self` so the parent collection
+      # sees it. Same reason as the leaf branch: the event-observer
+      # force-send echo runs before the parent-change propagator can
+      # fire on the next flush.
+      set_internal(v)
+      set_self(v)
       invisible(NULL)
     }
   }

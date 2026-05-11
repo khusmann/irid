@@ -255,14 +255,14 @@ test_that("Each builds a mini-store for record items and a slot accessor for sca
   m2$handle$destroy()
 })
 
-test_that("Each shape transitions via mini-store write trigger rebuild", {
-  # Regression for the `each_heterogeneous.R` crash path: the user
-  # writes a different-shape record through the per-item mini-store
-  # (e.g., a `kind_proxy` swapping a heading record for a todo
-  # record). The mini-store's shape-changing write routes through
-  # `set_record`; parent invalidates; the reconciler detects the
-  # shape change and rebuilds this entry with a new mini-store of
-  # the right shape.
+test_that("Each shape transitions via parent collection write trigger rebuild", {
+  # Regression for the variant-kind transition pattern: the user
+  # reshapes a slot in the parent collection (e.g., a `kind_proxy`
+  # swapping a heading record for a todo record by writing through
+  # `items`). The Each reconciler detects the shape change for that
+  # entry and rebuilds with a new mini-store of the right shape.
+  # A direct shape-changing write through the mini-store would error
+  # (mini-stores are shape-strict, same contract as reactiveStore).
   items <- shiny::reactiveVal(list(list(id = 1L, type = "heading", text = "")))
   built_minis <- list()
   m <- mount_each(
@@ -278,18 +278,28 @@ test_that("Each shape transitions via mini-store write trigger rebuild", {
   expect_equal(names(shiny::isolate(built_minis[[1]]())),
                c("id", "type", "text"))
 
-  # Same-shape write: paragraph keeps (id, type, text). No rebuild —
-  # the original mini-store handles the in-place patch.
+  # Same-shape write through the mini-store: paragraph keeps
+  # (id, type, text). No rebuild — the original mini-store handles
+  # the in-place patch.
   built_minis[[1]](list(id = 1L, type = "paragraph", text = "hi"))
   flushReact()
   expect_equal(length(built_minis), 1L)
 
-  # Shape-changing write: todo adds `done`. The reconciler rebuilds.
-  built_minis[[1]](list(id = 1L, type = "todo", text = "hi", done = FALSE))
+  # Shape-changing write through the *parent collection* (`items`):
+  # todo adds `done`. The reconciler rebuilds.
+  items(list(list(id = 1L, type = "todo", text = "hi", done = FALSE)))
   flushReact()
   expect_equal(length(built_minis), 2L)
   expect_equal(names(shiny::isolate(built_minis[[2]]())),
                c("id", "type", "text", "done"))
+
+  # Direct write through the mini-store with an unknown key errors —
+  # the mini-store enforces the same shape contract as reactiveStore.
+  expect_error(
+    built_minis[[2]](list(id = 1L, type = "todo", text = "hi",
+                          done = FALSE, extra = "novel")),
+    "Unknown keys"
+  )
   m$handle$destroy()
 })
 
