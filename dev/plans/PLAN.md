@@ -88,8 +88,11 @@ sequenced so the next phase has a stable foundation under it.
 and `Match` (record bound value) will share.
 
 - New internal in [R/store.R](../../R/store.R) (or a new
-  `R/mini_store.R`) — `make_mini_store(get_record, set_record)` returns a
-  callable-tree shaped like a `reactiveStore`:
+  `R/mini_store.R`) — `make_mini_store(get_record, set_record, scope)`
+  returns a callable-tree shaped like a `reactiveStore`. The `scope` arg
+  is the `make_scope` shim from "Forward-compatibility with shiny#4372"
+  below — pass it through so the projection's internal reactives are
+  created inside the right session:
   - `mini()` → `get_record()`
   - `mini(record)` → `set_record(record)`
   - `mini$field()` → reads the corresponding leaf from `get_record()`
@@ -119,11 +122,13 @@ function bodies.
   - One outer `observe` reads `cf$callable()` and walks the case
     predicates to find the first true one. Predicate arity dictates whether
     it's called as `pred(bound)` or `pred()`.
-  - On active-case change: destroy old mount, project a mini-store from the
-    bound value (records) or pass the bare callable (scalars), call
-    `body_fn(projection)` or `body_fn()` based on body arity, mount fresh.
+  - On active-case change: destroy old mount **and old scope** (see
+    "Forward-compatibility with shiny#4372"), create a fresh scope,
+    project a mini-store from the bound value (records) or pass the bare
+    callable (scalars), call `body_fn(projection)` or `body_fn()` based on
+    body arity, mount fresh inside the new scope.
   - Patch on same-case, value-changed: route the new record through the
-    existing mini-store's `set_record` (no remount).
+    existing mini-store's `set_record` (no remount, no new scope).
 - [R/process_tags.R](../../R/process_tags.R): the Match descriptor in
   `control_flows` carries `callable` + `cases` instead of just `cases`.
 - Tests: `tests/testthat/test-match.R` covering predicate / literal /
@@ -150,7 +155,10 @@ reconciliation, write-through-parent.
   The Each node carries `items` (a callable), `fn`, and `by` (NULL or
   function).
 - [R/mount.R](../../R/mount.R): rewrite the `cf$type == "each"` branch
-  with two reconciliation modes selected by `is.null(by)`:
+  with two reconciliation modes selected by `is.null(by)`. Each item /
+  slot gets its own scope (see "Forward-compatibility with shiny#4372"):
+  the per-item mini-store / scalar accessor, the body's reactives, and
+  the inner mount all live inside it. Unmount calls `scope$destroy()`.
   - **Positional (`by = NULL`):** parallel arrays of slot state. Each
     slot holds a per-item callable (mini-store or scalar accessor) plus
     its DOM mount and `pos_rv`. Slot accessors close over the slot index
@@ -205,6 +213,92 @@ reconciliation, write-through-parent.
 - `devtools::document()` to refresh `man/` and `NAMESPACE`.
 - `devtools::build_readme()` if any README example references the changed
   signatures.
+
+---
+
+## Forward-compatibility with shiny#4372 (session destroy API)
+
+[rstudio/shiny#4372](https://github.com/rstudio/shiny/pull/4372) is an
+open PR (not merged as of 2026-04-28) that adds:
+
+- `session$destroy()` — destroys all reactive state within a module scope
+- `session$onDestroy(callback)` — cleanup callbacks, fire deepest-first
+- `ReactiveVal$destroy()`, `Observable$destroy()`, `ReactiveValues$destroy()`,
+  `ReactiveValues$destroyByPrefix(nsPrefix)` — explicit teardown with
+  access guards (`shiny.destroyed.error`)
+- **Weak-reference auto-registration** — reactives created inside a
+  domain automatically participate in that domain's teardown
+
+Why it matters here: the new `Each` and `Match` runtimes create
+per-item / per-case `reactiveVal`s (mini-store leaves, scalar
+accessors). Today those reactives can't be destroyed — they leak until
+the parent session ends. Once #4372 merges, each per-item / per-case
+mount can be a subdomain whose `$destroy()` cleans everything up
+(observers + reactives) in one call.
+
+### Structure the implementation around a `scope` shim
+
+Don't sprinkle subdomain logic into the runtime now; centralise it so
+the post-merge swap is one helper-body edit.
+
+Add an internal `make_scope(session)` (in `R/mount.R` or a new
+`R/scope.R`):
+
+```r
+# Today — no-op shim. Reactives created via scope$session leak until
+# the parent session ends; observers are destroyed manually via the
+# existing $destroy() path.
+make_scope <- function(session) {
+  list(
+    session = session,
+    destroy = function() invisible()
+  )
+}
+
+# Post-merge — uncomment, delete the no-op above. Reactives + observers
+# created inside the subdomain are auto-destroyed.
+# make_scope <- function(session) {
+#   sub <- session$makeSubdomain()  # or whatever #4372 names it
+#   list(session = sub, destroy = sub$destroy)
+# }
+```
+
+Every per-item / per-case mount path takes a scope and uses
+`scope$session` everywhere it would have used `session`:
+
+- `Each` item mount (both `by = NULL` and `by = fn`) — one scope per
+  item / per slot. Created at mount, destroyed at unmount.
+- `Match` case mount — one scope per active case. Created on case
+  activation, destroyed on case transition.
+- Mini-store leaf creation — the projection's underlying
+  `reactiveVal`s are created inside the owning scope's session.
+
+The unmount path calls `scope$destroy()` *after* the existing
+manual-observer cleanup loop. Today both run; post-merge, the manual
+loop becomes redundant and is the second thing to comment out (see
+below).
+
+### What gets commented out when #4372 merges
+
+Mark every block that becomes redundant with a `# shiny#4372:` tag so
+the post-merge diff is a literal grep-and-comment-out:
+
+1. **`make_scope` body** — swap the no-op for the subdomain version.
+2. **Manual observer tracking in `irid_mount_processed`** — the
+   `observers <- list()` accumulator and the `for (obs in observers)
+   obs$destroy()` loop in the returned `destroy` function. Auto-destroy
+   via subdomain replaces both.
+3. **Manual per-item / per-case mount destroys** — the
+   `item_mounts[[k]]$mount$destroy()` and equivalents in `Each` /
+   `Match` unmount paths. Subdomain destroy cascades deepest-first.
+4. **Mini-store leaf creation site** — no code change, but the comment
+   noting "leaks until session ends" becomes stale; remove it.
+
+A small unit test that mounts and unmounts a control-flow node many
+times in one session can sanity-check the post-merge state isn't
+leaking — it'll be a no-op today (reactives leak, but the test won't
+see it without instrumentation), and after the merge it becomes a real
+leak check.
 
 ---
 
