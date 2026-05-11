@@ -639,13 +639,13 @@ same one-way mechanism.
 ### Discriminated unions in collections
 
 When *collection items* follow a tagged union — different shapes for different
-variants — use a compound `by` key that includes the discriminator. (For a
-*single* variant-shaped value, store it as an `I()`-leaf and dispatch with
+variants — wrap the per-item callable in `Match` and dispatch on shape. (For
+a *single* variant-shaped value, store it as an `I()`-leaf and dispatch with
 `Match` instead — see **`Match`**. The mechanics below are for collections
 only.)
 
 ```r
-Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
+Each(state$questions, by = \(q) q$id, \(question) {
   tags$div(
     # ... common fields ...
     Match(question,
@@ -657,11 +657,15 @@ Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
 })
 ```
 
-Mini-stores have fixed shape (derived from the item at mount time). The
-compound key ensures a type change is treated as a remove + add rather than
-a patch: the old mini-store (and its DOM) is torn down; a new one of the
-correct shape is mounted. The fixed-shape constraint applies within a variant,
-not across the union.
+A mini-store's leaf keys are derived from the item at mount time, so when a
+variant transition produces a record with different keys, the reconciler
+tears down the entry and rebuilds it with the new shape — same-key shape
+changes are detected per-entry and rebuilt as a remove + add, with a single
+`irid-mutate` carrying the new range plus `order`. A compound `by` key
+(e.g. `\(q) paste0(q$id, "_", q$qtype)`) is still useful when you want the
+type change to read explicitly as "different identity" — the reconciler then
+treats it as a separate item entirely — but it is no longer required for
+shape correctness.
 
 The write path replaces the whole item rather than just updating the
 discriminator field. A `reactiveProxy` on the discriminator handles this,

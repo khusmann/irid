@@ -80,9 +80,16 @@ make_mini_store <- function(get_record, set_record, scope) {
   # changed fire their observers (each leaf's `set_internal` short-
   # circuits on `identical`). One observer rather than one-per-leaf
   # so deep trees don't fan out the dependency on `get_record()`.
+  #
+  # Permissive `is_record` guard (not `is_branch`): if the parent's
+  # value transiently isn't a record (shape change to a scalar, or a
+  # malformed list with missing names), we silently skip rather than
+  # crash inside the observer. The outer `Each` / `Match` reconciler
+  # owns shape transitions and will tear this mini-store down on the
+  # same flush; we just need to not blow up before it gets there.
   obs <- shiny::observe({
     new_record <- get_record()
-    if (is_branch(new_record, "")) {
+    if (is_record(new_record)) {
       node$set_internal(new_record)
     }
   }, domain = scope$session)
@@ -227,8 +234,14 @@ make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
 #' @keywords internal
 make_slot_accessor <- function(get_value, set_value, scope) {
   rv <- shiny::reactiveVal(shiny::isolate(get_value()))
+  # Shape-change guard: if the parent's slot transiently becomes a
+  # record (e.g. heterogeneous list where a slot's shape flips), don't
+  # stuff the record into the scalar `rv`. The outer `Each` reconciler
+  # detects the shape change and rebuilds this slot as a mini-store on
+  # the same flush; we just need to not poison the rv before teardown.
   obs <- shiny::observe({
     new_v <- get_value()
+    if (is_record(new_v)) return()
     if (!identical(shiny::isolate(rv()), new_v)) {
       rv(new_v)
     }
@@ -258,4 +271,49 @@ is_record <- function(value) {
   nm <- names(value)
   if (is.null(nm)) return(FALSE)
   all(nzchar(nm))
+}
+
+# Disallow mixing records and scalars in one `Each` snapshot. Per-entry
+# shape is decided from each item's own value, so the reconciler
+# *could* mount records and scalars side by side — but a list like
+# `c(records..., "footer-string")` is almost always a data-modeling
+# slip (a scalar where a `list(...)` was intended). Allowing it would
+# silently hand the body function an `item` that is sometimes a
+# mini-store and sometimes a bare callable; bindings written against
+# one shape would break the other. Heterogeneous *records* (different
+# leaf trees) remain supported — that's the variant pattern, handled
+# by `Match` inside the body. Errors with a wrap-in-record hint.
+validate_each_kinds <- function(item_list) {
+  if (length(item_list) == 0L) return(invisible())
+  record_flags <- vapply(item_list, is_record, logical(1L))
+  if (any(record_flags) && !all(record_flags)) {
+    stop(
+      "Each() items must be either all records (fully named lists) ",
+      "or all scalars/atomics. Mixed-shape lists are usually a ",
+      "data-modeling mistake — wrap scalars in a record like ",
+      "`list(value = ...)` to mix.",
+      call. = FALSE
+    )
+  }
+  invisible()
+}
+
+# Recursive structural signature for `Each` shape-change detection.
+# Mirrors `make_mini_node`'s branch-vs-leaf decision: bare named lists
+# (no `AsIs`, no S3 class) are branches; everything else is a leaf.
+# Returns a nested-list of NULL leaves under the same key tree the
+# mini-store would build, or NULL for a leaf value.
+#
+# Comparison is by `identical()` — two items have the same signature iff
+# the mini-store they'd build has the same set of leaves at the same
+# paths. Scalars all share the NULL signature; only structural changes
+# (key added/removed at any depth, scalar↔record transition, list-shape
+# field becoming a record or vice versa) flip the signature.
+shape_signature <- function(value) {
+  if (inherits(value, "AsIs")) return(NULL)
+  if (!is.list(value) || is.object(value)) return(NULL)
+  if (length(value) == 0L) return(NULL)
+  nm <- names(value)
+  if (is.null(nm) || !all(nzchar(nm))) return(NULL)
+  stats::setNames(lapply(value, shape_signature), nm)
 }

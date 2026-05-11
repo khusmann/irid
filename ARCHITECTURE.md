@@ -19,13 +19,15 @@ inst/js/
   irid.js        Client-side message handlers (vanilla JS, no build step)
 
 examples/
-  old_faithful.R       Old Faithful geyser histogram with PlotOutput
-  composing.R          Two Counter instances showing closure-based isolation
-  temperature.R        Bidirectional temperature converter (controlled inputs)
-  todo.R               Todo app (Each positional, When, dynamic lists)
-  optimistic_updates.R Controlled inputs with simulated server latency
-  shiny_interop.R      irid components inside a standard Shiny module
-  cards.R              Dynamic column cards (Each, keyed by column name)
+  old_faithful.R        Old Faithful geyser histogram with PlotOutput
+  composing.R           Two Counter instances showing closure-based isolation
+  temperature.R         Bidirectional temperature converter (controlled inputs)
+  todo.R                Todo app (Each positional, When, dynamic lists)
+  optimistic_updates.R  Controlled inputs with simulated server latency
+  shiny_interop.R       irid components inside a standard Shiny module
+  cards.R               Dynamic column cards (Each, keyed by column name)
+  each_nested.R         Nested Each + recursive mini-store fields
+  each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
 ```
 
 ## Design Principles
@@ -154,18 +156,29 @@ receives a per-item callable plus an optional position accessor:
   (a `reactiveProxy` over an internal `reactiveVal`). `item()` reads;
   `item(v)` writes back to the parent's slot.
 
+Accessor type is decided per-entry from the item's current value, so
+heterogeneous lists work — a slot holding a record gets a mini-store
+while its sibling holding a scalar gets a scalar accessor. Wrap the
+per-item callable in `Match` to dispatch on shape inside the callback.
+When a slot's value transitions between shapes (scalar↔record, or a
+record's keys change), the outer reconciler treats it as a remove +
+rebuild of just that entry — a fresh scope, accessor, and DOM range —
+emitted as a single `irid-mutate` with `order` so the client repositions
+the rebuilt range.
+
 The reconciliation strategy is selected by `by`:
 
 - **Positional** (`by = NULL`, the default) — slot *i* is slot *i*. The list
   can grow or shrink at the end; in-place value changes propagate via each
   slot accessor's internal observer (no DOM work). Same-length value changes
-  fire only the slots whose value actually changed.
+  fire only the slots whose value actually changed. A surviving slot whose
+  shape changed is rebuilt in place.
 - **Keyed** (`by = fn`) — items are tracked across reorders, adds, and
   removes by their `by(item)` key. Kept items have their existing
   mini-store / accessor reused (no remount, no new scope) and self-update
   via the propagating observer; new items are mounted; removed items are
   destroyed; reordered items have their DOM nodes moved via `irid-mutate`'s
-  `order` mechanism.
+  `order` mechanism. A kept key whose value's shape changed is rebuilt.
 
 The callback is arity-polymorphic — `\() body`, `\(item) body`, or
 `\(item, pos) body`. `pos` is always a 0-arg reactive accessor for the

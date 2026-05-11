@@ -180,21 +180,33 @@ irid_mount_processed <- function(result, session) {
         # slot position; keyed mode uses a named list keyed by stringified
         # `by(item)`. Each entry holds:
         #   scope, mount, wrapper_id, accessor, pos_rv (keyed only),
+        #   is_record_shape (per-entry — the list may be heterogeneous),
         #   processed (transient — cleared after mount).
+        #
+        # Shape is decided per-entry at build time from the item's
+        # current value, not once for the whole list. A slot whose
+        # value changes shape (scalar↔record, or partial-named anomaly)
+        # is torn down and rebuilt with the right accessor type — same
+        # path as add/remove. This lets `Each(items, \(x) Match(x, ...))`
+        # work over heterogeneous lists.
         item_mounts <- list()
         current_keys <- character(0)
-        shape_locked <- FALSE
-        is_record_shape <- NULL
         env <- environment()
 
-        # Build accessor + tag tree + mount entry for one item. `key_or_idx`
-        # is the storage key in `item_mounts`; `slot_index` is the initial
-        # 1-indexed position used to seed `pos_rv`. For positional mode
-        # both are the same integer; for keyed mode the storage key is
-        # the stringified `by(item)`.
-        build_entry <- function(key_or_idx, slot_index) {
+        # Build accessor + tag tree + mount entry for one item.
+        # `key_or_idx` is the storage key in `item_mounts`; `slot_index`
+        # is the initial 1-indexed position used to seed `pos_rv`. For
+        # positional mode both are the same integer; for keyed mode the
+        # storage key is the stringified `by(item)`. `item_value` is the
+        # current value at build time — used to pick the accessor shape
+        # and seed the entry's structural signature without re-reading
+        # `cf_items()` (and so heterogeneous lists build each slot
+        # against its own item, not the first one).
+        build_entry <- function(key_or_idx, slot_index, item_value) {
           wrapper_id <- counter()
           scope <- make_scope(session)
+          shape_sig <- shape_signature(item_value)
+          is_record_shape <- !is.null(shape_sig)
 
           if (keyed) {
             # Resolve slot by key at *write* time so reorders work — the
@@ -241,7 +253,7 @@ irid_mount_processed <- function(result, session) {
             pos_accessor <- reactiveProxy(get = function() ii)
           }
 
-          accessor <- if (env$is_record_shape) {
+          accessor <- if (is_record_shape) {
             make_mini_store(get_value, set_value, scope)
           } else {
             make_slot_accessor(get_value, set_value, scope)
@@ -255,15 +267,16 @@ irid_mount_processed <- function(result, session) {
             cf_fn(accessor, pos_accessor)
           }
           wrapped <- tagList(
-            HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
+            htmltools::HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
             child,
-            HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+            htmltools::HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
           )
           processed <- process_tags(wrapped, counter = counter)
 
           list(
             scope = scope, mount = NULL, wrapper_id = wrapper_id,
             accessor = accessor, pos_rv = pos_rv,
+            shape_sig = shape_sig,
             processed = processed
           )
         }
@@ -278,15 +291,7 @@ irid_mount_processed <- function(result, session) {
 
         obs <- observe({
           item_list <- cf_items()
-
-          # Lock item shape (record vs scalar) on the first non-empty
-          # observation. A slot's accessor is built around one shape and
-          # cannot switch — mixed-shape lists are the caller's
-          # responsibility (every item must match the first).
-          if (!env$shape_locked && length(item_list) > 0L) {
-            env$is_record_shape <- is_record(item_list[[1L]])
-            env$shape_locked <- TRUE
-          }
+          validate_each_kinds(item_list)
 
           if (keyed) {
             new_keys <- vapply(
@@ -296,26 +301,53 @@ irid_mount_processed <- function(result, session) {
             )
             old_keys <- env$current_keys
 
+            # Detect shape changes among the keys that survive (i.e.
+            # would otherwise be "kept"). A shape transition for a kept
+            # key forces a remove+rebuild for that one entry — the
+            # mini-store's leaf tree is derived from the item at mount
+            # time, so any structural change (scalar↔record, or a
+            # record with different keys at any depth) needs a fresh
+            # entry with the new shape.
+            shape_changed_keys <- character(0)
+            for (i in seq_along(new_keys)) {
+              key <- new_keys[i]
+              if (key %in% old_keys) {
+                new_sig <- shape_signature(item_list[[i]])
+                if (!identical(
+                  new_sig, env$item_mounts[[key]]$shape_sig
+                )) {
+                  shape_changed_keys <- c(shape_changed_keys, key)
+                }
+              }
+            }
+
             # Pure value-change short-circuit. The observer fires on any
             # change to the parent collection (including in-place value
             # edits), but the per-item mini-store / scalar-accessor
             # propagators handle in-place changes themselves. If the
-            # keys are identical to the previous run, we have no DOM
-            # work — and emitting an `irid-mutate` here detaches every
-            # child range into a fragment client-side just to re-insert
-            # it, which kills focus on any focused input inside.
-            # Short-circuit first so unchanged keys also skip the
-            # duplicate check (already validated on a prior reconcile).
-            if (identical(new_keys, old_keys)) return()
+            # keys are identical to the previous run AND no kept entry
+            # changed shape, we have no DOM work — and emitting an
+            # `irid-mutate` here detaches every child range into a
+            # fragment client-side just to re-insert it, which kills
+            # focus on any focused input inside.
+            if (identical(new_keys, old_keys) &&
+                length(shape_changed_keys) == 0L) {
+              return()
+            }
 
             if (anyDuplicated(new_keys)) {
               stop("Each() requires unique keys from the `by` function",
                    call. = FALSE)
             }
 
-            removed_keys <- setdiff(old_keys, new_keys)
-            added_keys <- setdiff(new_keys, old_keys)
-            kept_keys <- intersect(new_keys, old_keys)
+            # Shape-changed kept keys are promoted to remove + add so
+            # the entry gets a fresh scope, accessor, and DOM range
+            # built against its new shape.
+            removed_keys <- c(setdiff(old_keys, new_keys), shape_changed_keys)
+            added_keys <- c(setdiff(new_keys, old_keys), shape_changed_keys)
+            kept_keys <- setdiff(
+              intersect(new_keys, old_keys), shape_changed_keys
+            )
 
             removes <- character(0)
             for (key in removed_keys) {
@@ -328,7 +360,7 @@ irid_mount_processed <- function(result, session) {
             for (key in added_keys) local({
               k <- key
               idx <- match(k, new_keys)
-              entry <- build_entry(k, idx)
+              entry <- build_entry(k, idx, item_list[[idx]])
               inserts[[length(inserts) + 1L]] <<- as.character(
                 entry$processed$tag
               )
@@ -365,44 +397,88 @@ irid_mount_processed <- function(result, session) {
             # Positional mode. Slot i is slot i for as long as it lives;
             # in-place value changes propagate via each slot accessor's
             # internal observer (no DOM work here). Length changes
-            # append/destroy at the tail.
+            # append/destroy at the tail. A surviving slot whose value
+            # changed shape is torn down and rebuilt in place — same
+            # DOM mutate as length changes, but with `order` so the
+            # client knows where the new range belongs.
             new_len <- length(item_list)
             old_len <- length(env$item_mounts)
+            common_len <- min(new_len, old_len)
 
-            if (new_len < old_len) {
-              removes <- character(0)
-              for (i in (new_len + 1L):old_len) {
-                teardown_entry(env$item_mounts[[i]])
-                removes <- c(removes, env$item_mounts[[i]]$wrapper_id)
-              }
-              env$item_mounts <- env$item_mounts[seq_len(new_len)]
-              session$sendCustomMessage("irid-mutate", list(
-                id = cf_id,
-                removes = as.list(removes)
-              ))
-            } else if (new_len > old_len) {
-              inserts <- list()
-              for (i in (old_len + 1L):new_len) local({
-                ii <- i
-                entry <- build_entry(ii, ii)
-                inserts[[length(inserts) + 1L]] <<- as.character(
-                  entry$processed$tag
-                )
-                env$item_mounts[[ii]] <- entry
-              })
-              session$sendCustomMessage("irid-mutate", list(
-                id = cf_id,
-                inserts = inserts
-              ))
-              for (i in (old_len + 1L):new_len) {
-                entry <- env$item_mounts[[i]]
-                entry$mount <- irid_mount_processed(entry$processed, session)
-                entry$processed <- NULL
-                env$item_mounts[[i]] <- entry
+            shape_changed <- integer(0)
+            for (i in seq_len(common_len)) {
+              new_sig <- shape_signature(item_list[[i]])
+              if (!identical(
+                new_sig, env$item_mounts[[i]]$shape_sig
+              )) {
+                shape_changed <- c(shape_changed, i)
               }
             }
-            # Same length: nothing to do — slot accessors' internal
-            # observers handle in-place value changes.
+
+            if (new_len == old_len && length(shape_changed) == 0L) {
+              # Pure value-change — slot accessors handle it. No DOM work.
+              return()
+            }
+
+            # Tear down: trailing trim (if shrunk) + shape-changed slots.
+            trim_indices <- if (new_len < old_len) {
+              (new_len + 1L):old_len
+            } else {
+              integer(0)
+            }
+            removes <- character(0)
+            for (i in c(trim_indices, shape_changed)) {
+              teardown_entry(env$item_mounts[[i]])
+              removes <- c(removes, env$item_mounts[[i]]$wrapper_id)
+            }
+            # Drop trimmed entries; shape-changed slots are overwritten
+            # below by their rebuilt entries (same index).
+            if (length(trim_indices) > 0L) {
+              env$item_mounts <- env$item_mounts[seq_len(new_len)]
+            }
+
+            # Build: new tail appends + shape-changed replacements.
+            grow_indices <- if (new_len > old_len) {
+              (old_len + 1L):new_len
+            } else {
+              integer(0)
+            }
+            build_indices <- c(grow_indices, shape_changed)
+            inserts <- list()
+            for (i in build_indices) local({
+              ii <- i
+              entry <- build_entry(ii, ii, item_list[[ii]])
+              inserts[[length(inserts) + 1L]] <<- as.character(
+                entry$processed$tag
+              )
+              env$item_mounts[[ii]] <- entry
+            })
+
+            msg <- list(id = cf_id)
+            if (length(removes) > 0L) msg$removes <- as.list(removes)
+            if (length(inserts) > 0L) msg$inserts <- inserts
+            # `order` is required when shape changes happen mid-list —
+            # tail appends and trims are positional by construction, but
+            # a rebuilt mid-slot has a new wrapper_id that the client
+            # needs to position. Send the full ordering whenever any
+            # shape change occurred; tail-only changes still don't need
+            # it (and skipping keeps the wire payload minimal).
+            if (length(shape_changed) > 0L) {
+              msg$order <- as.list(vapply(
+                seq_len(new_len),
+                function(i) env$item_mounts[[i]]$wrapper_id,
+                character(1L)
+              ))
+            }
+            session$sendCustomMessage("irid-mutate", msg)
+
+            # Mount new entries (after DOM exists).
+            for (i in build_indices) {
+              entry <- env$item_mounts[[i]]
+              entry$mount <- irid_mount_processed(entry$processed, session)
+              entry$processed <- NULL
+              env$item_mounts[[i]] <- entry
+            }
           }
         })
         observers[[length(observers) + 1L]] <<- obs

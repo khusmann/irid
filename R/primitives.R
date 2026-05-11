@@ -69,6 +69,28 @@ When <- function(condition, yes, otherwise = NULL) {
 #' the parent. Scalars are passed as a per-item callable: `item()` reads,
 #' `item(value)` writes back to the parent's slot.
 #'
+#' Records may be heterogeneous in shape — different leaf trees per
+#' entry. Each slot's mini-store is sized to its own item, and a
+#' [Match()] inside the body dispatches on the discriminator:
+#'
+#' ```r
+#' Each(state$blocks, by = \(b) b$id, \(block) {
+#'   Match(block,
+#'     Case(\(b) b$type == "heading",   \(b) Heading(b)),
+#'     Case(\(b) b$type == "paragraph", \(b) Paragraph(b)),
+#'     Case(\(b) b$type == "todo",      \(b) Todo(b))
+#'   )
+#' })
+#' ```
+#'
+#' When a record's shape changes (different key set, or a sub-record's
+#' shape shifts), that one entry is torn down and rebuilt with the new
+#' mini-store. Shape-stable updates use the fine-grained in-place path.
+#'
+#' Mixing records and scalars in the same list is rejected at flush
+#' time as a likely data-modeling slip — wrap scalars in
+#' `list(value = ...)` to mix them.
+#'
 #' @param items A reactive expression that returns a list.
 #' @param fn A function of `(item)`, `(item, pos)`, or `()`. `item` is
 #'   the per-item callable (mini-store or scalar accessor); `pos` is a

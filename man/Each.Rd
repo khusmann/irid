@@ -44,4 +44,25 @@ whole record, \code{item(record)} writes it back, \code{item$field()} reads a
 leaf, and \code{item$field(v)} is a synthetic setter that writes through
 the parent. Scalars are passed as a per-item callable: \code{item()} reads,
 \code{item(value)} writes back to the parent's slot.
+
+Records may be heterogeneous in shape — different leaf trees per
+entry. Each slot's mini-store is sized to its own item, and a
+\code{\link[=Match]{Match()}} inside the body dispatches on the discriminator:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{Each(state$blocks, by = \\(b) b$id, \\(block) \{
+  Match(block,
+    Case(\\(b) b$type == "heading",   \\(b) Heading(b)),
+    Case(\\(b) b$type == "paragraph", \\(b) Paragraph(b)),
+    Case(\\(b) b$type == "todo",      \\(b) Todo(b))
+  )
+\})
+}\if{html}{\out{</div>}}
+
+When a record's shape changes (different key set, or a sub-record's
+shape shifts), that one entry is torn down and rebuilt with the new
+mini-store. Shape-stable updates use the fine-grained in-place path.
+
+Mixing records and scalars in the same list is rejected at flush
+time as a likely data-modeling slip — wrap scalars in
+\code{list(value = ...)} to mix them.
 }
