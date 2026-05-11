@@ -255,55 +255,56 @@ conditional rendering. irid provides control flow primitives instead.
 
 ### When
 
+`When` is the binary specialization. The bodies are 0-arg functions that
+return a tag tree — they are called fresh on each activation, since the
+previous branch's closures are torn down with its reactives:
+
 ```r
 When(logged_in,
-  Dashboard(),
-  otherwise = LoginPanel()
+  \() Dashboard(),
+  otherwise = \() LoginPanel()
 )
 ```
 
-When the condition changes, the old content is torn down and the new content is
-mounted.
-
 ### Match / Case / Default
 
+`Match` dispatches on a leading callable. Records are projected as a
+mini-store for the active case body; scalars are passed as the bare
+callable. `Case`'s first arg is one of: a function `\(v) cond` of the
+bound value, a function `\() cond` ignoring it (cross-cutting), or a
+literal (equality match via `identical`). `Case`'s second arg and
+`Default`'s arg are 0- or 1-arg functions returning a tag tree:
+
 ```r
-Match(
-  Case(\() tab() == "home",     HomePage()),
-  Case(\() tab() == "settings", SettingsPage()),
-  Default(NotFoundPage())
+Match(tab,
+  Case("home",     \() HomePage()),
+  Case("settings", \() SettingsPage()),
+  Default(\() NotFoundPage())
 )
 ```
 
 ### Each
 
-Dynamic lists. The callback receives each item as a plain value — when the
-list changes, items are diffed by key and DOM nodes are reused where possible:
+Dynamic lists. The callback receives a per-item callable — a mini-store
+for record items, a scalar accessor for atomic items — and an optional
+1-indexed position accessor:
 
 ```r
 tags$ul(
-  Each(items, \(item) {
-    tags$li(item$name)
+  Each(todos, by = \(t) t$id, \(todo) {
+    tags$li(
+      tags$input(type = "checkbox", checked = todo$done),
+      tags$span(\() todo$text())
+    )
   })
 )
 ```
 
-### Index
-
-Like `Each`, but keyed by position. The callback receives each item as a
-reactive accessor (`item()` to read). When values change without a length
-change, existing observers re-fire without DOM recreation:
-
-```r
-tags$ul(
-  Index(items, \(item) {
-    tags$li(\() item()$name)
-  })
-)
-```
-
-Use `Each` when items have a stable identity (todos, records). Use `Index`
-when you care about positions (rankings, slots).
+`by = NULL` (the default) reconciles positionally — slot *i* is slot
+*i*, the list grows or shrinks at the end, and same-length value
+changes update slots in place without DOM recreation. `by = fn` keys
+items by `fn(item)` — kept items are reused across reorders, adds, and
+removes; mini-store leaves are diffed so only changed fields fire.
 
 *See the [Todo List](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
