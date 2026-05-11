@@ -20,15 +20,13 @@ test_that("unnamed list at leaf position is stored atomically", {
 
 test_that("empty list() at a leaf position is a leaf", {
   state <- reactiveStore(list(todos = list()))
-  expect_false(inherits(state$todos, "reactiveStore"))
-  expect_true(is.function(state$todos))
+  expect_true(inherits(state$todos, "reactiveVal"))
   expect_equal(shiny::isolate(state$todos()), list())
 })
 
 test_that("setNames(list(), character(0)) is also a leaf", {
   state <- reactiveStore(list(group = setNames(list(), character(0))))
-  expect_false(inherits(state$group, "reactiveStore"))
-  expect_true(is.function(state$group))
+  expect_true(inherits(state$group, "reactiveVal"))
 })
 
 test_that("mixed-type children at one level work", {
@@ -222,8 +220,7 @@ test_that("deep root patch replaces list leaf wholesale", {
 test_that("data.frame initial is stored as a leaf, class preserved", {
   df <- data.frame(x = 1:3, y = c("a", "b", "c"), stringsAsFactors = FALSE)
   state <- reactiveStore(list(df = df))
-  expect_false(inherits(state$df, "reactiveStore"))
-  expect_true(is.function(state$df))
+  expect_true(inherits(state$df, "reactiveVal"))
   expect_equal(shiny::isolate(state$df()), df)
 })
 
@@ -637,12 +634,28 @@ test_that("names() on a leaf returns NULL (closure default)", {
   expect_null(names(state$todos))
 })
 
+test_that("print(leaf) does not error across value shapes", {
+  # No custom print method — leaves route through shiny's
+  # `print.reactiveVal`. Smoke-test scalar/list/data.frame/matrix to
+  # catch upstream regressions and to pin that we haven't accidentally
+  # re-introduced a throwing print.
+  state <- reactiveStore(list(
+    x = 42,
+    todos = list(list(id = 1), list(id = 2)),
+    df = data.frame(x = 1:3, y = 4:6),
+    m = matrix(1:6, nrow = 2, ncol = 3)
+  ))
+  expect_no_error(capture.output(print(state$x)))
+  expect_no_error(capture.output(print(state$todos)))
+  expect_no_error(capture.output(print(state$df)))
+  expect_no_error(capture.output(print(state$m)))
+})
+
 # --- I() opt-out: bare named lists as leaves --------------------------------
 
 test_that("I()-wrapped named list at construction becomes a leaf", {
   state <- reactiveStore(list(filter = I(list(foo = 1, bar = 2))))
-  expect_false(inherits(state$filter, "reactiveStore"))
-  expect_true(is.function(state$filter))
+  expect_true(inherits(state$filter, "reactiveVal"))
 })
 
 test_that("I()-wrapped value strips AsIs class on read", {
@@ -671,8 +684,7 @@ test_that("I()-wrapped leaf accepts any-shape writes (union types)", {
 
 test_that("I(list()) gives a shape-flexible empty leaf (df-or-list pattern)", {
   state <- reactiveStore(list(data = I(list())))
-  expect_false(inherits(state$data, "reactiveStore"))
-  expect_true(is.function(state$data))
+  expect_true(inherits(state$data, "reactiveVal"))
   state$data(data.frame(x = 1:3))
   expect_equal(shiny::isolate(state$data()), data.frame(x = 1:3))
   state$data(list(a = 1, b = 2))

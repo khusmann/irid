@@ -88,12 +88,8 @@ build_node <- function(value, path, root = FALSE) {
     make_store(children, keys, path)
   } else {
     if (root) stop("`initial` must be a named list", call. = FALSE)
-    make_leaf(strip_asis(value))
+    shiny::reactiveVal(strip_asis(value))
   }
-}
-
-make_leaf <- function(initial_value) {
-  shiny::reactiveVal(initial_value)
 }
 
 make_store <- function(children, keys, path) {
