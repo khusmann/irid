@@ -302,6 +302,40 @@ test_that("branch write updates descendant leaves synchronously", {
   expect_equal(shiny::isolate(fix$mini$user$email()), "Y")
 })
 
+test_that("synthetic setter replaces a list field rather than recursing", {
+  # Regression: `modifyList` recurses into matching list-shaped values,
+  # so writing a length-3 list over a length-2 list silently kept the
+  # original two entries. The synthetic setter now uses `[[<-` so the
+  # whole field is replaced atomically.
+  fix <- new_mini(list(id = 1L, options = list("Red", "Blue")))
+  fix$mini$options(list("Red", "Blue", ""))
+  flushReact()
+  expect_equal(shiny::isolate(fix$mini$options()),
+               list("Red", "Blue", ""))
+  expect_equal(shiny::isolate(fix$parent())$options,
+               list("Red", "Blue", ""))
+})
+
+test_that("write at one branch leaves a list-typed sibling untouched", {
+  # Regression: Same `modifyList`-recursion bug surfaced as fields
+  # disappearing when an unrelated branch was written. After adding to
+  # `options`, changing `author$role` (a different sub-tree) silently
+  # collapsed `options` back because the chain used `modifyList` to
+  # patch the question record at each level.
+  fix <- new_mini(list(
+    id = 1L,
+    author = list(name = "Alice", role = "Admin"),
+    options = list("Red", "Blue")
+  ))
+  fix$mini$options(list("Red", "Blue", ""))
+  flushReact()
+  fix$mini$author$role("Viewer")
+  flushReact()
+  expect_equal(shiny::isolate(fix$mini$options()),
+               list("Red", "Blue", ""))
+  expect_equal(shiny::isolate(fix$mini$author$role()), "Viewer")
+})
+
 test_that("synchronous local write does not double-fire on flush", {
   fix <- new_mini(list(a = 1))
   count <- 0L

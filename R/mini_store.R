@@ -10,7 +10,8 @@
 #' project fine-grained leaf reactivity out of a coarse-grained parent.
 #'
 #' Recursive — nested named lists in the initial record become sub-mini-stores
-#' (so `mini$user$name(v)` works the same as `mini$user(modifyList(...))`).
+#' (so `mini$user$name(v)` writes through the same chain as
+#' `mini$user(<patched-user>)` would).
 #' Each level threads a sub-`get`/`set` pair down the tree; writes at any
 #' depth fan out through the chain of synthetic setters until they reach
 #' the user-supplied `set_record`. Shape uses the same shared
@@ -93,12 +94,13 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
         force(k)
         # Sub-projection — narrow get/set to this child's slice. `isolate`
         # so the synthetic setter never subscribes to the parent record.
+        # `[[<-` rather than `modifyList` because `modifyList` recurses
+        # into matching list-shaped values (replacing a length-2 list
+        # with a length-3 list silently keeps the original two entries).
         sub_get <- function() get_self()[[k]]
         sub_set <- function(v) {
-          patched <- utils::modifyList(
-            shiny::isolate(get_self()),
-            stats::setNames(list(v), k)
-          )
+          patched <- shiny::isolate(get_self())
+          patched[[k]] <- v
           set_self(patched)
         }
         child_path <- if (nzchar(path)) paste0(path, "$", k) else k

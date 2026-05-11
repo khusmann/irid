@@ -36,7 +36,8 @@ Used by \code{Each} (record items) and \code{Match} (record bound value) to
 project fine-grained leaf reactivity out of a coarse-grained parent.
 
 Recursive — nested named lists in the initial record become sub-mini-stores
-(so \code{mini$user$name(v)} works the same as \code{mini$user(modifyList(...))}).
+(so \code{mini$user$name(v)} writes through the same chain as
+\verb{mini$user(<patched-user>)} would).
 Each level threads a sub-\code{get}/\code{set} pair down the tree; writes at any
 depth fan out through the chain of synthetic setters until they reach
 the user-supplied \code{set_record}. Shape uses the same shared
