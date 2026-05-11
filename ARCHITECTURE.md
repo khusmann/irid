@@ -181,6 +181,18 @@ merges, `make_scope` becomes a one-line wrapper around
 Every site that depends on the shim is tagged `# shiny#4372:` so the
 post-merge swap is mechanical.
 
+**Known limitation — reactive-leak until shiny#4372 lands.** `scope$destroy()`
+tears down the observers it tracks, but cannot tear down the `reactiveVal`s
+held inside mini-store leaves and slot accessors — Shiny exposes no public
+API for destroying a `reactiveVal`. Each unmounted `Each` item and each
+unmounted `Match` case leaves its leaves behind in the session's reactive
+graph. For short-lived sessions this is harmless; for long-lived sessions
+that churn list contents (e.g. a dashboard where rows are added/removed
+continuously), the leaked leaves accumulate and grow session memory. The
+leak is bounded per-session — it resets when the session ends — but apps in
+that shape should monitor session lifetime until shiny#4372 lands and the
+subdomain cascade reclaims the leaves.
+
 ## Comment-Anchor Range Protocol
 
 Control-flow containers and `Each` items are represented in the DOM as

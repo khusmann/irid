@@ -1,27 +1,27 @@
-# Vertical Composition: Each inside Each, with nested mini-store fields
+# Nested Each with mini-store fields
 #
-# Stress test for two intersecting concerns (PLAN risks + final-design Q3):
+# A question editor showing how the reactive system composes:
 #
-#   1. Recursive mini-store decomposition. Each question record has a
-#      nested `author = list(name, role)` field — the outer Each
-#      projects question as a mini-store, and `question$author` is
-#      itself a sub-mini-store with its own per-leaf accessors. Writes
-#      to `question$author$name` chain through a 3-level synthetic
-#      setter (leaf → author → question → questions(...)).
+#   - Recursive mini-store decomposition. Each question has a nested
+#     `author = list(name, role)` field. The outer Each projects each
+#     question as a mini-store, and `question$author` is itself a
+#     sub-mini-store. A write to `question$author$name` chains through
+#     three synthetic setters (leaf → author → question →
+#     questions(...)) and only the one focused input re-renders.
 #
-#   2. Multi-level Each composition. The outer Each is keyed over
-#      questions. Each question's `options` is an atomic list of
-#      strings; the inner Each iterates positionally (default), giving
-#      each option a scalar slot accessor that writes back through the
-#      mini-store leaf and on to the parent collection.
+#   - Multi-level Each composition. The outer Each is keyed over
+#     questions; each question's `options` is an atomic list of
+#     strings, iterated positionally by an inner Each so each option
+#     gets a scalar slot accessor that writes back through the
+#     mini-store leaf to the parent collection.
 #
-# Things to exercise manually in a Shiny session:
-#   - Edit `question$author$name` — fires only that one leaf binding;
-#     question's text input and the option inputs all stay stable.
+# Try in the running app:
+#   - Edit `question$author$name` — only that one leaf binding fires;
+#     question text and option inputs stay stable.
 #   - Edit a question's text — only the outer text input fires.
-#   - Edit an option — only that one option input fires.
+#   - Edit an option — only that option input fires.
 #   - "Add option" / "Remove option" — positional reconciliation
-#     appends/removes a trailing slot without disturbing siblings.
+#     appends or removes a trailing slot without disturbing siblings.
 #   - "Add question" / "Remove question" — keyed outer reconciler;
 #     kept questions keep their inner-Each state across sibling
 #     adds/removes.

@@ -45,14 +45,25 @@ branch-vs-leaf rules as \code{\link[=reactiveStore]{reactiveStore()}} (\code{is_
 \code{strip_asis} are reused), and the same recursive \code{\link[=validate_write]{validate_write()}}
 enforces "no unknown keys" at every level on whole-record writes.
 
+\strong{Replace, not patch.} Unlike \code{\link[=reactiveStore]{reactiveStore()}} branch writes,
+mini-store branch writes pass the value verbatim to \code{set_record}
+(and, for sub-branches, replace the slot via \verb{[[<-} in the parent's
+synthetic setter chain). A partial branch write \emph{drops} the omitted
+fields from the parent record — \code{mini$user(list(name = "X"))} on a
+\code{user = list(name, email)} subrecord makes the parent's \code{user}
+become \code{list(name = "X")}. Callers wanting patch semantics must use
+per-field synthetic setters (\code{mini$user$name("X")}) or merge before
+writing. The asymmetry exists because the mini-store is a
+projection: it never owns the record, so it has no business
+deciding how to merge a partial write into the source of truth.
+
 Internally, every leaf holds a \code{reactiveVal} kept in sync with the
 parent by a single root-level propagating observer. The observer
 walks the tree top-down via each branch's internal \code{set_internal},
 which recurses to children's \code{set_internal}; only at leaves does an
 actual \code{reactiveVal} write occur, gated by \code{identical(old, new)}.
-This is what delivers the "only changed fields fire" promise. (Risks
-decision from PLAN: diff inside the projection rather than at the
-call site — same effect, smaller surface area for callers to get
-wrong.)
+This is what delivers the "only changed fields fire" promise — the
+diff happens inside the projection rather than at the call site, so
+callers can't get it wrong.
 }
 \keyword{internal}

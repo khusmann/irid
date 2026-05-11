@@ -200,6 +200,10 @@ irid_mount_processed <- function(result, session) {
             # Resolve slot by key at *write* time so reorders work — the
             # slot's positional index is never captured. `isolate` so the
             # write path doesn't subscribe to the parent collection.
+            # Returns NA if the key has been removed from the parent
+            # collection since this entry was built (e.g. an event
+            # observer fires after the item was removed but before
+            # teardown completes).
             current_index <- function() {
               items_now <- shiny::isolate(cf_items())
               keys_now <- vapply(
@@ -209,10 +213,16 @@ irid_mount_processed <- function(result, session) {
               )
               match(key_or_idx, keys_now)
             }
-            get_value <- function() cf_items()[[current_index()]]
+            get_value <- function() {
+              idx <- current_index()
+              if (is.na(idx)) return(NULL)
+              cf_items()[[idx]]
+            }
             set_value <- function(v) {
+              idx <- current_index()
+              if (is.na(idx)) return(invisible())
               new_items <- shiny::isolate(cf_items())
-              new_items[[current_index()]] <- v
+              new_items[[idx]] <- v
               cf_items(new_items)
             }
             pos_rv <- shiny::reactiveVal(slot_index)
@@ -258,10 +268,8 @@ irid_mount_processed <- function(result, session) {
           )
         }
 
-        # Tear down one item entry: mount first (its observers may depend
-        # on the per-item leaves), then scope (which destroys the
-        # mini-store / slot-accessor's propagating observer and, post
-        # shiny#4372, the per-item reactives).
+        # Tear down one item entry. Order: mount → scope. See
+        # `make_scope`'s "Teardown ordering" note.
         teardown_entry <- function(entry) {
           if (!is.null(entry$mount)) entry$mount$destroy()
           if (!is.null(entry$scope)) entry$scope$destroy()
@@ -273,7 +281,8 @@ irid_mount_processed <- function(result, session) {
 
           # Lock item shape (record vs scalar) on the first non-empty
           # observation. A slot's accessor is built around one shape and
-          # cannot switch — see PLAN's "Mini-store identity" risk.
+          # cannot switch — mixed-shape lists are the caller's
+          # responsibility (every item must match the first).
           if (!env$shape_locked && length(item_list) > 0L) {
             env$is_record_shape <- is_record(item_list[[1L]])
             env$shape_locked <- TRUE
@@ -285,10 +294,6 @@ irid_mount_processed <- function(result, session) {
               function(x) as.character(cf_by(x)),
               character(1L)
             )
-            if (anyDuplicated(new_keys)) {
-              stop("Each() requires unique keys from the `by` function",
-                   call. = FALSE)
-            }
             old_keys <- env$current_keys
 
             # Pure value-change short-circuit. The observer fires on any
@@ -299,7 +304,14 @@ irid_mount_processed <- function(result, session) {
             # work — and emitting an `irid-mutate` here detaches every
             # child range into a fragment client-side just to re-insert
             # it, which kills focus on any focused input inside.
+            # Short-circuit first so unchanged keys also skip the
+            # duplicate check (already validated on a prior reconcile).
             if (identical(new_keys, old_keys)) return()
+
+            if (anyDuplicated(new_keys)) {
+              stop("Each() requires unique keys from the `by` function",
+                   call. = FALSE)
+            }
 
             removed_keys <- setdiff(old_keys, new_keys)
             added_keys <- setdiff(new_keys, old_keys)
@@ -432,10 +444,8 @@ irid_mount_processed <- function(result, session) {
           if (identical(active_idx, env$last_active)) return()
           env$last_active <- active_idx
 
-          # Tear down old case: mount, then scope. Order matters — mount
-          # destroys observers in the body that may depend on the
-          # mini-store's leaves; the scope then destroys the mini-store's
-          # propagating observer.
+          # Tear down old case. Order: mount → scope. See
+          # `make_scope`'s "Teardown ordering" note.
           if (!is.null(env$current_mount)) {
             env$current_mount$destroy()
             env$current_mount <- NULL

@@ -51,6 +51,18 @@ test_that("unnamed initial errors", {
   )
 })
 
+test_that("partially-named initial errors with the mini-store message", {
+  # Without the permissive pre-check, `is_branch` would error first
+  # with a generic store-construction message that leaks through to
+  # `Each` / `Match` callers.
+  scope <- new_scope()
+  rv <- shiny::reactiveVal(list(a = 1, 2))
+  expect_error(
+    irid:::make_mini_store(rv, rv, scope),
+    "fully named list"
+  )
+})
+
 # --- Read / write round-trips ------------------------------------------------
 
 test_that("whole-record write routes through set_record", {
@@ -168,11 +180,30 @@ test_that("write with unnamed list errors", {
   expect_error(fix$mini(list(1, 2)), "named list")
 })
 
-test_that("partial whole-record write succeeds for known keys", {
+test_that("whole-record write replaces (does not patch) the parent record", {
+  # Unlike `reactiveStore`, mini-store branch writes pass the value
+  # verbatim to `set_record`. A partial write at the root drops the
+  # omitted fields from the parent — callers wanting patch semantics
+  # must use the per-field synthetic setter (`mini$a(99)`) or merge
+  # before writing.
   fix <- new_mini(list(a = 1, b = 2))
   fix$mini(list(a = 99))
   flushReact()
   expect_equal(shiny::isolate(fix$parent()), list(a = 99))
+})
+
+test_that("nested branch partial write drops omitted sub-fields from the parent", {
+  # Same replace-not-patch rule applies at sub-branches. Writing
+  # `mini$user(list(name = "X"))` over a `user = list(name, email)`
+  # subrecord drops `email`, because the synthetic setter at the
+  # parent level replaces the slot with the value as written.
+  fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
+  fix$mini$user(list(name = "Bob"))
+  flushReact()
+  expect_equal(
+    shiny::isolate(fix$parent()),
+    list(id = 1L, user = list(name = "Bob"))
+  )
 })
 
 # --- Scope cleanup -----------------------------------------------------------

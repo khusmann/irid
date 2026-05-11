@@ -19,15 +19,26 @@
 #' `strip_asis` are reused), and the same recursive [validate_write()]
 #' enforces "no unknown keys" at every level on whole-record writes.
 #'
+#' **Replace, not patch.** Unlike [reactiveStore()] branch writes,
+#' mini-store branch writes pass the value verbatim to `set_record`
+#' (and, for sub-branches, replace the slot via `[[<-` in the parent's
+#' synthetic setter chain). A partial branch write *drops* the omitted
+#' fields from the parent record — `mini$user(list(name = "X"))` on a
+#' `user = list(name, email)` subrecord makes the parent's `user`
+#' become `list(name = "X")`. Callers wanting patch semantics must use
+#' per-field synthetic setters (`mini$user$name("X")`) or merge before
+#' writing. The asymmetry exists because the mini-store is a
+#' projection: it never owns the record, so it has no business
+#' deciding how to merge a partial write into the source of truth.
+#'
 #' Internally, every leaf holds a `reactiveVal` kept in sync with the
 #' parent by a single root-level propagating observer. The observer
 #' walks the tree top-down via each branch's internal `set_internal`,
 #' which recurses to children's `set_internal`; only at leaves does an
 #' actual `reactiveVal` write occur, gated by `identical(old, new)`.
-#' This is what delivers the "only changed fields fire" promise. (Risks
-#' decision from PLAN: diff inside the projection rather than at the
-#' call site — same effect, smaller surface area for callers to get
-#' wrong.)
+#' This is what delivers the "only changed fields fire" promise — the
+#' diff happens inside the projection rather than at the call site, so
+#' callers can't get it wrong.
 #'
 #' @param get_record A 0-arg reactive callable that returns the current
 #'   record (a fully named list).
@@ -44,7 +55,12 @@
 #' @keywords internal
 make_mini_store <- function(get_record, set_record, scope) {
   initial <- shiny::isolate(get_record())
-  if (!is_branch(initial, "")) {
+  # Permissive check first — `is_branch` errors on partially-named
+  # lists with a store-construction message that's misleading when the
+  # caller is `Each` / `Match`. `is_record` returns FALSE for both
+  # unnamed and partial-named, so we can issue the mini-store-specific
+  # message before `build_mini_node` calls `is_branch` internally.
+  if (!is_record(initial)) {
     stop(
       "make_mini_store: initial record must be a fully named list",
       call. = FALSE

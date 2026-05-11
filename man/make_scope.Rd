@@ -26,6 +26,14 @@ themselves via \code{register_observer()} and are destroyed in
 scalar slot accessors) leak until the parent session ends — there is no
 public API for destroying a \code{reactiveVal}.
 
+\strong{Teardown ordering.} On unmount, callers MUST destroy the per-item
+/ per-case \code{mount} handle \emph{before} the scope: the mount's observers
+(auto-bind bindings, event handlers) read mini-store / slot-accessor
+leaves that live in the scope, so tearing the scope down first
+would leave the mount's observers firing against dead state during
+the same flush. The order is mount → scope at every site that owns
+both.
+
 shiny#4372: once \url{https://github.com/rstudio/shiny/pull/4372} merges,
 \code{make_scope} becomes a one-line wrapper around \code{session$makeSubdomain()}
 and the new subdomain teardown handles observers \emph{and} reactives in one
