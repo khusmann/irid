@@ -291,6 +291,16 @@ irid_mount_processed <- function(result, session) {
             }
             old_keys <- env$current_keys
 
+            # Pure value-change short-circuit. The observer fires on any
+            # change to the parent collection (including in-place value
+            # edits), but the per-item mini-store / scalar-accessor
+            # propagators handle in-place changes themselves. If the
+            # keys are identical to the previous run, we have no DOM
+            # work — and emitting an `irid-mutate` here detaches every
+            # child range into a fragment client-side just to re-insert
+            # it, which kills focus on any focused input inside.
+            if (identical(new_keys, old_keys)) return()
+
             removed_keys <- setdiff(old_keys, new_keys)
             added_keys <- setdiff(new_keys, old_keys)
             kept_keys <- intersect(new_keys, old_keys)
