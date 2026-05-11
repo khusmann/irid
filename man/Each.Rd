@@ -2,25 +2,46 @@
 % Please edit documentation in R/primitives.R
 \name{Each}
 \alias{Each}
-\title{Render a list by recreating all items}
+\title{Render a reactive list}
 \usage{
-Each(items, fn, by = identity)
+Each(items, fn, by = NULL)
 }
 \arguments{
 \item{items}{A reactive expression that returns a list.}
 
-\item{fn}{A function of \code{(item)} or \verb{(item, index)} where \code{item} is the
-plain item value and \code{index} is a \code{\link[shiny:reactiveVal]{shiny::reactiveVal()}} that tracks the
-item's current position (updated on reorder). Should return a tag tree.}
+\item{fn}{A function of \code{(item)}, \verb{(item, pos)}, or \verb{()}. \code{item} is
+the per-item callable (mini-store or scalar accessor); \code{pos} is a
+0-arg reactive accessor returning the item's current 1-indexed
+slot. \code{pos} is constant under \code{by = NULL} (positional identity)
+and live under \code{by = fn} (fires on reorder).}
 
-\item{by}{A function that extracts a comparable key from each item, used
-for keyed reordering. Keys must be unique. Defaults to \code{\link[=identity]{identity()}}.}
+\item{by}{\code{NULL} for positional reconciliation, or a function that
+extracts a unique comparable key from each item for keyed
+reconciliation.}
 }
 \value{
 A irid control-flow node.
 }
 \description{
-Iterates over a reactive list and calls \code{fn} for each item. When the list
-changes, all items are destroyed and recreated. For a version that updates
-items in place, see \code{\link[=Index]{Index()}}.
+Iterates over a reactive list and calls \code{fn} for each item. The
+callback receives a per-item callable (a mini-store for record items,
+a scalar accessor for atomic items) and an optional position
+accessor. The reconciliation strategy is selected by \code{by}:
+}
+\details{
+\itemize{
+\item \strong{Positional} (\code{by = NULL}, the default) — slot \emph{i} is slot \emph{i}.
+The list can grow or shrink at the end; in-place value changes
+update each slot's accessor without DOM recreation.
+\item \strong{Keyed} (\verb{by = \\(x) x$id}) — items are tracked across reorders,
+adds, and removes by their key. Kept items have their mini-store
+patched (only changed leaves fire); reordered items have their
+DOM nodes moved (no recreation).
+}
+
+Records are projected as a per-item mini-store: \code{item()} reads the
+whole record, \code{item(record)} writes it back, \code{item$field()} reads a
+leaf, and \code{item$field(v)} is a synthetic setter that writes through
+the parent. Scalars are passed as a per-item callable: \code{item()} reads,
+\code{item(value)} writes back to the parent's slot.
 }

@@ -4,15 +4,16 @@
 \alias{Default}
 \title{Define a default (fallback) case for \code{\link[=Match]{Match()}}}
 \usage{
-Default(content)
+Default(body)
 }
 \arguments{
-\item{content}{Tag tree to render when no other case matches.}
+\item{body}{A function returning the tag tree to render when no other
+case matches. Same arity rules as \code{\link[=Case]{Case()}} body.}
 }
 \value{
 A case definition (a list).
 }
 \description{
-A convenience wrapper around \code{\link[=Case]{Case()}} with a condition that is always
-\code{TRUE}. Place this as the last argument to \code{Match}.
+Sugar for \verb{Case(\\() TRUE, body)} — matches when no earlier \code{Case} does.
+Place this as the last argument to \code{Match}.
 }

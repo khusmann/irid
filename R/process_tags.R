@@ -306,12 +306,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       return(do.call(node$output_fn, c(list(id), node$output_fn_args)))
     }
 
-    if (inherits(node, "irid_each") || inherits(node, "irid_index")) {
+    if (inherits(node, "irid_each")) {
       id <- next_id()
-      type <- if (inherits(node, "irid_each")) "each" else "index"
-      cf_entry <- list(type = type, id = id, items = node$items, fn = node$fn)
-      if (type == "each") cf_entry$by <- node$by
-      control_flows[[length(control_flows) + 1L]] <<- cf_entry
+      control_flows[[length(control_flows) + 1L]] <<- list(
+        type = "each", id = id,
+        items = node$items, fn = node$fn, by = node$by
+      )
       return(anchor_pair(id))
     }
 
@@ -319,6 +319,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       id <- next_id()
       control_flows[[length(control_flows) + 1L]] <<- list(
         type = "match", id = id,
+        callable = node$callable,
         cases = node$cases
       )
       return(anchor_pair(id))

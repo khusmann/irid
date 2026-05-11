@@ -19,6 +19,6 @@ A mount handle with \verb{$tag} (the processed HTML) and \verb{$destroy()}
 \description{
 Takes the output of \code{\link[=process_tags]{process_tags()}} and wires up Shiny observers for
 reactive attribute bindings, event listeners, Shiny outputs, and
-control-flow nodes (\code{When}, \code{Each}, \code{Index}, \code{Match}).
+control-flow nodes (\code{When}, \code{Each}, \code{Match}).
 }
 \keyword{internal}

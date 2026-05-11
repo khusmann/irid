@@ -111,6 +111,48 @@ make_mini_store <- function(get_record, set_record, scope) {
   fn
 }
 
+#' Scalar slot accessor for `Each` (positional and keyed)
+#'
+#' Builds the scalar-item analogue of [make_mini_store()] — a callable
+#' (`reactiveProxy`) over a single value held in the parent collection.
+#' Reads route through an internal `reactiveVal` that is kept in sync with
+#' `get_value()` by a propagating observer; writes route through
+#' `set_value()` to the parent. The internal `reactiveVal` is what gives
+#' fine-grained reactivity: when the parent list is patched somewhere
+#' else, an unchanged slot's observers don't fire.
+#'
+#' @param get_value 0-arg callable returning the slot's current value.
+#' @param set_value 1-arg function called with the new value on write.
+#' @param scope Scope from [make_scope()]; the propagating observer is
+#'   registered here for cleanup.
+#' @return A `reactiveProxy` that reads from the internal leaf and writes
+#'   through `set_value`.
+#' @keywords internal
+make_slot_accessor <- function(get_value, set_value, scope) {
+  rv <- shiny::reactiveVal(shiny::isolate(get_value()))
+  obs <- shiny::observe({
+    new_v <- get_value()
+    if (!identical(shiny::isolate(rv()), new_v)) {
+      rv(new_v)
+    }
+  }, domain = scope$session)
+  scope$register_observer(obs)
+  reactiveProxy(get = function() rv(), set = set_value)
+}
+
+# Decide between mini-store projection (records) and bare-callable
+# pass-through (scalars). A record is a fully named bare list with at
+# least one element. Same shape rule as `is_branch` in store.R, but on a
+# value rather than a tree node — this version accepts any classed list
+# (mini-stores never recurse, so AsIs/etc. don't matter).
+is_record <- function(value) {
+  if (!is.list(value)) return(FALSE)
+  if (length(value) == 0L) return(FALSE)
+  nm <- names(value)
+  if (is.null(nm)) return(FALSE)
+  all(nzchar(nm))
+}
+
 validate_mini_store_write <- function(value, keys) {
   if (!is.list(value)) {
     stop(

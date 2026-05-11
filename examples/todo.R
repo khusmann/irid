@@ -5,6 +5,11 @@
 # and removing items are ordinary functions that update that list. The filter
 # tabs and item count derive reactively from the same source, so everything
 # stays consistent without any manual synchronization.
+#
+# `Each(filtered, ...)` uses positional reconciliation (the default
+# `by = NULL`): each slot is a mini-store over `filtered()[[i]]`, so when
+# the filter changes the same DOM nodes are reused and only the fields
+# that changed fire their bindings.
 
 library(irid)
 library(bslib)
@@ -129,9 +134,9 @@ TodoApp <- function() {
         class = "p-0",
         When(
           \() length(filtered()) > 0,
-          tags$ul(
+          \() tags$ul(
             class = "list-group list-group-flush",
-            Index(filtered, \(todo) {
+            Each(filtered, \(todo) {
               TodoItem(
                 todo,
                 on_toggle = \() toggle_todo(todo()$id),
@@ -139,12 +144,12 @@ TodoApp <- function() {
               )
             })
           ),
-          otherwise = tags$div(
+          otherwise = \() tags$div(
             class = "text-center text-muted p-4",
             When(
               \() filter() == "all",
-              "No todos yet. Add one above!",
-              otherwise = "No matching todos."
+              \() "No todos yet. Add one above!",
+              otherwise = \() "No matching todos."
             )
           )
         )

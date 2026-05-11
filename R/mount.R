@@ -2,7 +2,7 @@
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
 #' reactive attribute bindings, event listeners, Shiny outputs, and
-#' control-flow nodes (`When`, `Each`, `Index`, `Match`).
+#' control-flow nodes (`When`, `Each`, `Match`).
 #'
 #' @param result A list returned by [process_tags()], containing `$tag`,
 #'   `$bindings`, `$events`, `$control_flows`, and `$shiny_outputs`.
@@ -133,7 +133,7 @@ irid_mount_processed <- function(result, session) {
           if (identical(active, env$last_active)) return()
           env$last_active <- active
 
-          branch <- if (active) cf_yes else cf_otherwise
+          branch_fn <- if (active) cf_yes else cf_otherwise
 
           # Destroy previous branch
           if (!is.null(env$current_mount)) {
@@ -141,7 +141,10 @@ irid_mount_processed <- function(result, session) {
             env$current_mount <- NULL
           }
 
-          if (!is.null(branch)) {
+          if (!is.null(branch_fn)) {
+            # Call the body fresh on each activation — the previous
+            # branch's closures were torn down above.
+            branch <- branch_fn()
             processed <- process_tags(branch, counter = counter)
 
             # Swap first so elements exist in DOM
@@ -166,176 +169,218 @@ irid_mount_processed <- function(result, session) {
       })
     } else if (cf$type == "each") {
       local({
-        # Per-item state: named list keyed by item key.
-        # Each entry: list(mount, wrapper_id, index_rv)
-        item_mounts <- list()
-        current_keys <- character(0)
         cf_id <- cf$id
         cf_items <- cf$items
         cf_fn <- cf$fn
         cf_by <- cf$by
         cf_nformals <- length(formals(cf_fn))
+        keyed <- !is.null(cf_by)
+
+        # Per-item state. Positional mode uses an unnamed list indexed by
+        # slot position; keyed mode uses a named list keyed by stringified
+        # `by(item)`. Each entry holds:
+        #   scope, mount, wrapper_id, accessor, pos_rv (keyed only),
+        #   processed (transient — cleared after mount).
+        item_mounts <- list()
+        current_keys <- character(0)
+        shape_locked <- FALSE
+        is_record_shape <- NULL
         env <- environment()
+
+        # Build accessor + tag tree + mount entry for one item. `key_or_idx`
+        # is the storage key in `item_mounts`; `slot_index` is the initial
+        # 1-indexed position used to seed `pos_rv`. For positional mode
+        # both are the same integer; for keyed mode the storage key is
+        # the stringified `by(item)`.
+        build_entry <- function(key_or_idx, slot_index) {
+          wrapper_id <- counter()
+          scope <- make_scope(session)
+
+          if (keyed) {
+            # Resolve slot by key at *write* time so reorders work — the
+            # slot's positional index is never captured. `isolate` so the
+            # write path doesn't subscribe to the parent collection.
+            current_index <- function() {
+              items_now <- shiny::isolate(cf_items())
+              keys_now <- vapply(
+                items_now,
+                function(x) as.character(cf_by(x)),
+                character(1L)
+              )
+              match(key_or_idx, keys_now)
+            }
+            get_value <- function() cf_items()[[current_index()]]
+            set_value <- function(v) {
+              new_items <- shiny::isolate(cf_items())
+              new_items[[current_index()]] <- v
+              cf_items(new_items)
+            }
+            pos_rv <- shiny::reactiveVal(slot_index)
+            pos_accessor <- reactiveProxy(get = function() pos_rv())
+          } else {
+            # Positional mode: slot index is captured (slots are stable).
+            ii <- key_or_idx
+            get_value <- function() cf_items()[[ii]]
+            set_value <- function(v) {
+              new_items <- shiny::isolate(cf_items())
+              new_items[[ii]] <- v
+              cf_items(new_items)
+            }
+            pos_rv <- NULL
+            # Constant signal — slot number is the identity, never changes.
+            pos_accessor <- reactiveProxy(get = function() ii)
+          }
+
+          accessor <- if (env$is_record_shape) {
+            make_mini_store(get_value, set_value, scope)
+          } else {
+            make_slot_accessor(get_value, set_value, scope)
+          }
+
+          child <- if (cf_nformals == 0L) {
+            cf_fn()
+          } else if (cf_nformals == 1L) {
+            cf_fn(accessor)
+          } else {
+            cf_fn(accessor, pos_accessor)
+          }
+          wrapped <- tagList(
+            HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
+            child,
+            HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+          )
+          processed <- process_tags(wrapped, counter = counter)
+
+          list(
+            scope = scope, mount = NULL, wrapper_id = wrapper_id,
+            accessor = accessor, pos_rv = pos_rv,
+            processed = processed
+          )
+        }
+
+        # Tear down one item entry: mount first (its observers may depend
+        # on the per-item leaves), then scope (which destroys the
+        # mini-store / slot-accessor's propagating observer and, post
+        # shiny#4372, the per-item reactives).
+        teardown_entry <- function(entry) {
+          if (!is.null(entry$mount)) entry$mount$destroy()
+          if (!is.null(entry$scope)) entry$scope$destroy()
+          invisible()
+        }
 
         obs <- observe({
           item_list <- cf_items()
-          new_keys <- vapply(item_list, function(x) as.character(cf_by(x)), character(1))
-          if (anyDuplicated(new_keys)) {
-            stop("Each() requires unique keys from the `by` function")
-          }
-          old_keys <- env$current_keys
 
-          removed_keys <- setdiff(old_keys, new_keys)
-          added_keys <- setdiff(new_keys, old_keys)
-          kept_keys <- intersect(new_keys, old_keys)
-
-          # Destroy removed items
-          removes <- character(0)
-          for (key in removed_keys) {
-            env$item_mounts[[key]]$mount$destroy()
-            removes <- c(removes, env$item_mounts[[key]]$wrapper_id)
-            env$item_mounts[[key]] <- NULL
+          # Lock item shape (record vs scalar) on the first non-empty
+          # observation. A slot's accessor is built around one shape and
+          # cannot switch — see PLAN's "Mini-store identity" risk.
+          if (!env$shape_locked && length(item_list) > 0L) {
+            env$is_record_shape <- is_record(item_list[[1L]])
+            env$shape_locked <- TRUE
           }
 
-          # Create new items (local() prevents for-loop closure capture)
-          inserts <- list()
-          for (key in added_keys) local({
-            k <- key
-            idx <- match(k, new_keys)
-            item <- item_list[[idx]]
-            wrapper_id <- counter()
-
-            index_rv <- reactiveVal(idx)
-            child <- if (cf_nformals >= 2L) cf_fn(item, index_rv) else cf_fn(item)
-            wrapped <- tagList(
-              HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
-              child,
-              HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+          if (keyed) {
+            new_keys <- vapply(
+              item_list,
+              function(x) as.character(cf_by(x)),
+              character(1L)
             )
-            processed <- process_tags(wrapped, counter = counter)
+            if (anyDuplicated(new_keys)) {
+              stop("Each() requires unique keys from the `by` function",
+                   call. = FALSE)
+            }
+            old_keys <- env$current_keys
 
-            inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
-            env$item_mounts[[k]] <- list(
-              mount = NULL, wrapper_id = wrapper_id,
-              index_rv = index_rv, processed = processed
-            )
-          })
+            removed_keys <- setdiff(old_keys, new_keys)
+            added_keys <- setdiff(new_keys, old_keys)
+            kept_keys <- intersect(new_keys, old_keys)
 
-          # Build order array
-          order <- vapply(new_keys, function(key) {
-            env$item_mounts[[key]]$wrapper_id
-          }, character(1), USE.NAMES = FALSE)
-
-          # Send DOM mutation
-          session$sendCustomMessage("irid-mutate", list(
-            id = cf_id,
-            removes = as.list(removes),
-            inserts = inserts,
-            order = as.list(order)
-          ))
-
-          # Mount new items (after DOM exists)
-          for (key in added_keys) {
-            entry <- env$item_mounts[[key]]
-            entry$mount <- irid_mount_processed(entry$processed, session)
-            entry$processed <- NULL
-            env$item_mounts[[key]] <- entry
-          }
-
-          # Update index reactiveVals for kept items whose position changed
-          for (key in kept_keys) {
-            new_idx <- match(key, new_keys)
-            env$item_mounts[[key]]$index_rv(new_idx)
-          }
-
-          env$current_keys <- new_keys
-        })
-        observers[[length(observers) + 1L]] <<- obs
-        cf_envs[[length(cf_envs) + 1L]] <<- env
-      })
-
-    } else if (cf$type == "index") {
-      local({
-        # Per-slot state: parallel lists
-        slots <- list()       # reactiveVal per position
-        slot_mounts <- list() # mount handle per position
-        slot_wrapper_ids <- character(0)
-        cf_id <- cf$id
-        cf_items <- cf$items
-        cf_fn <- cf$fn
-        cf_nformals <- length(formals(cf_fn))
-        env <- environment()
-
-        obs <- observe({
-          item_list <- cf_items()
-          new_len <- length(item_list)
-          old_len <- length(env$slots)
-
-          if (new_len > old_len) {
-            # Grow — update existing slots, append new ones
-            for (i in seq_len(old_len)) {
-              env$slots[[i]](item_list[[i]])
+            removes <- character(0)
+            for (key in removed_keys) {
+              teardown_entry(env$item_mounts[[key]])
+              removes <- c(removes, env$item_mounts[[key]]$wrapper_id)
+              env$item_mounts[[key]] <- NULL
             }
 
-            # local() prevents for-loop closure capture
             inserts <- list()
-            for (i in (old_len + 1L):new_len) local({
-              ii <- i
-              rv <- reactiveVal(item_list[[ii]])
-              wrapper_id <- counter()
-
-              child <- if (cf_nformals >= 2L) cf_fn(rv, ii) else cf_fn(rv)
-              wrapped <- tagList(
-                HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
-                child,
-                HTML(paste0("<!--irid:e:", wrapper_id, "-->"))
+            for (key in added_keys) local({
+              k <- key
+              idx <- match(k, new_keys)
+              entry <- build_entry(k, idx)
+              inserts[[length(inserts) + 1L]] <<- as.character(
+                entry$processed$tag
               )
-              processed <- process_tags(wrapped, counter = counter)
-
-              inserts[[length(inserts) + 1L]] <<- as.character(processed$tag)
-              env$slots[[ii]] <- rv
-              env$slot_wrapper_ids[[ii]] <- wrapper_id
-              # Temporarily store processed for mounting after DOM update
-              env$slot_mounts[[ii]] <- processed
+              env$item_mounts[[k]] <- entry
             })
 
-            session$sendCustomMessage("irid-mutate", list(
-              id = cf_id,
-              inserts = inserts
-            ))
-
-            # Mount new slots (after DOM exists)
-            for (i in (old_len + 1L):new_len) {
-              env$slot_mounts[[i]] <- irid_mount_processed(
-                env$slot_mounts[[i]], session
-              )
-            }
-
-          } else if (new_len < old_len) {
-            # Shrink — update kept slots, destroy trailing ones
-            for (i in seq_len(new_len)) {
-              env$slots[[i]](item_list[[i]])
-            }
-
-            removes <- env$slot_wrapper_ids[(new_len + 1L):old_len]
-            for (i in (new_len + 1L):old_len) {
-              env$slot_mounts[[i]]$destroy()
-            }
+            order <- vapply(new_keys, function(key) {
+              env$item_mounts[[key]]$wrapper_id
+            }, character(1L), USE.NAMES = FALSE)
 
             session$sendCustomMessage("irid-mutate", list(
               id = cf_id,
-              removes = as.list(removes)
+              removes = as.list(removes),
+              inserts = inserts,
+              order = as.list(order)
             ))
 
-            env$slots <- env$slots[seq_len(new_len)]
-            env$slot_mounts <- env$slot_mounts[seq_len(new_len)]
-            env$slot_wrapper_ids <- env$slot_wrapper_ids[seq_len(new_len)]
+            for (key in added_keys) {
+              entry <- env$item_mounts[[key]]
+              entry$mount <- irid_mount_processed(entry$processed, session)
+              entry$processed <- NULL
+              env$item_mounts[[key]] <- entry
+            }
+
+            # Live position fires for any kept item whose slot moved.
+            for (key in kept_keys) {
+              new_idx <- match(key, new_keys)
+              env$item_mounts[[key]]$pos_rv(new_idx)
+            }
+
+            env$current_keys <- new_keys
 
           } else {
-            # Same length — update slots in place
-            for (i in seq_len(new_len)) {
-              env$slots[[i]](item_list[[i]])
+            # Positional mode. Slot i is slot i for as long as it lives;
+            # in-place value changes propagate via each slot accessor's
+            # internal observer (no DOM work here). Length changes
+            # append/destroy at the tail.
+            new_len <- length(item_list)
+            old_len <- length(env$item_mounts)
+
+            if (new_len < old_len) {
+              removes <- character(0)
+              for (i in (new_len + 1L):old_len) {
+                teardown_entry(env$item_mounts[[i]])
+                removes <- c(removes, env$item_mounts[[i]]$wrapper_id)
+              }
+              env$item_mounts <- env$item_mounts[seq_len(new_len)]
+              session$sendCustomMessage("irid-mutate", list(
+                id = cf_id,
+                removes = as.list(removes)
+              ))
+            } else if (new_len > old_len) {
+              inserts <- list()
+              for (i in (old_len + 1L):new_len) local({
+                ii <- i
+                entry <- build_entry(ii, ii)
+                inserts[[length(inserts) + 1L]] <<- as.character(
+                  entry$processed$tag
+                )
+                env$item_mounts[[ii]] <- entry
+              })
+              session$sendCustomMessage("irid-mutate", list(
+                id = cf_id,
+                inserts = inserts
+              ))
+              for (i in (old_len + 1L):new_len) {
+                entry <- env$item_mounts[[i]]
+                entry$mount <- irid_mount_processed(entry$processed, session)
+                entry$processed <- NULL
+                env$item_mounts[[i]] <- entry
+              }
             }
+            # Same length: nothing to do — slot accessors' internal
+            # observers handle in-place value changes.
           }
         })
         observers[[length(observers) + 1L]] <<- obs
@@ -345,44 +390,87 @@ irid_mount_processed <- function(result, session) {
     } else if (cf$type == "match") {
       local({
         current_mount <- NULL
-        last_branch <- NULL
+        current_scope <- NULL
+        last_active <- NULL
         cf_id <- cf$id
+        cf_callable <- cf$callable
         cf_cases <- cf$cases
         env <- environment()
 
         obs <- observe({
-          # Find first matching case
-          branch <- NULL
-          for (case in cf_cases) {
-            if (isTRUE(case$condition())) {
-              branch <- case$content
+          value <- cf_callable()
+
+          # Walk cases — predicate arity dictates whether the bound value
+          # is passed in. 0-arg predicates are cross-cutting (debug
+          # overrides, auth checks) and ignore the bound value; 1-arg
+          # predicates inspect it.
+          active_idx <- NA_integer_
+          for (i in seq_along(cf_cases)) {
+            pred <- cf_cases[[i]]$predicate
+            n_pred <- length(formals(pred))
+            result <- if (n_pred == 0L) pred() else pred(value)
+            if (isTRUE(result)) {
+              active_idx <- i
               break
             }
           }
 
-          # Short-circuit if the branch hasn't changed
-          if (identical(branch, env$last_branch)) return()
-          env$last_branch <- branch
+          # Short-circuit on same active case — the existing mini-store's
+          # internal observer auto-propagates value changes to its leaves
+          # (only changed fields fire), so the mounted body's observers
+          # update without a remount.
+          if (identical(active_idx, env$last_active)) return()
+          env$last_active <- active_idx
 
-          # Destroy previous branch
+          # Tear down old case: mount, then scope. Order matters — mount
+          # destroys observers in the body that may depend on the
+          # mini-store's leaves; the scope then destroys the mini-store's
+          # propagating observer.
           if (!is.null(env$current_mount)) {
             env$current_mount$destroy()
             env$current_mount <- NULL
           }
-
-          if (!is.null(branch)) {
-            processed <- process_tags(branch, counter = counter)
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = as.character(processed$tag)
-            ))
-            env$current_mount <- irid_mount_processed(processed, session)
-          } else {
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = ""
-            ))
+          if (!is.null(env$current_scope)) {
+            env$current_scope$destroy()
+            env$current_scope <- NULL
           }
+
+          if (is.na(active_idx)) {
+            session$sendCustomMessage("irid-swap", list(
+              id = cf_id, html = ""
+            ))
+            return()
+          }
+
+          case <- cf_cases[[active_idx]]
+          body <- case$body
+          n_body <- length(formals(body))
+
+          scope <- make_scope(session)
+          env$current_scope <- scope
+
+          # Records → mini-store projection (fine-grained leaf reads,
+          # synthetic setters write through the leading callable).
+          # Scalars → pass the bare callable (it already has the right
+          # read/write shape).
+          binding <- if (is_record(value)) {
+            make_mini_store(
+              get_record = cf_callable,
+              set_record = cf_callable,
+              scope = scope
+            )
+          } else {
+            cf_callable
+          }
+
+          tag_tree <- if (n_body == 0L) body() else body(binding)
+
+          processed <- process_tags(tag_tree, counter = counter)
+          session$sendCustomMessage("irid-swap", list(
+            id = cf_id,
+            html = as.character(processed$tag)
+          ))
+          env$current_mount <- irid_mount_processed(processed, session)
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
@@ -395,15 +483,17 @@ irid_mount_processed <- function(result, session) {
     destroy = function() {
       for (obs in observers) obs$destroy()
       for (env in cf_envs) {
-        # When/Match: single current_mount
+        # When/Match: single current_mount + (Match only) per-case scope
         if (!is.null(env$current_mount)) env$current_mount$destroy()
-        # Each: per-key mounts
+        # shiny#4372: per-case scope teardown — replaced by subdomain cascade.
+        if (!is.null(env$current_scope)) env$current_scope$destroy()
+        # Each: per-item mounts + per-item scopes (mini-store / slot
+        # accessor propagating observers, plus shiny#4372 reactives).
         if (!is.null(env$item_mounts)) {
-          for (m in env$item_mounts) m$mount$destroy()
-        }
-        # Index: per-slot mounts
-        if (!is.null(env$slot_mounts)) {
-          for (m in env$slot_mounts) m$destroy()
+          for (m in env$item_mounts) {
+            if (!is.null(m$mount)) m$mount$destroy()
+            if (!is.null(m$scope)) m$scope$destroy()
+          }
         }
       }
     }
