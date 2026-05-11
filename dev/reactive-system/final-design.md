@@ -466,7 +466,7 @@ RichTextEditor(constrained)
 ## `Each`
 
 Iterates a collection — an unnamed list held in a `reactiveVal`, a `reactive`,
-or an atomic store leaf. Callback receives `(item, index)`.
+or an atomic store leaf. Callback is arity-polymorphic (0, 1, or 2 args).
 
 ```r
 Each(collection, fn, by = NULL)
@@ -519,10 +519,25 @@ adds, and removes by their key. Kept items are patched (mini-store leaves
 diffed, only changed fields fire); new items are mounted; removed items are
 destroyed; reordered items have their DOM nodes moved.
 
-### Callback second argument
+### Callback arity
 
-`(item, i)` where `i` is a plain integer for `by = NULL` and the key value
-for `by = fn`.
+The callback is dispatched by formal-argument count — `\() body`,
+`\(item) body`, or `\(item, pos) body`. Drop the args you don't use.
+
+- `item` — per-item callable (mini-store for records, reactive accessor
+  for scalars), as described above.
+- `pos` — **always a 0-arg reactive accessor** returning the item's
+  current 1-indexed slot. Under `by = NULL` it is a constant signal
+  (slot number is the identity, never changes). Under `by = fn` it is
+  live and fires on reorder with the item's new slot.
+
+The always-reactive shape keeps the callback uniform across modes and
+covers patterns like live "Item #3 of 10" numbering, queue-position
+indicators, or alternating row styles that follow reorders. Users who
+need the stable key value in the `by = fn` case read it from the item
+(`item$id()`) or re-apply `by` — a dedicated `key` arg was considered
+and rejected as redundant for the common case where the key is derived
+from the item itself.
 
 ### One-way data flow
 
@@ -1120,8 +1135,9 @@ RichTextEditor(constrained)  # can't modify, don't need to
 
 ## Open questions
 
-1. ~~**Callback second argument for keyed `Each`.**~~ Resolved: `(item, i)`
-   where `i` is a plain integer for `by = NULL` and the key value for `by = fn`.
+1. ~~**Callback second argument for keyed `Each`.**~~ Resolved: see
+   "Callback arity" — `(item, pos)` with `pos` always a 0-arg reactive
+   accessor for the current 1-indexed slot.
 
 2. ~~**Read-only `Each` on derived reactives.**~~ Resolved: wrap in
    `reactiveProxy(get = ..., set = <error>)` before iterating. No separate primitive needed.
@@ -1131,28 +1147,9 @@ RichTextEditor(constrained)  # can't modify, don't need to
    one-way mechanism so it should compose, but needs prototype validation.
    Concerns: redundant reconcile passes, performance at three or more levels.
 
-4. **Reactive position accessor.** The callback currently receives
-   `(item, i)` where `i` is a plain value — slot number for `by = NULL`, key
-   value for `by = fn`. This leaves no way to read an item's *current*
-   position reactively after reorders. Solid's `For` solves this by passing
-   `index` as a reactive accessor, enabling patterns like live "Item #3 of
-   10" numbering, queue-position indicators, or alternating row styles that
-   follow reorders.
-
-   Proposal: change the callback to `(item, pos)` where `pos` is always a
-   reactive accessor returning the current 1-indexed slot. The reconciler
-   already tracks slot positions to move DOM nodes; exposing that as a signal
-   per mini-store is cheap.
-
-   - `by = NULL`: `pos()` is a constant signal — slot number is the identity,
-     never changes.
-   - `by = fn`: `pos()` is live — fires on reorder with the item's new slot.
-
-   Always-reactive-accessor keeps the callback shape uniform across modes.
-   Users who need the stable key value in the `by = fn` case read it from the
-   item (`item$id()`) or re-apply `by`; a dedicated `key` arg was considered
-   and rejected as redundant for the common case where the key is derived
-   from the item itself.
+4. ~~**Reactive position accessor.**~~ Resolved: adopt `(item, pos)` with
+   `pos` as an always-reactive 0-arg accessor — constant under `by = NULL`,
+   live under `by = fn`. See "Callback arity" above.
 
 5. ~~**`Fields` vs `names()` + `lapply` + `[[`.**~~ Resolved: drop `Fields`.
    `Fields` has no reconciliation machinery and no reactive semantics of its
