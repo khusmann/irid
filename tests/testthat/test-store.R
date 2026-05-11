@@ -20,15 +20,13 @@ test_that("unnamed list at leaf position is stored atomically", {
 
 test_that("empty list() at a leaf position is a leaf", {
   state <- reactiveStore(list(todos = list()))
-  expect_true(inherits(state$todos, "reactiveLeaf"))
-  expect_false(inherits(state$todos, "reactiveStore"))
+  expect_true(inherits(state$todos, "reactiveVal"))
   expect_equal(shiny::isolate(state$todos()), list())
 })
 
 test_that("setNames(list(), character(0)) is also a leaf", {
   state <- reactiveStore(list(group = setNames(list(), character(0))))
-  expect_true(inherits(state$group, "reactiveLeaf"))
-  expect_false(inherits(state$group, "reactiveStore"))
+  expect_true(inherits(state$group, "reactiveVal"))
 })
 
 test_that("mixed-type children at one level work", {
@@ -164,9 +162,15 @@ test_that("list leaf write replaces the entire value", {
   expect_equal(shiny::isolate(state$todos()), list(list(id = 9)))
 })
 
-test_that("$ on a leaf errors with a hint pointing at leaf()$name", {
+# The three "subsettable" assertions below (`$` on a list leaf, `$` on
+# a data.frame leaf, `[[` on a list leaf) pin base-R's wording for
+# subsetting a closure: "object of type 'closure' is not subsettable".
+# Leaves are plain reactiveVals (closures), so this is the default
+# error. If base R ever rewords it, update all three call sites here.
+
+test_that("$ on a leaf errors (default closure subset error)", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(state$todos$id, "leaf\\(\\)\\$id")
+  expect_error(state$todos$id, "subsettable")
 })
 
 test_that("list leaf accepts any-shape write (no validation)", {
@@ -216,8 +220,7 @@ test_that("deep root patch replaces list leaf wholesale", {
 test_that("data.frame initial is stored as a leaf, class preserved", {
   df <- data.frame(x = 1:3, y = c("a", "b", "c"), stringsAsFactors = FALSE)
   state <- reactiveStore(list(df = df))
-  expect_true(inherits(state$df, "reactiveLeaf"))
-  expect_false(inherits(state$df, "reactiveStore"))
+  expect_true(inherits(state$df, "reactiveVal"))
   expect_equal(shiny::isolate(state$df()), df)
 })
 
@@ -230,7 +233,7 @@ test_that("data.frame leaf accepts data.frame writes without shape validation", 
 
 test_that("data.frame is not navigated into via $", {
   state <- reactiveStore(list(df = data.frame(x = 1:3)))
-  expect_error(state$df$x, "leaf\\(\\)\\$x")
+  expect_error(state$df$x, "subsettable")
 })
 
 test_that("tibble (if installed) is stored opaquely as a leaf", {
@@ -592,30 +595,6 @@ test_that("print(branch) lists every top-level key", {
   expect_true(any(grepl("todos", out)))
 })
 
-test_that("print(leaf) shows the current value for scalars", {
-  state <- reactiveStore(list(x = 42))
-  out <- capture.output(print(state$x))
-  expect_true(any(grepl("42", out)))
-})
-
-test_that("print(leaf) abbreviates list-valued leaves", {
-  state <- reactiveStore(list(todos = list(list(id = 1), list(id = 2))))
-  out <- capture.output(print(state$todos))
-  expect_true(any(grepl("list", out)))
-})
-
-test_that("print(leaf) shows rows x cols for data.frame", {
-  state <- reactiveStore(list(df = data.frame(x = 1:3, y = 4:6)))
-  out <- capture.output(print(state$df))
-  expect_true(any(grepl("3 x 2", out)))
-})
-
-test_that("print(leaf) shows dims for matrices and arrays", {
-  state <- reactiveStore(list(m = matrix(1:6, nrow = 2, ncol = 3)))
-  out <- capture.output(print(state$m))
-  expect_true(any(grepl("2 x 3", out)))
-})
-
 test_that("str(branch) is non-empty and shows nested keys", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
   out <- capture.output(str(state))
@@ -629,33 +608,54 @@ test_that("str(branch) does not error on list-valued leaves", {
   expect_no_error(capture.output(str(state)))
 })
 
-# --- Leaf error stubs --------------------------------------------------------
+# --- Leaf semantics (plain reactiveVal) --------------------------------------
 
-test_that("[[ on a leaf errors and points at Each / leaf()", {
+test_that("[[ on a leaf errors (default closure subset error)", {
   state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(state$todos[[1L]], "Each|leaf\\(\\)")
+  expect_error(state$todos[[1L]], "subsettable")
 })
 
 test_that("length() on a leaf returns 1 (callable-as-singular)", {
-  # No custom `length.reactiveLeaf` — leaves inherit reactiveVal's default
-  # length-1 behavior. htmltools' `dropNullsOrEmpty` calls `length()` on
-  # every attribute value, so a throwing length method would prevent
-  # `value = state$leaf` from surviving tag construction.
+  # Contract: R's default `length()` for closures returns 1L, and shiny
+  # does not override it for `reactiveVal`. Required by htmltools'
+  # `dropNullsOrEmpty`, which calls `length()` on every attribute value;
+  # any other return would prevent `value = state$leaf` from surviving
+  # tag construction. If shiny ever ships `length.reactiveVal`, this
+  # test surfaces the regression.
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_equal(length(state$todos), 1L)
 })
 
-test_that("names() on a leaf errors with a hint", {
+test_that("names() on a leaf returns NULL (closure default)", {
+  # No custom `names.reactiveVal` — `names()` on a closure returns NULL
+  # by default. Pinning the silent-NULL behavior so a future
+  # `names.reactiveVal` regression surfaces here.
   state <- reactiveStore(list(todos = list(list(id = 1))))
-  expect_error(names(state$todos), "names\\(leaf\\(\\)\\)")
+  expect_null(names(state$todos))
+})
+
+test_that("print(leaf) does not error across value shapes", {
+  # No custom print method — leaves route through shiny's
+  # `print.reactiveVal`. Smoke-test scalar/list/data.frame/matrix to
+  # catch upstream regressions and to pin that we haven't accidentally
+  # re-introduced a throwing print.
+  state <- reactiveStore(list(
+    x = 42,
+    todos = list(list(id = 1), list(id = 2)),
+    df = data.frame(x = 1:3, y = 4:6),
+    m = matrix(1:6, nrow = 2, ncol = 3)
+  ))
+  expect_no_error(capture.output(print(state$x)))
+  expect_no_error(capture.output(print(state$todos)))
+  expect_no_error(capture.output(print(state$df)))
+  expect_no_error(capture.output(print(state$m)))
 })
 
 # --- I() opt-out: bare named lists as leaves --------------------------------
 
 test_that("I()-wrapped named list at construction becomes a leaf", {
   state <- reactiveStore(list(filter = I(list(foo = 1, bar = 2))))
-  expect_true(inherits(state$filter, "reactiveLeaf"))
-  expect_false(inherits(state$filter, "reactiveStore"))
+  expect_true(inherits(state$filter, "reactiveVal"))
 })
 
 test_that("I()-wrapped value strips AsIs class on read", {
@@ -684,7 +684,7 @@ test_that("I()-wrapped leaf accepts any-shape writes (union types)", {
 
 test_that("I(list()) gives a shape-flexible empty leaf (df-or-list pattern)", {
   state <- reactiveStore(list(data = I(list())))
-  expect_true(inherits(state$data, "reactiveLeaf"))
+  expect_true(inherits(state$data, "reactiveVal"))
   state$data(data.frame(x = 1:3))
   expect_equal(shiny::isolate(state$data()), data.frame(x = 1:3))
   state$data(list(a = 1, b = 2))
