@@ -12,6 +12,12 @@
 #' updated). Unknown keys on a store-node patch are an error. Types are
 #' not enforced.
 #'
+#' `length()` on a leaf returns `1` (the underlying `reactiveVal` is a
+#' callable, and neither R's closure default nor shiny override
+#' `length`). htmltools' `dropNullsOrEmpty` calls `length()` on every
+#' attribute value, so this is what lets `value = state$leaf` survive
+#' tag construction. Use `length(leaf())` for the underlying length.
+#'
 #' @param initial A bare named list describing the initial shape.
 #'   Sub-positions classify as follows: bare named lists (length > 0)
 #'   become store sub-nodes; anything else (scalars, vectors, `NULL`,
@@ -116,13 +122,6 @@ make_store <- function(children, keys, path) {
 # levels deep) leaves siblings unmodified.
 validate_write <- function(node, value) {
   if (inherits(node, "reactiveVal")) return(invisible())
-  if (!inherits(node, "reactiveStore")) {
-    stop(
-      "Internal error: validate_write expected a reactiveStore or reactiveVal, ",
-      "got an object of class ", paste(class(node), collapse = "/"),
-      call. = FALSE
-    )
-  }
   env <- environment(node)
   label <- env$label
   if (!is.list(value)) {

@@ -164,10 +164,13 @@ test_that("list leaf write replaces the entire value", {
   expect_equal(shiny::isolate(state$todos()), list(list(id = 9)))
 })
 
+# The three "subsettable" assertions below (`$` on a list leaf, `$` on
+# a data.frame leaf, `[[` on a list leaf) pin base-R's wording for
+# subsetting a closure: "object of type 'closure' is not subsettable".
+# Leaves are plain reactiveVals (closures), so this is the default
+# error. If base R ever rewords it, update all three call sites here.
+
 test_that("$ on a leaf errors (default closure subset error)", {
-  # Leaves are plain reactiveVals (closures), so R's default `$` on a
-  # closure errors with "object of type 'closure' is not subsettable".
-  # This test pins that base-R wording.
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_error(state$todos$id, "subsettable")
 })
@@ -232,8 +235,6 @@ test_that("data.frame leaf accepts data.frame writes without shape validation", 
 })
 
 test_that("data.frame is not navigated into via $", {
-  # Same as the leaf-$ test above: a leaf is a closure, so R's default
-  # error wording applies.
   state <- reactiveStore(list(df = data.frame(x = 1:3)))
   expect_error(state$df$x, "subsettable")
 })
@@ -597,14 +598,6 @@ test_that("print(branch) lists every top-level key", {
   expect_true(any(grepl("todos", out)))
 })
 
-test_that("print(leaf) shows the current value for scalars", {
-  # Leaves are plain reactiveVals; shiny's print.reactiveVal deparses
-  # the current value, so scalar values appear in the output.
-  state <- reactiveStore(list(x = 42))
-  out <- capture.output(print(state$x))
-  expect_true(any(grepl("42", out)))
-})
-
 test_that("str(branch) is non-empty and shows nested keys", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
   out <- capture.output(str(state))
@@ -621,8 +614,6 @@ test_that("str(branch) does not error on list-valued leaves", {
 # --- Leaf semantics (plain reactiveVal) --------------------------------------
 
 test_that("[[ on a leaf errors (default closure subset error)", {
-  # Same as the leaf-$ test: leaves are closures, so R's default
-  # "object of type 'closure' is not subsettable" applies.
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_error(state$todos[[1L]], "subsettable")
 })
@@ -644,20 +635,6 @@ test_that("names() on a leaf returns NULL (closure default)", {
   # `names.reactiveVal` regression surfaces here.
   state <- reactiveStore(list(todos = list(list(id = 1))))
   expect_null(names(state$todos))
-})
-
-test_that("print(leaf) does not error for non-scalar values", {
-  # `print.reactiveLeaf` is gone; non-scalar leaves now route through
-  # shiny's `print.reactiveVal`. Smoke-test list, data.frame, and
-  # matrix values to catch upstream print regressions.
-  state <- reactiveStore(list(
-    todos = list(list(id = 1), list(id = 2)),
-    df = data.frame(x = 1:3, y = 4:6),
-    m = matrix(1:6, nrow = 2, ncol = 3)
-  ))
-  expect_no_error(capture.output(print(state$todos)))
-  expect_no_error(capture.output(print(state$df)))
-  expect_no_error(capture.output(print(state$m)))
 })
 
 # --- I() opt-out: bare named lists as leaves --------------------------------

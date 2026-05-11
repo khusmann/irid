@@ -1,7 +1,7 @@
 #' Test whether a value is a irid-reactive function
 #'
 #' Returns `TRUE` for any callable irid treats as reactive — plain
-#' functions, Shiny reactives, store nodes/leaves, and `reactiveProxy`
+#' functions, Shiny reactives, `reactiveStore` nodes, and `reactiveProxy`
 #' wrappers. Used by [process_tags()] to decide which attributes participate
 #' in auto-bind / event extraction.
 #'
@@ -30,7 +30,7 @@ can_accept_write <- function(fn) {
 }
 
 # Build the synthetic write-back handler for a state-binding prop.
-# Writable callables (reactiveVal, store leaf, reactiveProxy, store node,
+# Writable callables (reactiveVal, reactiveProxy, reactiveStore node,
 # `\(v) ...`, `\(...) ...`, primitives) get a handler that calls
 # `fn(e$value/checked)`. Read-only callables (`\() expr()`, `reactive()`)
 # get a no-op handler — the listener still fires so the optimistic-update

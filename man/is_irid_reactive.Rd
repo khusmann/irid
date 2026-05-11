@@ -14,7 +14,7 @@ Logical.
 }
 \description{
 Returns \code{TRUE} for any callable irid treats as reactive — plain
-functions, Shiny reactives, store nodes/leaves, and \code{reactiveProxy}
+functions, Shiny reactives, \code{reactiveStore} nodes, and \code{reactiveProxy}
 wrappers. Used by \code{\link[=process_tags]{process_tags()}} to decide which attributes participate
 in auto-bind / event extraction.
 }

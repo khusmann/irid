@@ -33,4 +33,10 @@ Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
 replace; store nodes patch (only the keys present in the patch are
 updated). Unknown keys on a store-node patch are an error. Types are
 not enforced.
+
+\code{length()} on a leaf returns \code{1} (the underlying \code{reactiveVal} is a
+callable, and neither R's closure default nor shiny override
+\code{length}). htmltools' \code{dropNullsOrEmpty} calls \code{length()} on every
+attribute value, so this is what lets \code{value = state$leaf} survive
+tag construction. Use \code{length(leaf())} for the underlying length.
 }
