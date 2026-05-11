@@ -1,113 +1,168 @@
 #' Mini-store projection over a record
 #'
-#' Builds a `reactiveStore`-shaped callable tree that projects a single record
-#' out of a parent collection. Reads route through `get_record()`; writes
-#' (whole-record or per-field synthetic setters) route through
-#' `set_record()`. The mini-store never holds independent state for the
-#' record — the parent collection is the single source of truth.
+#' Builds a `reactiveStore`-shaped callable tree that projects a single
+#' record out of a parent collection. Reads route through `get_record()`;
+#' writes (whole-record or per-field synthetic setters) route through
+#' `set_record()`. The mini-store never owns the record's state — the
+#' parent collection is the single source of truth.
 #'
-#' Used by `Each` (record items) and `Match` (record bound value) to project
-#' fine-grained leaf reactivity out of a coarse-grained parent.
+#' Used by `Each` (record items) and `Match` (record bound value) to
+#' project fine-grained leaf reactivity out of a coarse-grained parent.
 #'
-#' Shape is locked at construction from the keys of the record returned by
-#' `get_record()`. Writes with unknown keys error, same rule as
-#' `reactiveStore`.
+#' Recursive — nested named lists in the initial record become sub-mini-stores
+#' (so `mini$user$name(v)` works the same as `mini$user(modifyList(...))`).
+#' Each level threads a sub-`get`/`set` pair down the tree; writes at any
+#' depth fan out through the chain of synthetic setters until they reach
+#' the user-supplied `set_record`. Shape uses the same shared
+#' branch-vs-leaf rules as [reactiveStore()] (`is_branch`, `is_bare_list`,
+#' `strip_asis` are reused), and the same recursive [validate_write()]
+#' enforces "no unknown keys" at every level on whole-record writes.
 #'
-#' Internally, each leaf is a `reactiveVal` kept in sync with `get_record()`
-#' by an internal observer that diffs and writes only changed leaves. This
-#' is what delivers the "only changed fields fire" promise: a parent patch
-#' that touches one field invalidates only that one leaf's observers.
-#' (Risks decision from PLAN: diff inside the projection rather than at the
-#' call site — same effect, smaller surface area for callers to get wrong.)
-#'
-#' Per-field accessors are `reactiveProxy`s with a `get` reading the
-#' internal leaf and a `set` patching the parent record via `set_record`.
-#' Auto-bind treats them like any other callable.
+#' Internally, every leaf holds a `reactiveVal` kept in sync with the
+#' parent by a single root-level propagating observer. The observer
+#' walks the tree top-down via each branch's internal `set_internal`,
+#' which recurses to children's `set_internal`; only at leaves does an
+#' actual `reactiveVal` write occur, gated by `identical(old, new)`.
+#' This is what delivers the "only changed fields fire" promise. (Risks
+#' decision from PLAN: diff inside the projection rather than at the
+#' call site — same effect, smaller surface area for callers to get
+#' wrong.)
 #'
 #' @param get_record A 0-arg reactive callable that returns the current
 #'   record (a fully named list).
 #' @param set_record A 1-arg function called with the new record on
 #'   whole-record write or after a per-field synthetic setter has built
 #'   the patched record.
-#' @param scope A scope from [make_scope()]. The internal observer is
+#' @param scope A scope from [make_scope()]. The propagating observer is
 #'   created against `scope$session` and registered for cleanup so
 #'   `scope$destroy()` tears it down.
 #' @return A callable with class `c("reactiveStore", "reactive", "function")`,
 #'   shaped like a `reactiveStore` branch — `mini()` reads the record,
-#'   `mini(record)` writes it, `mini$field()` reads a leaf, and
-#'   `mini$field(v)` writes through the parent.
+#'   `mini(record)` writes it, `mini$field()` reads a leaf or sub-branch,
+#'   and `mini$field(v)` writes through the parent.
 #' @keywords internal
 make_mini_store <- function(get_record, set_record, scope) {
   initial <- shiny::isolate(get_record())
-  if (!is.list(initial) || is.null(names(initial)) ||
-      any(!nzchar(names(initial)))) {
+  if (!is_branch(initial, "")) {
     stop(
       "make_mini_store: initial record must be a fully named list",
       call. = FALSE
     )
   }
-  keys <- names(initial)
 
-  leaves <- stats::setNames(
-    lapply(keys, function(k) shiny::reactiveVal(initial[[k]])),
-    keys
+  node <- build_mini_node(
+    initial = initial,
+    get_self = get_record,
+    set_self = set_record,
+    scope = scope,
+    path = ""
   )
 
-  # Diff incoming records against the current leaf values and write only
-  # changed leaves. Keys present in the locked shape but missing from the
-  # incoming record are skipped (shape is fixed; missing keys are user
-  # error and surface elsewhere — Match remounts on shape change, Each on
-  # keyed reconcile).
+  # Single root-level propagator — pushes parent changes down through
+  # the tree via `set_internal`. Only leaves whose value actually
+  # changed fire their observers (each leaf's `set_internal` short-
+  # circuits on `identical`). One observer rather than one-per-leaf
+  # so deep trees don't fan out the dependency on `get_record()`.
   obs <- shiny::observe({
     new_record <- get_record()
-    for (k in keys) {
-      if (k %in% names(new_record)) {
-        new_v <- new_record[[k]]
-        old_v <- shiny::isolate(leaves[[k]]())
-        if (!identical(old_v, new_v)) {
-          leaves[[k]](new_v)
-        }
-      }
+    if (is_branch(new_record, "")) {
+      node$set_internal(new_record)
     }
   }, domain = scope$session)
   scope$register_observer(obs)
 
-  accessors <- stats::setNames(
-    lapply(keys, function(k) {
-      force(k)
-      reactiveProxy(
-        get = function() leaves[[k]](),
-        set = function(v) {
-          # `isolate` so a synthetic setter triggered from outside a
-          # reactive context still works (event handlers, raw calls in
-          # tests) and so the setter never subscribes to the whole record.
-          patched <- utils::modifyList(
-            shiny::isolate(get_record()), stats::setNames(list(v), k)
-          )
-          set_record(patched)
-        }
-      )
-    }),
-    keys
-  )
+  node$fn
+}
 
+# Recursive constructor for a mini-store node. Returns a list with:
+#   - fn:           the user-facing callable (reactiveStore-classed for
+#                   branches, reactiveProxy-classed for leaves)
+#   - set_internal: pushes a value into the node's internal state
+#                   without going through `set_self`. Branches recurse
+#                   into children; leaves write to their `reactiveVal`
+#                   only if the value actually changed.
+#
+# `get_self` / `set_self` are the chained projections of the parent's
+# get/set, narrowed to this node's slice of the record.
+build_mini_node <- function(initial, get_self, set_self, scope, path) {
+  if (is_branch(initial, path)) {
+    keys <- names(initial)
+
+    child_nodes <- stats::setNames(
+      lapply(keys, function(k) {
+        force(k)
+        # Sub-projection — narrow get/set to this child's slice. `isolate`
+        # so the synthetic setter never subscribes to the parent record.
+        sub_get <- function() get_self()[[k]]
+        sub_set <- function(v) {
+          patched <- utils::modifyList(
+            shiny::isolate(get_self()),
+            stats::setNames(list(v), k)
+          )
+          set_self(patched)
+        }
+        child_path <- if (nzchar(path)) paste0(path, "$", k) else k
+        build_mini_node(initial[[k]], sub_get, sub_set, scope, child_path)
+      }),
+      keys
+    )
+
+    set_internal <- function(record) {
+      for (k in keys) {
+        if (k %in% names(record)) {
+          child_nodes[[k]]$set_internal(record[[k]])
+        }
+      }
+      invisible()
+    }
+
+    fn_children <- stats::setNames(
+      lapply(keys, function(k) child_nodes[[k]]$fn),
+      keys
+    )
+    fn <- make_mini_branch_fn(fn_children, keys, path, set_self)
+
+    list(fn = fn, set_internal = set_internal)
+
+  } else {
+    rv <- shiny::reactiveVal(strip_asis(initial))
+
+    set_internal <- function(v) {
+      old_v <- shiny::isolate(rv())
+      if (!identical(old_v, v)) rv(v)
+      invisible()
+    }
+
+    fn <- reactiveProxy(get = function() rv(), set = set_self)
+
+    list(fn = fn, set_internal = set_internal)
+  }
+}
+
+# Builds a `reactiveStore`-classed branch callable. Reads recursively
+# call each child's `fn` (subscribing to all descendant leaves); writes
+# validate against the locked shape and route through `set_self`.
+# Factored out of `build_mini_node` so the closure environment cleanly
+# binds `children` (the named list of child callables) to `fn_children`
+# — this matches `make_store`'s shape so [validate_write()] and
+# `$.reactiveStore` work uniformly across both store kinds.
+make_mini_branch_fn <- function(children, keys, path, set_self) {
+  label <- if (nzchar(path)) sprintf("'%s'", path) else "mini-store"
   fn <- function(...) {
     if (missing(..1)) {
-      stats::setNames(lapply(keys, function(k) leaves[[k]]()), keys)
+      stats::setNames(lapply(keys, function(k) children[[k]]()), keys)
     } else {
       v <- ..1
-      validate_mini_store_write(v, keys)
-      set_record(v)
+      validate_write(fn, v)
+      set_self(v)
       invisible(NULL)
     }
   }
-
   e <- environment(fn)
   e$keys <- keys
-  e$children <- accessors
-  e$label <- "mini-store"
+  e$children <- children
+  e$label <- label
   class(fn) <- c("reactiveStore", "reactive", "function")
-
   fn
 }
 
@@ -141,38 +196,16 @@ make_slot_accessor <- function(get_value, set_value, scope) {
 }
 
 # Decide between mini-store projection (records) and bare-callable
-# pass-through (scalars). A record is a fully named bare list with at
-# least one element. Same shape rule as `is_branch` in store.R, but on a
-# value rather than a tree node — this version accepts any classed list
-# (mini-stores never recurse, so AsIs/etc. don't matter).
+# pass-through (scalars). Same shape as `is_branch` in spirit (fully
+# named bare list with at least one element) but with permissive
+# semantics — partial-naming returns FALSE rather than erroring.
+# `is_branch` errors on construction-time misuse of `reactiveStore`;
+# `is_record` is a runtime inspection on item values where erroring
+# would mean crashing a user's app over an accidentally malformed item.
 is_record <- function(value) {
   if (!is.list(value)) return(FALSE)
   if (length(value) == 0L) return(FALSE)
   nm <- names(value)
   if (is.null(nm)) return(FALSE)
   all(nzchar(nm))
-}
-
-validate_mini_store_write <- function(value, keys) {
-  if (!is.list(value)) {
-    stop(
-      "mini-store write expected a named list, got ",
-      paste(class(value), collapse = "/"),
-      call. = FALSE
-    )
-  }
-  if (length(value) == 0L) return(invisible())
-  nm <- names(value)
-  if (is.null(nm) || any(!nzchar(nm))) {
-    stop("mini-store write expected a fully named list", call. = FALSE)
-  }
-  unknown <- setdiff(nm, keys)
-  if (length(unknown) > 0L) {
-    stop(
-      "Unknown keys in mini-store write: ",
-      paste(unknown, collapse = ", "),
-      call. = FALSE
-    )
-  }
-  invisible()
 }

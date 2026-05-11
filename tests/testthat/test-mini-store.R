@@ -165,7 +165,7 @@ test_that("write with non-list errors", {
 
 test_that("write with unnamed list errors", {
   fix <- new_mini(list(a = 1, b = 2))
-  expect_error(fix$mini(list(1, 2)), "fully named list")
+  expect_error(fix$mini(list(1, 2)), "named list")
 })
 
 test_that("partial whole-record write succeeds for known keys", {
@@ -204,4 +204,72 @@ test_that("per-field accessor passes is_irid_reactive", {
 test_that("mini-store callable passes is_irid_reactive", {
   fix <- new_mini(list(a = 1))
   expect_true(irid:::is_irid_reactive(fix$mini))
+})
+
+# --- Nested records (recursive mini-store) -----------------------------------
+
+test_that("nested named lists become sub-mini-stores", {
+  fix <- new_mini(list(
+    id = 1L,
+    user = list(name = "Alice", email = "a@x")
+  ))
+  expect_s3_class(fix$mini$user, "reactiveStore")
+  expect_equal(names(fix$mini$user), c("name", "email"))
+})
+
+test_that("nested leaf reads return the initial value", {
+  fix <- new_mini(list(user = list(name = "Alice", email = "a@x")))
+  expect_equal(shiny::isolate(fix$mini$user$name()), "Alice")
+  expect_equal(shiny::isolate(fix$mini$user$email()), "a@x")
+})
+
+test_that("nested leaf write chains up to set_record", {
+  fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
+  fix$mini$user$name("Bob")
+  flushReact()
+  expect_equal(
+    shiny::isolate(fix$parent()),
+    list(id = 1L, user = list(name = "Bob", email = "a@x"))
+  )
+})
+
+test_that("nested branch write patches whole sub-record via set_record", {
+  fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
+  fix$mini$user(list(name = "Bob", email = "b@x"))
+  flushReact()
+  expect_equal(
+    shiny::isolate(fix$parent()),
+    list(id = 1L, user = list(name = "Bob", email = "b@x"))
+  )
+})
+
+test_that("parent change to a nested field propagates only to that leaf", {
+  fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
+  c_name <- 0L; c_email <- 0L
+  o_name  <- shiny::observe({ fix$mini$user$name();  c_name  <<- c_name  + 1L })
+  o_email <- shiny::observe({ fix$mini$user$email(); c_email <<- c_email + 1L })
+  flushReact()
+  base_name <- c_name; base_email <- c_email
+
+  fix$parent(list(id = 1L, user = list(name = "Bob", email = "a@x")))
+  flushReact()
+  expect_equal(c_name  - base_name,  1L)
+  expect_equal(c_email - base_email, 0L)
+
+  o_name$destroy(); o_email$destroy()
+})
+
+test_that("nested unknown-key write errors at the right depth", {
+  fix <- new_mini(list(user = list(name = "A", email = "B")))
+  expect_error(
+    fix$mini(list(user = list(name = "X", phone = "1"))),
+    "Unknown keys.*phone"
+  )
+})
+
+test_that("synthetic setter chain doesn't subscribe writers to the parent", {
+  fix <- new_mini(list(user = list(name = "A", email = "B")))
+  # Calling the setter from outside any reactive context succeeds —
+  # would error if the chain forgot to `isolate` parent reads.
+  expect_silent(fix$mini$user$name("X"))
 })

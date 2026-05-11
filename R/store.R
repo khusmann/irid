@@ -112,12 +112,18 @@ make_store <- function(children, keys, path) {
 
 # Recursively validates a write/patch against the target subtree without
 # committing — throws on the first shape violation, otherwise returns
-# invisibly. Store nodes enforce: list-shaped, fully named, no unknown
-# keys. Leaves accept any value, so they always pass validation. Used by
-# store write paths so a downstream rejection (e.g., an unknown key five
-# levels deep) leaves siblings unmodified.
+# invisibly. Branch nodes (the `reactiveStore`-classed callables produced
+# by `make_store` and by `make_mini_store`'s recursive branch builder)
+# enforce: list-shaped, fully named, no unknown keys. Leaves accept any
+# value, so they always pass validation. Used by store write paths so a
+# downstream rejection (e.g., an unknown key five levels deep) leaves
+# siblings unmodified.
+#
+# Branch detection is by class — anything not classed `reactiveStore` is
+# a leaf. This way the same validator works for `reactiveStore` (leaves
+# are `reactiveVal`) and `make_mini_store` (leaves are `reactiveProxy`).
 validate_write <- function(node, value) {
-  if (inherits(node, "reactiveVal")) return(invisible())
+  if (!inherits(node, "reactiveStore")) return(invisible())
   env <- environment(node)
   label <- env$label
   if (!is.list(value)) {

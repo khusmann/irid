@@ -14,40 +14,44 @@ record (a fully named list).}
 whole-record write or after a per-field synthetic setter has built
 the patched record.}
 
-\item{scope}{A scope from \code{\link[=make_scope]{make_scope()}}. The internal observer is
+\item{scope}{A scope from \code{\link[=make_scope]{make_scope()}}. The propagating observer is
 created against \code{scope$session} and registered for cleanup so
 \code{scope$destroy()} tears it down.}
 }
 \value{
 A callable with class \code{c("reactiveStore", "reactive", "function")},
 shaped like a \code{reactiveStore} branch — \code{mini()} reads the record,
-\code{mini(record)} writes it, \code{mini$field()} reads a leaf, and
-\code{mini$field(v)} writes through the parent.
+\code{mini(record)} writes it, \code{mini$field()} reads a leaf or sub-branch,
+and \code{mini$field(v)} writes through the parent.
 }
 \description{
-Builds a \code{reactiveStore}-shaped callable tree that projects a single record
-out of a parent collection. Reads route through \code{get_record()}; writes
-(whole-record or per-field synthetic setters) route through
-\code{set_record()}. The mini-store never holds independent state for the
-record — the parent collection is the single source of truth.
+Builds a \code{reactiveStore}-shaped callable tree that projects a single
+record out of a parent collection. Reads route through \code{get_record()};
+writes (whole-record or per-field synthetic setters) route through
+\code{set_record()}. The mini-store never owns the record's state — the
+parent collection is the single source of truth.
 }
 \details{
-Used by \code{Each} (record items) and \code{Match} (record bound value) to project
-fine-grained leaf reactivity out of a coarse-grained parent.
+Used by \code{Each} (record items) and \code{Match} (record bound value) to
+project fine-grained leaf reactivity out of a coarse-grained parent.
 
-Shape is locked at construction from the keys of the record returned by
-\code{get_record()}. Writes with unknown keys error, same rule as
-\code{reactiveStore}.
+Recursive — nested named lists in the initial record become sub-mini-stores
+(so \code{mini$user$name(v)} works the same as \code{mini$user(modifyList(...))}).
+Each level threads a sub-\code{get}/\code{set} pair down the tree; writes at any
+depth fan out through the chain of synthetic setters until they reach
+the user-supplied \code{set_record}. Shape uses the same shared
+branch-vs-leaf rules as \code{\link[=reactiveStore]{reactiveStore()}} (\code{is_branch}, \code{is_bare_list},
+\code{strip_asis} are reused), and the same recursive \code{\link[=validate_write]{validate_write()}}
+enforces "no unknown keys" at every level on whole-record writes.
 
-Internally, each leaf is a \code{reactiveVal} kept in sync with \code{get_record()}
-by an internal observer that diffs and writes only changed leaves. This
-is what delivers the "only changed fields fire" promise: a parent patch
-that touches one field invalidates only that one leaf's observers.
-(Risks decision from PLAN: diff inside the projection rather than at the
-call site — same effect, smaller surface area for callers to get wrong.)
-
-Per-field accessors are \code{reactiveProxy}s with a \code{get} reading the
-internal leaf and a \code{set} patching the parent record via \code{set_record}.
-Auto-bind treats them like any other callable.
+Internally, every leaf holds a \code{reactiveVal} kept in sync with the
+parent by a single root-level propagating observer. The observer
+walks the tree top-down via each branch's internal \code{set_internal},
+which recurses to children's \code{set_internal}; only at leaves does an
+actual \code{reactiveVal} write occur, gated by \code{identical(old, new)}.
+This is what delivers the "only changed fields fire" promise. (Risks
+decision from PLAN: diff inside the projection rather than at the
+call site — same effect, smaller surface area for callers to get
+wrong.)
 }
 \keyword{internal}
