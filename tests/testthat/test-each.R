@@ -255,6 +255,44 @@ test_that("Each builds a mini-store for record items and a slot accessor for sca
   m2$handle$destroy()
 })
 
+test_that("Each shape transitions via mini-store write trigger rebuild", {
+  # Regression for the `each_heterogeneous.R` crash path: the user
+  # writes a different-shape record through the per-item mini-store
+  # (e.g., a `kind_proxy` swapping a heading record for a todo
+  # record). The mini-store's shape-changing write routes through
+  # `set_record`; parent invalidates; the reconciler detects the
+  # shape change and rebuilds this entry with a new mini-store of
+  # the right shape.
+  items <- shiny::reactiveVal(list(list(id = 1L, type = "heading", text = "")))
+  built_minis <- list()
+  m <- mount_each(
+    items,
+    function(item) {
+      built_minis[[length(built_minis) + 1L]] <<- item
+      shiny::tags$span()
+    },
+    by = function(b) b$id
+  )
+  flushReact()
+  expect_equal(length(built_minis), 1L)
+  expect_equal(names(shiny::isolate(built_minis[[1]]())),
+               c("id", "type", "text"))
+
+  # Same-shape write: paragraph keeps (id, type, text). No rebuild —
+  # the original mini-store handles the in-place patch.
+  built_minis[[1]](list(id = 1L, type = "paragraph", text = "hi"))
+  flushReact()
+  expect_equal(length(built_minis), 1L)
+
+  # Shape-changing write: todo adds `done`. The reconciler rebuilds.
+  built_minis[[1]](list(id = 1L, type = "todo", text = "hi", done = FALSE))
+  flushReact()
+  expect_equal(length(built_minis), 2L)
+  expect_equal(names(shiny::isolate(built_minis[[2]]())),
+               c("id", "type", "text", "done"))
+  m$handle$destroy()
+})
+
 test_that("Each rebuilds the entry when a positional slot's record shape changes", {
   # Heterogeneous records in positional mode: slot 1 goes from a 2-key
   # record to a 3-key record. The reconciler must detect the shape

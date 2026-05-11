@@ -57,6 +57,17 @@ writing. The asymmetry exists because the mini-store is a
 projection: it never owns the record, so it has no business
 deciding how to merge a partial write into the source of truth.
 
+\strong{Shape-changing writes are allowed.} A write whose value has a
+different \code{shape_signature} than the one captured at construction
+(different key set at any depth, or scalar↔record at a sub-branch)
+skips local validation and the in-place leaf sync, and just routes
+the new value to \code{set_record}. The outer container (\code{Each}'s
+reconciler, \code{Match}'s active-case detector) observes the parent
+change and rebuilds this mini-store with a fresh leaf tree of the
+new shape on the same flush. The write must still be a named-list
+record at the root — scalars and unnamed lists error rather than
+implicitly demoting the slot to a scalar accessor.
+
 Internally, every leaf holds a \code{reactiveVal} kept in sync with the
 parent by a single root-level propagating observer. The observer
 walks the tree top-down via each branch's internal \code{set_internal},
