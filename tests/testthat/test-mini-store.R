@@ -273,3 +273,45 @@ test_that("synthetic setter chain doesn't subscribe writers to the parent", {
   # would error if the chain forgot to `isolate` parent reads.
   expect_silent(fix$mini$user$name("X"))
 })
+
+# --- Synchronous local update on user write ---------------------------------
+
+# These cover the regression that broke the each_nested example: writes
+# through the chain only updated the parent collection; the local leaf
+# `rv` updated on the *next* flush via the propagator. The event
+# observer's force-send echo runs before that flush, so binding reads
+# saw the stale value and the client overwrote the user's typed input.
+
+test_that("leaf write updates the local rv synchronously (before flush)", {
+  fix <- new_mini(list(a = 1, b = 2))
+  fix$mini$a(99)
+  # No flushReact() — read immediately, mid-flight, like force-send does.
+  expect_equal(shiny::isolate(fix$mini$a()), 99)
+})
+
+test_that("nested leaf write updates the local rv synchronously", {
+  fix <- new_mini(list(user = list(name = "A", email = "B")))
+  fix$mini$user$name("X")
+  expect_equal(shiny::isolate(fix$mini$user$name()), "X")
+})
+
+test_that("branch write updates descendant leaves synchronously", {
+  fix <- new_mini(list(user = list(name = "A", email = "B")))
+  fix$mini$user(list(name = "X", email = "Y"))
+  expect_equal(shiny::isolate(fix$mini$user$name()), "X")
+  expect_equal(shiny::isolate(fix$mini$user$email()), "Y")
+})
+
+test_that("synchronous local write does not double-fire on flush", {
+  fix <- new_mini(list(a = 1))
+  count <- 0L
+  obs <- shiny::observe({ fix$mini$a(); count <<- count + 1L })
+  flushReact()
+  base <- count
+
+  fix$mini$a(99)        # synchronous local write + chained set_record
+  flushReact()          # propagator fires, finds identical, short-circuits
+  expect_equal(count - base, 1L)
+
+  obs$destroy()
+})

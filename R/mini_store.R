@@ -120,7 +120,9 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
       lapply(keys, function(k) child_nodes[[k]]$fn),
       keys
     )
-    fn <- make_mini_branch_fn(fn_children, keys, path, set_self)
+    fn <- make_mini_branch_fn(
+      fn_children, keys, path, set_self, set_internal
+    )
 
     list(fn = fn, set_internal = set_internal)
 
@@ -133,7 +135,22 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
       invisible()
     }
 
-    fn <- reactiveProxy(get = function() rv(), set = set_self)
+    # User-write path: update the local `rv` synchronously *and* chain
+    # the write up through `set_self`. Without the synchronous local
+    # write, the event observer's force-send echo (which runs before
+    # the next flush propagates the parent change back down) reads the
+    # stale `rv` and sends the OLD value to the client tagged with the
+    # current sequence — the client treats it as a server transform and
+    # overwrites the user's typed value. The propagator that fires on
+    # the next flush short-circuits via `identical()` and doesn't
+    # re-invalidate.
+    fn <- reactiveProxy(
+      get = function() rv(),
+      set = function(v) {
+        if (!identical(shiny::isolate(rv()), v)) rv(v)
+        set_self(v)
+      }
+    )
 
     list(fn = fn, set_internal = set_internal)
   }
@@ -146,7 +163,7 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
 # binds `children` (the named list of child callables) to `fn_children`
 # — this matches `make_store`'s shape so [validate_write()] and
 # `$.reactiveStore` work uniformly across both store kinds.
-make_mini_branch_fn <- function(children, keys, path, set_self) {
+make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
   label <- if (nzchar(path)) sprintf("'%s'", path) else "mini-store"
   fn <- function(...) {
     if (missing(..1)) {
@@ -154,6 +171,13 @@ make_mini_branch_fn <- function(children, keys, path, set_self) {
     } else {
       v <- ..1
       validate_write(fn, v)
+      # Push the record into descendant leaves' local `rv`s synchronously
+      # (set_internal recurses; only changed leaves invalidate). Then
+      # chain the write up through `set_self` so the parent collection
+      # sees it. Same reason as the leaf branch: the event-observer
+      # force-send echo runs before the parent-change propagator can
+      # fire on the next flush.
+      set_internal(v)
       set_self(v)
       invisible(NULL)
     }
@@ -192,7 +216,15 @@ make_slot_accessor <- function(get_value, set_value, scope) {
     }
   }, domain = scope$session)
   scope$register_observer(obs)
-  reactiveProxy(get = function() rv(), set = set_value)
+  # See `make_mini_store`'s leaf branch for why the local `rv` must be
+  # written synchronously before chaining up through `set_value`.
+  reactiveProxy(
+    get = function() rv(),
+    set = function(v) {
+      if (!identical(shiny::isolate(rv()), v)) rv(v)
+      set_value(v)
+    }
+  )
 }
 
 # Decide between mini-store projection (records) and bare-callable

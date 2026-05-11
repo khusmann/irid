@@ -111,6 +111,23 @@ test_that("make_slot_accessor only fires on its own slot change", {
   o1$destroy(); o2$destroy()
 })
 
+test_that("slot accessor write updates the local rv synchronously", {
+  # Mirrors `make_mini_store`'s leaf-sync regression — without a
+  # synchronous local write, the event observer's force-send echo
+  # reads the stale rv value and the client overwrites the user's
+  # typed input.
+  parent <- shiny::reactiveVal(c("a", "b", "c"))
+  scope <- new_scope()
+  acc <- irid:::make_slot_accessor(
+    function() parent()[[2L]],
+    function(v) { x <- shiny::isolate(parent()); x[[2L]] <- v; parent(x) },
+    scope
+  )
+  acc("B")
+  # No flushReact() — read mid-flight.
+  expect_equal(shiny::isolate(acc()), "B")
+})
+
 test_that("scope$destroy() tears down slot accessor's propagating observer", {
   parent <- shiny::reactiveVal(c("a", "b"))
   scope <- new_scope()
