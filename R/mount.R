@@ -4,15 +4,31 @@
 #' reactive attribute bindings, event listeners, Shiny outputs, and
 #' control-flow nodes (`When`, `Each`, `Match`).
 #'
+#' Binding observers run at `priority = -100 + depth`, so deeper-nested
+#' bindings fire before shallower ones in the same flush. Control flow
+#' observers stay at the default priority 0 and always fire first. This
+#' guarantees that on initial mount (and on any cascading re-render),
+#' content inserted by a control flow is fully populated by its inner
+#' bindings before any parent attribute binding observes it. The motivating
+#' case is `<select value=rv>` whose options come from `Each` — the parent's
+#' `value` binding must fire *after* the options exist and have their
+#' `value` attributes set, otherwise the browser silently sets
+#' `selectedIndex = -1` and the select renders blank.
+#'
 #' @param result A list returned by [process_tags()], containing `$tag`,
 #'   `$bindings`, `$events`, `$control_flows`, and `$shiny_outputs`.
 #' @param session A Shiny session object.
+#' @param depth Nesting depth used to compute binding priority. Top-level
+#'   mounts (`iridApp`, `renderIrid`) use the default `0`; recursive calls
+#'   from inside `When`/`Each`/`Match` increment it so nested bindings fire
+#'   before their parent's.
 #' @return A mount handle with `$tag` (the processed HTML) and `$destroy()`
 #'   (a function that tears down all observers).
 #' @keywords internal
-irid_mount_processed <- function(result, session) {
+irid_mount_processed <- function(result, session, depth = 0L) {
   counter <- result$counter
   observers <- list()
+  binding_priority <- -100L + depth
 
   # Index bindings by element ID so event handlers can force-send
   # the authoritative value even when the reactive is a no-op.
@@ -93,7 +109,10 @@ irid_mount_processed <- function(result, session) {
     session$sendCustomMessage("irid-events", event_msgs)
   }
 
-  # Set up reactive attribute bindings
+  # Set up reactive attribute bindings. Lower priority than control flows
+  # so this mount's bindings fire after all control-flow content has been
+  # inserted. Priority decreases with depth so deeper bindings fire before
+  # shallower ones — see the function-level docs for the motivating case.
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
@@ -103,7 +122,7 @@ irid_mount_processed <- function(result, session) {
         msg$sequence <- seq_info$seq
       }
       session$sendCustomMessage("irid-attr", msg)
-    })
+    }, priority = binding_priority)
     observers[[length(observers) + 1L]] <<- obs
   })
 
@@ -155,7 +174,7 @@ irid_mount_processed <- function(result, session) {
 
             # Then mount observers/events
             env$current_mount <- irid_mount_processed(
-              processed, session
+              processed, session, depth = depth + 1L
             )
           } else {
             session$sendCustomMessage("irid-swap", list(
@@ -380,7 +399,9 @@ irid_mount_processed <- function(result, session) {
 
             for (key in added_keys) {
               entry <- env$item_mounts[[key]]
-              entry$mount <- irid_mount_processed(entry$processed, session)
+              entry$mount <- irid_mount_processed(
+                entry$processed, session, depth = depth + 1L
+              )
               entry$processed <- NULL
               env$item_mounts[[key]] <- entry
             }
@@ -475,7 +496,9 @@ irid_mount_processed <- function(result, session) {
             # Mount new entries (after DOM exists).
             for (i in build_indices) {
               entry <- env$item_mounts[[i]]
-              entry$mount <- irid_mount_processed(entry$processed, session)
+              entry$mount <- irid_mount_processed(
+                entry$processed, session, depth = depth + 1L
+              )
               entry$processed <- NULL
               env$item_mounts[[i]] <- entry
             }
@@ -566,7 +589,9 @@ irid_mount_processed <- function(result, session) {
             id = cf_id,
             html = as.character(processed$tag)
           ))
-          env$current_mount <- irid_mount_processed(processed, session)
+          env$current_mount <- irid_mount_processed(
+            processed, session, depth = depth + 1L
+          )
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
