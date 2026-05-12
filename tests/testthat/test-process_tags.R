@@ -360,11 +360,11 @@ test_that("control-flow nodes as attribute values error with a child-slot hint",
     "irid_each.*children"
   )
   expect_error(
-    process_tags(tags$div(class = When(\() TRUE, "yes"))),
+    process_tags(tags$div(class = When(\() TRUE, \() "yes"))),
     "irid_when.*children"
   )
   expect_error(
-    process_tags(tags$div(class = Match(Default("hi")))),
+    process_tags(tags$div(class = Match(\() TRUE, Default(\() "hi")))),
     "irid_match.*children"
   )
 })

@@ -4,16 +4,34 @@
 \alias{Match}
 \title{Render the first matching case}
 \usage{
-Match(...)
+Match(callable, ...)
 }
 \arguments{
-\item{...}{One or more \code{\link[=Case]{Case()}} or \code{\link[=Default]{Default()}} values.}
+\item{callable}{The bound value — any 0-arg callable. Records (named
+lists) are projected as a mini-store; scalars are passed as the bare
+callable.}
+
+\item{...}{One or more \code{\link[=Case]{Case()}} / \code{\link[=Default]{Default()}} values.}
 }
 \value{
 A irid control-flow node.
 }
 \description{
-Evaluates cases in order and renders the content of the first case whose
-condition is \code{TRUE}. Use \code{\link[=Case]{Case()}} to define conditions and \code{\link[=Default]{Default()}} for
-a fallback.
+Evaluates cases in order against a bound value and renders the body of
+the first case whose predicate is \code{TRUE}. Records are projected as a
+mini-store for the active case's body; scalars are passed as the bare
+callable. On active-case change, the previous case is torn down (its
+reactives, DOM, and mini-store) and the new case is mounted fresh.
+}
+\details{
+Use a choice function as the leading callable to fold unrelated reactive
+state into a tagged variant on the fly:
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{Match(\\() if (loading()) list(tag = "loading") else list(tag = "data", x = data()),
+  Case(\\(r) r$tag == "loading", \\() Spinner()),
+  Case(\\(r) r$tag == "data",    \\(r) Items(r$x))
+)
+}\if{html}{\out{</div>}}
+
+Conceptually, \code{\link[=When]{When()}} is a fixed-shape binary specialization of \code{Match}.
 }

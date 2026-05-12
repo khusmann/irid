@@ -4,12 +4,18 @@
 \alias{Case}
 \title{Define a case for \code{\link[=Match]{Match()}}}
 \usage{
-Case(condition, content)
+Case(predicate, body)
 }
 \arguments{
-\item{condition}{A reactive expression that returns a logical value.}
+\item{predicate}{One of: a function \verb{\\(v) cond} of the bound value, a
+function \verb{\\() cond} ignoring the bound value (cross-cutting), or a
+literal value (matched against the bound value via \code{\link[=identical]{identical()}}).}
 
-\item{content}{Tag tree to render when this case matches.}
+\item{body}{A function \verb{\\(v) tag_tree} or \verb{\\() tag_tree} that returns
+the tag tree to render when this case is active. The function is
+called fresh on each case activation — the active case's reactives
+and DOM are torn down on transition, so a tag tree captured outside
+the function would reference dead closures.}
 }
 \value{
 A case definition (a list).

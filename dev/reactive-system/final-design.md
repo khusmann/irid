@@ -9,13 +9,14 @@
 irid's state and rendering model is built on six concepts:
 
 1. **`reactiveStore`** — hierarchical reactive state.
-2. **Auto-bind** — state-binding props (`value`, `checked`, `selected`)
-   accept a callable and automatically two-way bind.
+2. **Auto-bind** — state-binding props (`value`, `checked`) accept a
+   callable and automatically two-way bind.
 3. **`reactiveProxy`** — builds a callable from a reader and optional writer.
    The single mechanism for validation, transforms, side effects, and
    read-only views at component boundaries.
 4. **`Each`** — collection iteration with per-item mini-stores.
-5. **`Switch`** — variant dispatch with mini-store decomposition.
+5. **`Match`** — variant dispatch with mini-store decomposition. Pattern-
+   matching primitive (predicate Cases today, structurally extensible later).
 6. **`.event` config** — element-level timing and transport.
 
 Every piece of state — store branch, store leaf, standalone `reactiveVal`,
@@ -116,7 +117,7 @@ library(purrr)
 
 # Toggle a single item by id
 state$todos(
-  modify_if(state$todos(), \(t) t$id == 1L, \(t) modifyList(t, list(done = TRUE)))
+  modify_if(state$todos(), \(t) t$id == 1L, \(t) { t$done <- TRUE; t })
 )
 
 # Remove an item
@@ -125,6 +126,11 @@ state$todos(keep(state$todos(), \(t) t$id != 2L))
 # Append
 state$todos(c(state$todos(), list(list(id = 3L, text = "New", done = FALSE))))
 ```
+
+(`{ t$done <- TRUE; t }` rather than `modifyList(t, list(done = TRUE))`
+even though both work here — the latter recurses into list-shaped
+fields, so reaching for it as a general pattern bites the moment a
+field is itself a list. See "One-way data flow" under `Each` below.)
 
 Fine-grained per-item reactivity is the responsibility of `Each`, not the store.
 
@@ -154,10 +160,10 @@ state$result()  # list(success = FALSE, reasons = list("Email required"))
 Reads return the record verbatim, with no automatic decomposition. The leaf is
 a single `reactiveVal` — any change fires every observer of the leaf. To get
 fine-grained per-field reactivity *and* shape-dependent rendering, consume the
-leaf with `Switch` in dispatch mode, which projects it as a mini-store over the
-current variant. See **`Switch`** for the consumption mechanics.
+leaf with `Match` in dispatch mode, which projects it as a mini-store over the
+current variant. See **`Match`** for the consumption mechanics.
 
-This is the storage half of the variant pattern. Without `Switch`, the leaf
+This is the storage half of the variant pattern. Without `Match`, the leaf
 behaves as an opaque structured value — useful in its own right when you want
 to treat the record atomically (config blobs, third-party objects), but it
 gives you no decomposition.
@@ -224,20 +230,19 @@ callables — not resolved values — so auto-bind works unchanged.
 
 ## Auto-bind
 
-State-binding props — `value`, `checked`, `selected` — accept a callable and
+State-binding props — `value`, `checked` — accept a callable and
 automatically two-way bind:
 
 ```r
 tags$input(value = field)
 tags$input(type = "checkbox", checked = todo$done)
-tags$select(selected = state$sort)
 ```
 
 ### Detection by arity
 
 A prop auto-binds when:
 
-1. It is a recognized state-binding prop (`value`, `checked`, `selected`), and
+1. It is a recognized state-binding prop (`value`, `checked`), and
 2. Its value is a function.
 
 Auto-bind reads (`f()`) for rendering and writes (`f(value)`) on the
@@ -253,9 +258,8 @@ store leaves are the same; `\() expr()` is effectively read-only with snap-back.
 
 | Prop       | DOM event | Elements              |
 |------------|-----------|-----------------------|
-| `value`    | `input`   | text inputs, textarea |
+| `value`    | `input`   | text inputs, textarea, select, radio |
 | `checked`  | `change`  | checkboxes            |
-| `selected` | `change`  | select, radio         |
 
 Auto-bind always reads and writes through the callable. Write behavior is
 controlled by what the callable does, not by providing competing event handlers.
@@ -467,7 +471,7 @@ RichTextEditor(constrained)
 ## `Each`
 
 Iterates a collection — an unnamed list held in a `reactiveVal`, a `reactive`,
-or an atomic store leaf. Callback receives `(item, index)`.
+or an atomic store leaf. Callback is arity-polymorphic (0, 1, or 2 args).
 
 ```r
 Each(collection, fn, by = NULL)
@@ -503,8 +507,11 @@ Each(state$todos, by = \(t) t$id, \(todo) {
 - `todo$done()`, `todo$text()` — fine-grained reactive reads.
 - `todo()` — reads the full record.
 - `todo(new_record)` — writes the whole item back to the parent.
-- `todo$done(TRUE)` — synthetic setter, internally does
-  `todo(modifyList(todo(), list(done = TRUE)))`.
+- `todo$done(TRUE)` — synthetic setter, internally copies the current
+  record, replaces `done` via `[[<-`, and hands the result to the
+  parent. (Not `modifyList`: it recurses into list-shaped fields, which
+  silently keeps original entries when the new value is shorter or
+  unnamed.)
 
 Auto-bind on mini-store fields uses the synthetic setter: `checked = todo$done`
 reads from the leaf and writes through the parent on user input.
@@ -520,10 +527,25 @@ adds, and removes by their key. Kept items are patched (mini-store leaves
 diffed, only changed fields fire); new items are mounted; removed items are
 destroyed; reordered items have their DOM nodes moved.
 
-### Callback second argument
+### Callback arity
 
-`(item, i)` where `i` is a plain integer for `by = NULL` and the key value
-for `by = fn`.
+The callback is dispatched by formal-argument count — `\() body`,
+`\(item) body`, or `\(item, pos) body`. Drop the args you don't use.
+
+- `item` — per-item callable (mini-store for records, reactive accessor
+  for scalars), as described above.
+- `pos` — **always a 0-arg reactive accessor** returning the item's
+  current 1-indexed slot. Under `by = NULL` it is a constant signal
+  (slot number is the identity, never changes). Under `by = fn` it is
+  live and fires on reorder with the item's new slot.
+
+The always-reactive shape keeps the callback uniform across modes and
+covers patterns like live "Item #3 of 10" numbering, queue-position
+indicators, or alternating row styles that follow reorders. Users who
+need the stable key value in the `by = fn` case read it from the item
+(`item$id()`) or re-apply `by` — a dedicated `key` arg was considered
+and rejected as redundant for the common case where the key is derived
+from the item itself.
 
 ### One-way data flow
 
@@ -535,8 +557,14 @@ parent. The leaf never holds independent state. The reactive graph is acyclic.
 # All three are equivalent — all write through the parent:
 tags$input(type = "checkbox", checked = todo$done)   # auto-bind
 todo$done(TRUE)                                       # synthetic setter
-todo(modifyList(todo(), list(done = TRUE)))            # manual
+todo({ r <- todo(); r$done <- TRUE; r })              # manual
 ```
+
+Avoid `modifyList(todo(), list(done = TRUE))` for the manual form,
+even though it works for scalar fields. `modifyList` recurses when both
+sides of a key are list-shaped, so reaching for it as a general
+"replace this slot" pattern bites the moment a field is itself a list
+(e.g. `options = list(...)`). The explicit `[[<-` is shape-agnostic.
 
 Two-way mini-stores (leaf writes go directly to the leaf then propagate to the
 parent) create circular reactive flow. One-way avoids it: the parent is the
@@ -611,16 +639,16 @@ same one-way mechanism.
 ### Discriminated unions in collections
 
 When *collection items* follow a tagged union — different shapes for different
-variants — use a compound `by` key that includes the discriminator. (For a
-*single* variant-shaped value, store it as an `I()`-leaf and dispatch with
-`Switch` instead — see **`Switch`**. The mechanics below are for collections
+variants — wrap the per-item callable in `Match` and dispatch on shape. (For
+a *single* variant-shaped value, store it as an `I()`-leaf and dispatch with
+`Match` instead — see **`Match`**. The mechanics below are for collections
 only.)
 
 ```r
-Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
+Each(state$questions, by = \(q) q$id, \(question) {
   tags$div(
     # ... common fields ...
-    Switch(question,
+    Match(question,
       Case(\(q) q$qtype == "text",   \(q) TextQuestion(q)),
       Case(\(q) q$qtype == "scale",  \(q) ScaleQuestion(q)),
       Case(\(q) q$qtype == "choice", \(q) ChoiceQuestion(q))
@@ -629,11 +657,15 @@ Each(state$questions, by = \(q) paste0(q$id, "_", q$qtype), \(question) {
 })
 ```
 
-Mini-stores have fixed shape (derived from the item at mount time). The
-compound key ensures a type change is treated as a remove + add rather than
-a patch: the old mini-store (and its DOM) is torn down; a new one of the
-correct shape is mounted. The fixed-shape constraint applies within a variant,
-not across the union.
+A mini-store's leaf keys are derived from the item at mount time, so when a
+variant transition produces a record with different keys, the reconciler
+tears down the entry and rebuilds it with the new shape — same-key shape
+changes are detected per-entry and rebuilt as a remove + add, with a single
+`irid-mutate` carrying the new range plus `order`. A compound `by` key
+(e.g. `\(q) paste0(q$id, "_", q$qtype)`) is still useful when you want the
+type change to read explicitly as "different identity" — the reconciler then
+treats it as a separate item entirely — but it is no longer required for
+shape correctness.
 
 The write path replaces the whole item rather than just updating the
 discriminator field. A `reactiveProxy` on the discriminator handles this,
@@ -658,12 +690,12 @@ sees the old compound key gone and the new one appearing — full teardown and
 fresh mount with the correct shape for the new variant.
 
 Because the component is remounted on type change, each `Case`'s predicate is
-stable for the lifetime of its mini-store — it never flips. `Switch` is still
+stable for the lifetime of its mini-store — it never flips. `Match` is still
 required to evaluate the predicate in a reactive context and to mount the
 correct branch:
 
 ```r
-Switch(question,
+Match(question,
   Case(\(q) q$qtype == "choice", \(q) ChoiceConfig(q))
 )
 # $options is always present here — the mini-store shape guarantees it
@@ -681,7 +713,7 @@ No special case in `Each` — it sees a callable either way.
 
 ---
 
-## `Switch`
+## `Match`
 
 Renders one of several alternatives based on a reactive value. The leading
 callable's value is projected as a mini-store and made available to each
@@ -689,7 +721,7 @@ callable's value is projected as a mini-store and made available to each
 Case's body mounts. Active cases are mounted; inactive cases are destroyed.
 
 ```r
-Switch(state$result,
+Match(state$result,
   Case(\(r) r$success,  \() tags$p("Submitted")),
   Case(\(r) !r$success, \(r) tags$ul(
     Each(r$reasons, \(reason, i) tags$li(\() reason()))
@@ -731,7 +763,7 @@ graph only via the bound value — nothing inside the literal is reactive.
 | `\(v) body` | Function of the bound mini-store / leaf accessor |
 | `\() body` | Function ignoring the binding |
 
-Bodies are functions, not tag trees, because `Switch` uses mount-and-destroy
+Bodies are functions, not tag trees, because `Match` uses mount-and-destroy
 semantics on case transitions: inactive cases are torn down with their
 reactives, and reactivation must construct a fresh instance. There is no tag
 tree to remount — the closures it referenced are gone. The function form is
@@ -744,7 +776,7 @@ short-circuit on external state — a debug override, an auth check, a feature
 flag — alongside record-shape Cases:
 
 ```r
-Switch(state$result,
+Match(state$result,
   Case(\() debug_mode(),  \(r) DebugView(r)),
   Case(\() !auth$ok(),    \() LoginPrompt()),
   Case(\(r) r$success,    \() Submitted()),
@@ -754,7 +786,7 @@ Switch(state$result,
 
 The first two cases match on reactive reads outside `state$result` and
 short-circuit before any record-shape predicate runs. Both `debug_mode()`
-and `auth$ok()` become dependencies of the Switch — flipping either causes
+and `auth$ok()` become dependencies of the Match — flipping either causes
 re-evaluation.
 
 For record dispatch — variants identified by a discriminator field — predicates
@@ -776,7 +808,7 @@ the bare leaf accessor instead of a mini-store. With literal Cases, scalar
 dispatch reads cleanly:
 
 ```r
-Switch(state$theme,
+Match(state$theme,
   Case("dark",  \() DarkUI()),
   Case("light", \() LightUI())
 )
@@ -786,7 +818,7 @@ Bodies are zero-arg here because the literal already selected the variant —
 nothing to bind. Predicate Cases work too when the rule is more than equality:
 
 ```r
-Switch(state$score,
+Match(state$score,
   Case(\(s) s >= 90, \() tags$p("A")),
   Case(\(s) s >= 80, \() tags$p("B")),
   Default(\() tags$p("Try again"))
@@ -800,7 +832,7 @@ a synthesized record. Use a choice function as the leading callable to fold
 unrelated reactive conditions into a tagged variant on the fly:
 
 ```r
-Switch(\() {
+Match(\() {
   if (state$loading()) list(tag = "loading")
   else if (state$error() != "") list(tag = "error", error = state$error())
   else list(tag = "data", items = state$data())
@@ -812,15 +844,39 @@ Switch(\() {
 ```
 
 Two things to note. First, this is the same dispatch-mode machinery — there
-is no separate "predicate mode" in `Switch`. Second, once you've written the
+is no separate "predicate mode" in `Match`. Second, once you've written the
 choice fn you've effectively defined a variant; whenever the synthesized
 record is worth keeping as actual state, lift it to an `I()`-leaf and let the
 store hold it. The choice-fn pattern is the bridge between unstructured
 reactive state and the variant-leaf shape.
 
-A predicate-only mode (a `Switch(...Cases)` form without a leading callable)
+A predicate-only mode (a `Match(...Cases)` form without a leading callable)
 is intentionally absent — the choice-fn pattern covers it more cleanly. Adding
 it later would be a pure additive extension, no breaking change.
+
+---
+
+## `When`
+
+Sugar for binary boolean dispatch. Conceptually a fixed-shape specialization
+of `Match`:
+
+```r
+When(\() cond, \() yes_tree, \() otherwise_tree)
+# ≡ Match(\() cond, Case(TRUE, \() yes_tree), Case(FALSE, \() otherwise_tree))
+```
+
+The third argument is optional; with it omitted, nothing mounts when the
+condition is `FALSE`.
+
+Bodies are **functions returning tag trees**, not tag trees directly — same
+lazy-body rule as `Match` cases. `When` mounts/unmounts the active branch
+on transition, so each activation must construct a fresh tag tree (the
+previous branch's closures were torn down with its reactives).
+
+`When` has no bound-value projection — the condition is just a reactive
+boolean — so bodies are zero-arg only. Reach for `Match` whenever the
+branch needs to consume the dispatching value.
 
 ---
 
@@ -997,13 +1053,14 @@ Not legitimate uses:
 | Single reactive value                | `reactiveVal`                                     |
 | Variant-shaped leaf (storage)        | `I()`-wrapped named list at a leaf position       |
 | Derived state                        | `reactive()`                                      |
-| Two-way DOM binding                  | Auto-bind (`value`, `checked`, `selected`)        |
+| Two-way DOM binding                  | Auto-bind (`value`, `checked`)                    |
 | Write-path control                   | `reactiveProxy`                                   |
 | Sync with outside world              | `observe`                                         |
 | Discrete user actions                | Event callbacks (`onClick`, `onSubmit`, ...)      |
 | Collection iteration (fine-grained)  | `Each` with mini-stores                           |
 | Branch iteration (static shape)      | `lapply(branch, fn)` / `imap(branch, fn)`        |
-| Predicate / variant dispatch         | `Switch` with `Case` / `Default`                   |
+| Predicate / variant dispatch         | `Match` with `Case` / `Default`                   |
+| Binary boolean dispatch              | `When` (sugar for two-branch `Match`)            |
 | Event timing                         | `.event` (element-level config)                   |
 
 ### The common case
@@ -1096,8 +1153,9 @@ RichTextEditor(constrained)  # can't modify, don't need to
 
 ## Open questions
 
-1. ~~**Callback second argument for keyed `Each`.**~~ Resolved: `(item, i)`
-   where `i` is a plain integer for `by = NULL` and the key value for `by = fn`.
+1. ~~**Callback second argument for keyed `Each`.**~~ Resolved: see
+   "Callback arity" — `(item, pos)` with `pos` always a 0-arg reactive
+   accessor for the current 1-indexed slot.
 
 2. ~~**Read-only `Each` on derived reactives.**~~ Resolved: wrap in
    `reactiveProxy(get = ..., set = <error>)` before iterating. No separate primitive needed.
@@ -1107,28 +1165,9 @@ RichTextEditor(constrained)  # can't modify, don't need to
    one-way mechanism so it should compose, but needs prototype validation.
    Concerns: redundant reconcile passes, performance at three or more levels.
 
-4. **Reactive position accessor.** The callback currently receives
-   `(item, i)` where `i` is a plain value — slot number for `by = NULL`, key
-   value for `by = fn`. This leaves no way to read an item's *current*
-   position reactively after reorders. Solid's `For` solves this by passing
-   `index` as a reactive accessor, enabling patterns like live "Item #3 of
-   10" numbering, queue-position indicators, or alternating row styles that
-   follow reorders.
-
-   Proposal: change the callback to `(item, pos)` where `pos` is always a
-   reactive accessor returning the current 1-indexed slot. The reconciler
-   already tracks slot positions to move DOM nodes; exposing that as a signal
-   per mini-store is cheap.
-
-   - `by = NULL`: `pos()` is a constant signal — slot number is the identity,
-     never changes.
-   - `by = fn`: `pos()` is live — fires on reorder with the item's new slot.
-
-   Always-reactive-accessor keeps the callback shape uniform across modes.
-   Users who need the stable key value in the `by = fn` case read it from the
-   item (`item$id()`) or re-apply `by`; a dedicated `key` arg was considered
-   and rejected as redundant for the common case where the key is derived
-   from the item itself.
+4. ~~**Reactive position accessor.**~~ Resolved: adopt `(item, pos)` with
+   `pos` as an always-reactive 0-arg accessor — constant under `by = NULL`,
+   live under `by = fn`. See "Callback arity" above.
 
 5. ~~**`Fields` vs `names()` + `lapply` + `[[`.**~~ Resolved: drop `Fields`.
    `Fields` has no reconciliation machinery and no reactive semantics of its

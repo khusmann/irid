@@ -9,15 +9,29 @@ When(condition, yes, otherwise = NULL)
 \arguments{
 \item{condition}{A reactive expression that returns a logical value.}
 
-\item{yes}{Tag tree to render when the condition is \code{TRUE}.}
+\item{yes}{A 0-arg function returning the tag tree to render when the
+condition is \code{TRUE}.}
 
-\item{otherwise}{Optional tag tree to render when the condition is \code{FALSE}.}
+\item{otherwise}{An optional 0-arg function returning the tag tree to
+render when the condition is \code{FALSE}. With \code{NULL}, nothing mounts on
+the false branch.}
 }
 \value{
 A irid control-flow node.
 }
 \description{
-Renders \code{yes} when \code{condition} is \code{TRUE}, and \code{otherwise} (if provided)
-when it is \code{FALSE}. The active branch is fully mounted and the inactive
-branch is destroyed.
+Renders the \code{yes} branch when \code{condition} is \code{TRUE}, and \code{otherwise}
+(if provided) when it is \code{FALSE}. The active branch is fully mounted
+and the inactive branch is destroyed.
+}
+\details{
+Conceptually a fixed-shape binary specialization of \code{\link[=Match]{Match()}}:
+\verb{When(\\() cond, \\() yes, \\() no)} is equivalent to
+\verb{Match(\\() cond, Case(TRUE, \\() yes), Case(FALSE, \\() no))}.
+
+Bodies are 0-arg functions that return tag trees — not tag trees
+directly. \code{When} mounts and unmounts the active branch on transition,
+so each activation must construct a fresh tag tree (the previous
+branch's closures were torn down with its reactives). Reach for
+\code{\link[=Match]{Match()}} when the branch needs to consume the dispatching value.
 }

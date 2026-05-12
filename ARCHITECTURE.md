@@ -5,11 +5,13 @@
 ```
 R/
   app.R           iridApp, iridOutput, renderIrid
-  primitives.R    When, Each, Index, Match/Case/Default, Output
+  primitives.R    When, Each, Match/Case/Default, Output
   event.R         event_immediate, event_throttle, event_debounce
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
+  mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
+  scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
   irid-package.R Package-level imports
 
@@ -17,13 +19,15 @@ inst/js/
   irid.js        Client-side message handlers (vanilla JS, no build step)
 
 examples/
-  old_faithful.R       Old Faithful geyser histogram with PlotOutput
-  composing.R          Two Counter instances showing closure-based isolation
-  temperature.R        Bidirectional temperature converter (controlled inputs)
-  todo.R               Todo app (Each, Index, When, dynamic lists)
-  optimistic_updates.R Controlled inputs with simulated server latency
-  shiny_interop.R      irid components inside a standard Shiny module
-  cards.R              Dynamic column cards (Each, keyed by column name)
+  old_faithful.R        Old Faithful geyser histogram with PlotOutput
+  composing.R           Two Counter instances showing closure-based isolation
+  temperature.R         Bidirectional temperature converter (controlled inputs)
+  todo.R                Todo app (Each positional, When, dynamic lists)
+  optimistic_updates.R  Controlled inputs with simulated server latency
+  shiny_interop.R       irid components inside a standard Shiny module
+  cards.R               Dynamic column cards (Each, keyed by column name)
+  each_nested.R         Nested Each + recursive mini-store fields
+  each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
 ```
 
 ## Design Principles
@@ -55,7 +59,7 @@ Walks the tag tree recursively and produces:
   one entry per `(id, DOM event)`. Auto-bind synthetic and explicit `on*`
   on the same DOM event are merged into one composed handler.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
-  `Index`, or `Match` node.
+  or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
 
 When a state-binding prop (`value`, `checked`) holds a callable, process_tags
@@ -112,38 +116,99 @@ down all observers).
 
 ## Control Flow Lifecycle
 
-**When** and **Match** each manage a single `current_mount` — a mount handle from
-a recursive `irid_mount_processed` call. Both short-circuit: the observer
-re-evaluates the condition on every reactive invalidation but only destroys and
-recreates the branch when the active branch actually changes. This is critical
-when wrapping `Each` or `Index` — without the short-circuit, any change to a
-reactive dependency shared with the condition would destroy the inner mount and
-lose per-item state. Match iterates cases to find the first truthy condition.
+**When** and **Match** each manage a single `current_mount` — a mount handle
+from a recursive `irid_mount_processed` call. Both short-circuit: the observer
+re-evaluates on every reactive invalidation but only destroys and recreates the
+branch when the active branch actually changes. This is critical when wrapping
+`Each` — without the short-circuit, any change to a reactive dependency shared
+with the condition would destroy the inner mount and lose per-item state.
 
-**Each** and **Index** manage per-item mount handles and use `irid-mutate` for
-granular DOM mutations. Each item/slot is bracketed by its own pair of comment
-anchors so the client can insert, remove, and reorder individual children.
+**When** is the binary specialization: `condition` is a reactive boolean,
+`yes` and `otherwise` are 0-arg functions that return a tag tree. Bodies are
+called fresh on each activation (the previous branch's closures were torn
+down with its reactives, so a captured tag tree would reference dead state).
 
-The two primitives are symmetric: **Each** keys by identity (item is stable,
-index moves), **Index** keys by position (index is stable, item moves).
+**Match** dispatches on a leading callable's value. The `Match` observer reads
+`callable()`, walks each `Case`'s predicate (1-arg of the bound value or
+0-arg cross-cutting; literal predicates are normalised to
+`\(v) identical(v, literal)`), and picks the first truthy one. On
+active-case change, the previous mount and the per-case `scope` are
+destroyed; a fresh `scope` is created; if the bound value is a record
+(`is_record()`), it is projected as a mini-store (`make_mini_store()`)
+and passed to the case body, otherwise the bare callable is passed; the body
+function is called and the result is mounted. Same-case value changes do not
+remount — the active mini-store's internal observer auto-propagates value
+changes to its leaves so only the bindings whose field actually changed
+re-fire.
 
-**Each** — Like Solid's `For`. The callback receives each item as a **plain
-value** and an optional index: `fn(item)` or `fn(item, i)` where `i` is a
-`reactiveVal` that tracks the item's current position (updated on reorder). The
-`by` argument extracts a comparable key from each item (defaults to `identity`,
-must be unique). On list change, keys are diffed: kept items have their DOM nodes
-reordered (no recreation), new items are mounted, removed items are destroyed.
+**Each** manages per-item mount handles and uses `irid-mutate` for granular DOM
+mutations. Each item is bracketed by its own pair of comment anchors so the
+client can insert, remove, and reorder individual children. The callback
+receives a per-item callable plus an optional position accessor:
 
-**Index** — Like Solid's `Index`. The callback receives each item as a
-**reactive accessor** (`reactiveVal`) and an optional index: `fn(item)` or
-`fn(item, i)` where `i` is a fixed integer. If the length is stable, each slot's
-`reactiveVal` is updated in place so existing observers fire with the new values
-without DOM recreation. When the list grows, new slots are appended; when it
-shrinks, trailing slots are destroyed.
+- **Record items** → per-item mini-store (`make_mini_store()`). `item()` reads the
+  whole record; `item(record)` writes it back; `item$field()` reads a leaf;
+  `item$field(v)` is a synthetic setter that writes through the parent
+  collection. Data flows one direction: parent → mini-store leaves → DOM,
+  with synthetic setters routing writes back up. The reactive graph is
+  acyclic — leaves never hold independent state.
+- **Scalar items** → per-item scalar slot accessor (`make_slot_accessor()`)
+  (a `reactiveProxy` over an internal `reactiveVal`). `item()` reads;
+  `item(v)` writes back to the parent's slot.
+
+Accessor type is decided per-entry from the item's current value, so
+heterogeneous lists work — a slot holding a record gets a mini-store
+while its sibling holding a scalar gets a scalar accessor. Wrap the
+per-item callable in `Match` to dispatch on shape inside the callback.
+When a slot's value transitions between shapes (scalar↔record, or a
+record's keys change), the outer reconciler treats it as a remove +
+rebuild of just that entry — a fresh scope, accessor, and DOM range —
+emitted as a single `irid-mutate` with `order` so the client repositions
+the rebuilt range.
+
+The reconciliation strategy is selected by `by`:
+
+- **Positional** (`by = NULL`, the default) — slot *i* is slot *i*. The list
+  can grow or shrink at the end; in-place value changes propagate via each
+  slot accessor's internal observer (no DOM work). Same-length value changes
+  fire only the slots whose value actually changed. A surviving slot whose
+  shape changed is rebuilt in place.
+- **Keyed** (`by = fn`) — items are tracked across reorders, adds, and
+  removes by their `by(item)` key. Kept items have their existing
+  mini-store / accessor reused (no remount, no new scope) and self-update
+  via the propagating observer; new items are mounted; removed items are
+  destroyed; reordered items have their DOM nodes moved via `irid-mutate`'s
+  `order` mechanism. A kept key whose value's shape changed is rebuilt.
+
+The callback is arity-polymorphic — `\() body`, `\(item) body`, or
+`\(item, pos) body`. `pos` is always a 0-arg reactive accessor for the
+item's current 1-indexed slot: a constant signal under `by = NULL` (slot
+number is the identity), live under `by = fn` (fires on reorder).
+
+Each per-item / per-case mount creates its own `scope` (see
+`make_scope()`) to bound the lifetime of the per-item / per-case
+reactives and observers. Today the scope is a thin manual observer
+tracker; once [shiny#4372](https://github.com/rstudio/shiny/pull/4372)
+merges, `make_scope` becomes a one-line wrapper around
+`session$makeSubdomain()` and the auto-destroy registry handles teardown.
+Every site that depends on the shim is tagged `# shiny#4372:` so the
+post-merge swap is mechanical.
+
+**Known limitation — reactive-leak until shiny#4372 lands.** `scope$destroy()`
+tears down the observers it tracks, but cannot tear down the `reactiveVal`s
+held inside mini-store leaves and slot accessors — Shiny exposes no public
+API for destroying a `reactiveVal`. Each unmounted `Each` item and each
+unmounted `Match` case leaves its leaves behind in the session's reactive
+graph. For short-lived sessions this is harmless; for long-lived sessions
+that churn list contents (e.g. a dashboard where rows are added/removed
+continuously), the leaked leaves accumulate and grow session memory. The
+leak is bounded per-session — it resets when the session ends — but apps in
+that shape should monitor session lifetime until shiny#4372 lands and the
+subdomain cascade reclaims the leaves.
 
 ## Comment-Anchor Range Protocol
 
-Control-flow containers and `Each`/`Index` items are represented in the DOM as
+Control-flow containers and `Each` items are represented in the DOM as
 pairs of HTML comment markers rather than wrapper elements. This keeps them
 valid children of any parent — including restricted-content elements like
 `<select>`, `<table>`, `<tbody>`, and `<ul>` — where a wrapper `<div>` would
@@ -213,8 +278,8 @@ to initialize any Shiny outputs in the new content.
 ```
 
 Performs granular range mutations between the container's anchors. Used by
-`Each` and `Index` instead of `irid-swap` to avoid destroying and recreating
-all children on every list change.
+`Each` instead of `irid-swap` to avoid destroying and recreating all
+children on every list change.
 
 1. **Removes** — For each child ID, looks up its anchor pair and moves the
    entire `[start..end]` range into a detached fragment (unbinding elements

@@ -58,7 +58,11 @@ App <- function() {
         selected_columns(character(0))
         choice("")
       },
-      Each(\() names(all_datasets), \(name) tags$option(value = name, name))
+      Each(
+        \() names(all_datasets),
+        \(name) tags$option(value = name, name),
+        by = identity
+      )
     ),
 
     tags$label(class = "form-label", "Add a column:"),
@@ -72,16 +76,16 @@ App <- function() {
         }
       },
       tags$option(value = "", "Select a column..."),
-      Each(available, \(col) tags$option(value = col, col))
+      Each(available, \(col) tags$option(value = col, col), by = identity)
     ),
 
     Each(selected_columns, \(col) {
       Card(
         col,
-        col_class = \() class(dataset()[[col]])[1],
-        on_close = \() selected_columns(setdiff(selected_columns(), col))
+        col_class = \() class(dataset()[[col()]])[1],
+        on_close = \() selected_columns(setdiff(selected_columns(), col()))
       )
-    })
+    }, by = identity)
   )
 }
 

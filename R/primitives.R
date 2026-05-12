@@ -2,16 +2,44 @@
 
 #' Conditionally render content
 #'
-#' Renders `yes` when `condition` is `TRUE`, and `otherwise` (if provided)
-#' when it is `FALSE`. The active branch is fully mounted and the inactive
-#' branch is destroyed.
+#' Renders the `yes` branch when `condition` is `TRUE`, and `otherwise`
+#' (if provided) when it is `FALSE`. The active branch is fully mounted
+#' and the inactive branch is destroyed.
+#'
+#' Conceptually a fixed-shape binary specialization of [Match()]:
+#' `When(\() cond, \() yes, \() no)` is equivalent to
+#' `Match(\() cond, Case(TRUE, \() yes), Case(FALSE, \() no))`.
+#'
+#' Bodies are 0-arg functions that return tag trees — not tag trees
+#' directly. `When` mounts and unmounts the active branch on transition,
+#' so each activation must construct a fresh tag tree (the previous
+#' branch's closures were torn down with its reactives). Reach for
+#' [Match()] when the branch needs to consume the dispatching value.
 #'
 #' @param condition A reactive expression that returns a logical value.
-#' @param yes Tag tree to render when the condition is `TRUE`.
-#' @param otherwise Optional tag tree to render when the condition is `FALSE`.
+#' @param yes A 0-arg function returning the tag tree to render when the
+#'   condition is `TRUE`.
+#' @param otherwise An optional 0-arg function returning the tag tree to
+#'   render when the condition is `FALSE`. With `NULL`, nothing mounts on
+#'   the false branch.
 #' @return A irid control-flow node.
 #' @export
 When <- function(condition, yes, otherwise = NULL) {
+  if (!is.function(yes)) {
+    stop(
+      "`yes` must be a 0-arg function returning a tag tree ",
+      "(e.g. `\\() tags$div(...)`); got ",
+      paste(class(yes), collapse = "/"),
+      call. = FALSE
+    )
+  }
+  if (!is.null(otherwise) && !is.function(otherwise)) {
+    stop(
+      "`otherwise` must be a 0-arg function returning a tag tree or NULL; ",
+      "got ", paste(class(otherwise), collapse = "/"),
+      call. = FALSE
+    )
+  }
   structure(
     list(condition = condition, yes = yes, otherwise = otherwise),
     class = "irid_when"
@@ -20,44 +48,74 @@ When <- function(condition, yes, otherwise = NULL) {
 
 # -- List rendering -------------------------------------------------------
 
-#' Render a list by recreating all items
+#' Render a reactive list
 #'
-#' Iterates over a reactive list and calls `fn` for each item. When the list
-#' changes, all items are destroyed and recreated. For a version that updates
-#' items in place, see [Index()].
+#' Iterates over a reactive list and calls `fn` for each item. The
+#' callback receives a per-item callable (a mini-store for record items,
+#' a scalar accessor for atomic items) and an optional position
+#' accessor. The reconciliation strategy is selected by `by`:
+#'
+#' - **Positional** (`by = NULL`, the default) — slot *i* is slot *i*.
+#'   The list can grow or shrink at the end; in-place value changes
+#'   update each slot's accessor without DOM recreation.
+#' - **Keyed** (`by = \(x) x$id`) — items are tracked across reorders,
+#'   adds, and removes by their key. Kept items have their mini-store
+#'   patched (only changed leaves fire); reordered items have their
+#'   DOM nodes moved (no recreation).
+#'
+#' Records are projected as a per-item mini-store: `item()` reads the
+#' whole record, `item(record)` writes it back, `item$field()` reads a
+#' leaf, and `item$field(v)` is a synthetic setter that writes through
+#' the parent. Scalars are passed as a per-item callable: `item()` reads,
+#' `item(value)` writes back to the parent's slot.
+#'
+#' Records may be heterogeneous in shape — different leaf trees per
+#' entry. Each slot's mini-store is sized to its own item, and a
+#' [Match()] inside the body dispatches on the discriminator:
+#'
+#' ```r
+#' Each(state$blocks, by = \(b) b$id, \(block) {
+#'   Match(block,
+#'     Case(\(b) b$type == "heading",   \(b) Heading(b)),
+#'     Case(\(b) b$type == "paragraph", \(b) Paragraph(b)),
+#'     Case(\(b) b$type == "todo",      \(b) Todo(b))
+#'   )
+#' })
+#' ```
+#'
+#' When a record's shape changes (different key set, or a sub-record's
+#' shape shifts), that one entry is torn down and rebuilt with the new
+#' mini-store. Shape-stable updates use the fine-grained in-place path.
+#'
+#' Mixing records and scalars in the same list is rejected at flush
+#' time as a likely data-modeling slip — wrap scalars in
+#' `list(value = ...)` to mix them.
 #'
 #' @param items A reactive expression that returns a list.
-#' @param fn A function of `(item)` or `(item, index)` where `item` is the
-#'   plain item value and `index` is a [shiny::reactiveVal()] that tracks the
-#'   item's current position (updated on reorder). Should return a tag tree.
-#' @param by A function that extracts a comparable key from each item, used
-#'   for keyed reordering. Keys must be unique. Defaults to [identity()].
+#' @param fn A function of `(item)`, `(item, pos)`, or `()`. `item` is
+#'   the per-item callable (mini-store or scalar accessor); `pos` is a
+#'   0-arg reactive accessor returning the item's current 1-indexed
+#'   slot. `pos` is constant under `by = NULL` (positional identity)
+#'   and live under `by = fn` (fires on reorder).
+#' @param by `NULL` for positional reconciliation, or a function that
+#'   extracts a unique comparable key from each item for keyed
+#'   reconciliation.
 #' @return A irid control-flow node.
 #' @export
-Each <- function(items, fn, by = identity) {
+Each <- function(items, fn, by = NULL) {
+  if (!is.function(items)) {
+    stop("`items` must be a callable (e.g. `reactiveVal`, `\\() ...`)",
+         call. = FALSE)
+  }
+  if (!is.function(fn)) {
+    stop("`fn` must be a function", call. = FALSE)
+  }
+  if (!is.null(by) && !is.function(by)) {
+    stop("`by` must be NULL or a function", call. = FALSE)
+  }
   structure(
     list(items = items, by = by, fn = fn),
     class = "irid_each"
-  )
-}
-
-#' Render a list with positional updates
-#'
-#' Like [Each()], but when list values change without a length change, each
-#' slot's reactive value is updated in place rather than recreating the DOM.
-#' When the list grows, new slots are appended; when it shrinks, trailing
-#' slots are destroyed.
-#'
-#' @param items A reactive expression that returns a list.
-#' @param fn A function of `(item)` or `(item, index)` where `item` is a
-#'   [shiny::reactiveVal()] for the item at that position and `index` is its
-#'   fixed position (plain integer). Should return a tag tree.
-#' @return A irid control-flow node.
-#' @export
-Index <- function(items, fn) {
-  structure(
-    list(items = items, fn = fn),
-    class = "irid_index"
   )
 }
 
@@ -65,41 +123,93 @@ Index <- function(items, fn) {
 
 #' Define a case for [Match()]
 #'
-#' @param condition A reactive expression that returns a logical value.
-#' @param content Tag tree to render when this case matches.
+#' @param predicate One of: a function `\(v) cond` of the bound value, a
+#'   function `\() cond` ignoring the bound value (cross-cutting), or a
+#'   literal value (matched against the bound value via [identical()]).
+#' @param body A function `\(v) tag_tree` or `\() tag_tree` that returns
+#'   the tag tree to render when this case is active. The function is
+#'   called fresh on each case activation — the active case's reactives
+#'   and DOM are torn down on transition, so a tag tree captured outside
+#'   the function would reference dead closures.
 #' @return A case definition (a list).
 #' @export
-Case <- function(condition, content) {
-  list(condition = condition, content = content)
+Case <- function(predicate, body) {
+  if (!is.function(body)) {
+    stop(
+      "`body` must be a function returning a tag tree (e.g. `\\() tags$div(...)`); ",
+      "got ", paste(class(body), collapse = "/"),
+      call. = FALSE
+    )
+  }
+  list(predicate = predicate, body = body)
 }
 
 #' Define a default (fallback) case for [Match()]
 #'
-#' A convenience wrapper around [Case()] with a condition that is always
-#' `TRUE`. Place this as the last argument to `Match`.
+#' Sugar for `Case(\() TRUE, body)` — matches when no earlier `Case` does.
+#' Place this as the last argument to `Match`.
 #'
-#' @param content Tag tree to render when no other case matches.
+#' @param body A function returning the tag tree to render when no other
+#'   case matches. Same arity rules as [Case()] body.
 #' @return A case definition (a list).
 #' @export
-Default <- function(content) {
-  list(condition = function() TRUE, content = content)
+Default <- function(body) {
+  Case(function() TRUE, body)
 }
 
 #' Render the first matching case
 #'
-#' Evaluates cases in order and renders the content of the first case whose
-#' condition is `TRUE`. Use [Case()] to define conditions and [Default()] for
-#' a fallback.
+#' Evaluates cases in order against a bound value and renders the body of
+#' the first case whose predicate is `TRUE`. Records are projected as a
+#' mini-store for the active case's body; scalars are passed as the bare
+#' callable. On active-case change, the previous case is torn down (its
+#' reactives, DOM, and mini-store) and the new case is mounted fresh.
 #'
-#' @param ... One or more [Case()] or [Default()] values.
+#' Use a choice function as the leading callable to fold unrelated reactive
+#' state into a tagged variant on the fly:
+#'
+#' ```r
+#' Match(\() if (loading()) list(tag = "loading") else list(tag = "data", x = data()),
+#'   Case(\(r) r$tag == "loading", \() Spinner()),
+#'   Case(\(r) r$tag == "data",    \(r) Items(r$x))
+#' )
+#' ```
+#'
+#' Conceptually, [When()] is a fixed-shape binary specialization of `Match`.
+#'
+#' @param callable The bound value — any 0-arg callable. Records (named
+#'   lists) are projected as a mini-store; scalars are passed as the bare
+#'   callable.
+#' @param ... One or more [Case()] / [Default()] values.
 #' @return A irid control-flow node.
 #' @export
-Match <- function(...) {
-  cases <- list(...)
+Match <- function(callable, ...) {
+  if (!is.function(callable)) {
+    stop(
+      "`Match` requires a leading callable (a `reactiveVal`, `reactive`, ",
+      "store leaf, mini-store, or `\\() ...` closure); got ",
+      paste(class(callable), collapse = "/"),
+      call. = FALSE
+    )
+  }
+  cases <- lapply(list(...), normalize_match_case)
   structure(
-    list(cases = cases),
+    list(callable = callable, cases = cases),
     class = "irid_match"
   )
+}
+
+# Normalises a Case's predicate into a function. Literals become equality
+# matches via `identical`. Function-shaped predicates are stored as-is and
+# their arity is read at dispatch time (0-arg → cross-cutting,
+# 1-arg → predicate of bound value).
+normalize_match_case <- function(case) {
+  pred <- case$predicate
+  if (!is.function(pred)) {
+    literal <- pred
+    pred <- function(v) identical(v, literal)
+  }
+  list(predicate = pred, body = case$body)
 }
 
 # -- Shiny output wrapper -------------------------------------------------
