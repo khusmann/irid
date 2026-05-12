@@ -59,9 +59,9 @@ When <- function(condition, yes, otherwise = NULL) {
 #'   The list can grow or shrink at the end; in-place value changes
 #'   update each slot's accessor without DOM recreation.
 #' - **Keyed** (`by = \(x) x$id`) — items are tracked across reorders,
-#'   adds, and removes by their key. Kept items have their mini-store
-#'   patched (only changed leaves fire); reordered items have their
-#'   DOM nodes moved (no recreation).
+#'   adds, and removes by their key. Kept items propagate new values
+#'   through their mini-store (only changed leaves fire); reordered
+#'   items have their DOM nodes moved (no recreation).
 #'
 #' Records are projected as a per-item mini-store: `item()` reads the
 #' whole record, `item(record)` writes it back, `item$field()` reads a

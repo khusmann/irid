@@ -64,11 +64,11 @@ test_that("proxy over a store leaf reads and writes through it", {
   expect_equal(shiny::isolate(state$name()), "Bob")
 })
 
-test_that("proxy over a store node reads a snapshot and patches on write", {
+test_that("proxy over a store node reads a snapshot and writes back", {
   state <- reactiveStore(list(user = list(name = "Alice", age = 30)))
   p <- reactiveProxy(get = state$user, set = state$user)
   expect_equal(shiny::isolate(p()), list(name = "Alice", age = 30))
-  p(list(name = "Bob"))
+  p(list(name = "Bob", age = 30))
   expect_equal(shiny::isolate(state$user$name()), "Bob")
   expect_equal(shiny::isolate(state$user$age()), 30)
 })

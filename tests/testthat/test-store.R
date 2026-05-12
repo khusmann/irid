@@ -96,33 +96,51 @@ test_that("root read returns full nested shape", {
   expect_equal(shiny::isolate(state()), init)
 })
 
-# --- Branch write patches -----------------------------------------------------
+# --- Branch write replaces ----------------------------------------------------
 
-test_that("branch write updates only specified keys", {
+test_that("branch write replaces every key", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
-  state$user(list(name = "Bob"))
+  state$user(list(name = "Bob", email = "B"))
   expect_equal(
     shiny::isolate(state$user()),
     list(name = "Bob", email = "B")
   )
 })
 
-test_that("root patch leaves sibling branches untouched", {
+test_that("branch write with missing keys errors", {
+  state <- reactiveStore(list(user = list(name = "A", email = "B")))
+  expect_error(
+    state$user(list(name = "Bob")),
+    "[Mm]issing.*'user'.*email"
+  )
+})
+
+test_that("root write with missing keys errors", {
   state <- reactiveStore(list(
     user = list(name = "A"),
     todos = list(list(id = 1))
   ))
-  state(list(user = list(name = "Eve")))
+  expect_error(
+    state(list(user = list(name = "Eve"))),
+    "[Mm]issing.*root.*todos"
+  )
+})
+
+test_that("per-field write leaves sibling leaves untouched", {
+  state <- reactiveStore(list(
+    user = list(name = "A"),
+    todos = list(list(id = 1))
+  ))
+  state$user(list(name = "Eve"))
   expect_equal(shiny::isolate(state$user$name()), "Eve")
   expect_equal(shiny::isolate(state$todos()), list(list(id = 1)))
 })
 
-test_that("empty patch is a no-op", {
+test_that("empty list write errors (every key missing)", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
-  state$user(list())
-  expect_equal(
-    shiny::isolate(state$user()),
-    list(name = "A", email = "B")
+  expect_error(
+    state$user(list()),
+    "[Mm]issing.*'user'.*name.*email"
   )
 })
 
@@ -205,12 +223,12 @@ test_that("observer reading a list leaf fires on write", {
   obs$destroy()
 })
 
-test_that("deep root patch replaces list leaf wholesale", {
+test_that("per-field write replaces a list leaf wholesale", {
   state <- reactiveStore(list(
     user = list(name = "A"),
     todos = list(list(id = 1), list(id = 2))
   ))
-  state(list(todos = list(list(id = 9))))
+  state$todos(list(list(id = 9)))
   expect_equal(shiny::isolate(state$todos()), list(list(id = 9)))
   expect_equal(shiny::isolate(state$user$name()), "A")
 })
@@ -250,10 +268,10 @@ test_that("classed list leaf accepts arbitrary replacement (types not enforced)"
   expect_equal(shiny::isolate(state$df()), "not a df anymore")
 })
 
-test_that("nested classed list leaf survives a branch patch", {
+test_that("classed list leaf is replaceable via per-field write", {
   state <- reactiveStore(list(view = list(df = data.frame(x = 1:3), n = 1L)))
   new_df <- data.frame(x = 10:12)
-  state$view(list(df = new_df))
+  state$view$df(new_df)
   expect_equal(shiny::isolate(state$view$df()), new_df)
   expect_equal(shiny::isolate(state$view$n()), 1L)
 })
@@ -269,7 +287,7 @@ test_that("repeated $ access returns the same leaf (identity stable)", {
 test_that("captured leaf reference still works after a branch write", {
   state <- reactiveStore(list(user = list(name = "A", email = "B")))
   node <- state$user$name
-  state$user(list(name = "Z"))
+  state$user(list(name = "Z", email = "B"))
   expect_equal(shiny::isolate(node()), "Z")
   node("Q")
   expect_equal(shiny::isolate(state$user$name()), "Q")
