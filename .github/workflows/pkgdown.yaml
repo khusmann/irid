@@ -58,11 +58,32 @@ jobs:
           stopifnot(requireNamespace("shinylive", quietly = TRUE))
         shell: Rscript {0}
 
+      # TODO: Restore `uses: r-wasm/actions/build-rwasm@v2` once the upstream
+      # pkgcache `res_one_row_df` bug is fixed. `rwasm::add_pkg()` goes through
+      # `pkgdepends::resolve()`, which currently blows up on every package.
+      # Workaround: build a source tarball ourselves and call rwasm's internal
+      # `wasm_build()` directly — same path r-universe takes for its wasm
+      # builds, bypassing pkgdepends entirely.
+      # See https://github.com/khusmann/irid/issues/6
       - name: Build irid Wasm binary
-        uses: r-wasm/actions/build-rwasm@v2
-        with:
-          packages: "local::."
-          repo-path: "_rwasm"
+        run: |
+          docker run --rm -i \
+            -v "$(pwd):/github/workspace" \
+            --workdir /github/workspace \
+            -e GITHUB_PAT \
+            ghcr.io/r-wasm/webr:main \
+            Rscript - <<'EOF'
+          options(repos = c(CRAN = "https://cloud.r-project.org"))
+          install.packages(c("pak", "pkgbuild"))
+          pak::pak("r-wasm/rwasm")
+
+          tarball <- pkgbuild::build(".", dest_path = tempdir(), vignettes = FALSE)
+
+          r_short <- gsub("\\.[^.]+$", "", as.character(getRversion()))
+          contrib_bin <- file.path("_rwasm", "bin", "emscripten", "contrib", r_short)
+          dir.create(contrib_bin, recursive = TRUE, showWarnings = FALSE)
+          rwasm:::wasm_build("irid", tarball, contrib_bin, compress = FALSE)
+          EOF
 
       - name: Export shinylive apps
         run: |
