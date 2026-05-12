@@ -134,7 +134,7 @@ down with its reactives, so a captured tag tree would reference dead state).
 `\(v) identical(v, literal)`), and picks the first truthy one. On
 active-case change, the previous mount and the per-case `scope` are
 destroyed; a fresh `scope` is created; if the bound value is a record
-([is_record][make_mini_store]), it is projected as a [mini-store][make_mini_store]
+(`is_record()`), it is projected as a mini-store (`make_mini_store()`)
 and passed to the case body, otherwise the bare callable is passed; the body
 function is called and the result is mounted. Same-case value changes do not
 remount — the active mini-store's internal observer auto-propagates value
@@ -146,13 +146,13 @@ mutations. Each item is bracketed by its own pair of comment anchors so the
 client can insert, remove, and reorder individual children. The callback
 receives a per-item callable plus an optional position accessor:
 
-- **Record items** → per-item [mini-store][make_mini_store]. `item()` reads the
+- **Record items** → per-item mini-store (`make_mini_store()`). `item()` reads the
   whole record; `item(record)` writes it back; `item$field()` reads a leaf;
   `item$field(v)` is a synthetic setter that writes through the parent
   collection. Data flows one direction: parent → mini-store leaves → DOM,
   with synthetic setters routing writes back up. The reactive graph is
   acyclic — leaves never hold independent state.
-- **Scalar items** → per-item [scalar slot accessor][make_slot_accessor]
+- **Scalar items** → per-item scalar slot accessor (`make_slot_accessor()`)
   (a `reactiveProxy` over an internal `reactiveVal`). `item()` reads;
   `item(v)` writes back to the parent's slot.
 
@@ -186,7 +186,7 @@ item's current 1-indexed slot: a constant signal under `by = NULL` (slot
 number is the identity), live under `by = fn` (fires on reorder).
 
 Each per-item / per-case mount creates its own `scope` (see
-[make_scope][make_scope]) to bound the lifetime of the per-item / per-case
+`make_scope()`) to bound the lifetime of the per-item / per-case
 reactives and observers. Today the scope is a thin manual observer
 tracker; once [shiny#4372](https://github.com/rstudio/shiny/pull/4372)
 merges, `make_scope` becomes a one-line wrapper around

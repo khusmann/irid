@@ -20,12 +20,12 @@ TodoItem <- function(todo, on_toggle, on_remove) {
     tags$input(
       type = "checkbox",
       class = "form-check-input mt-0",
-      checked = \() todo()$done,
+      checked = todo$done,
       onClick = \() on_toggle()
     ),
     tags$span(
-      class = \() if (todo()$done) "flex-grow-1 text-decoration-line-through text-muted" else "flex-grow-1",
-      \() todo()$text
+      class = \() if (todo$done()) "flex-grow-1 text-decoration-line-through text-muted" else "flex-grow-1",
+      \() todo$text()
     ),
     tags$button(
       class = "btn btn-sm btn-outline-danger",
@@ -139,8 +139,8 @@ TodoApp <- function() {
             Each(filtered, \(todo) {
               TodoItem(
                 todo,
-                on_toggle = \() toggle_todo(todo()$id),
-                on_remove = \() remove_todo(todo()$id)
+                on_toggle = \() toggle_todo(shiny::isolate(todo$id())),
+                on_remove = \() remove_todo(shiny::isolate(todo$id()))
               )
             })
           ),
