@@ -337,11 +337,18 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     }
 
     if (is.function(node) && is_irid_reactive(node)) {
+      # Reactive text child → comment-anchor pair, not a `<span>` wrapper.
+      # A wrapper element would be silently stripped by the HTML parser
+      # inside restricted-content parents (`<option>`, `<textarea>`, etc.),
+      # which use insertion modes that drop unrecognised start tags. Comment
+      # nodes are valid children of any element, so the same shape works
+      # everywhere. The binding's `irid:text` attr tells mount to send an
+      # `irid-text` message that replaces the range with a single text node.
       id <- next_id()
       bindings[[length(bindings) + 1L]] <<- list(
-        id = id, attr = "textContent", fn = node
+        id = id, attr = "irid:text", fn = node
       )
-      return(tags$span(id = id))
+      return(anchor_pair(id))
     }
 
     if (is.list(node) && !inherits(node, "shiny.tag") &&

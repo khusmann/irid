@@ -113,15 +113,24 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # so this mount's bindings fire after all control-flow content has been
   # inserted. Priority decreases with depth so deeper bindings fire before
   # shallower ones — see the function-level docs for the motivating case.
+  #
+  # `irid:text` bindings target a comment-anchor pair rather than an
+  # element id, so they go out via `irid-text` (text-only range replace);
+  # everything else is a real DOM attribute / property write via
+  # `irid-attr`.
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      msg <- list(id = b$id, attr = b$attr, value = val)
-      seq_info <- session$userData$irid_current_sequence
-      if (!is.null(seq_info) && seq_info$source == b$id) {
-        msg$sequence <- seq_info$seq
+      if (identical(b$attr, "irid:text")) {
+        session$sendCustomMessage("irid-text", list(id = b$id, value = val))
+      } else {
+        msg <- list(id = b$id, attr = b$attr, value = val)
+        seq_info <- session$userData$irid_current_sequence
+        if (!is.null(seq_info) && seq_info$source == b$id) {
+          msg$sequence <- seq_info$seq
+        }
+        session$sendCustomMessage("irid-attr", msg)
       }
-      session$sendCustomMessage("irid-attr", msg)
     }, priority = binding_priority)
     observers[[length(observers) + 1L]] <<- obs
   })

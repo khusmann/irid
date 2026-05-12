@@ -176,6 +176,27 @@
     }
   });
 
+  // Replace the content between an anchor pair with a single text node.
+  // Used for reactive text children: process_tags emits a comment-anchor
+  // pair (valid inside `<option>`, `<textarea>`, and other restricted
+  // parents where a `<span>` wrapper would be stripped by the parser).
+  Shiny.addCustomMessageHandler('irid-text', function(msg) {
+    var a = lookupAnchors(msg.id);
+    if (!a) return;
+    var parent = a.start.parentNode;
+    var n = a.start.nextSibling;
+    while (n && n !== a.end) {
+      var next = n.nextSibling;
+      if (n.nodeType === 1) Shiny.unbindAll(n);
+      parent.removeChild(n);
+      n = next;
+    }
+    var val = msg.value;
+    if (val !== null && val !== undefined && val !== '') {
+      parent.insertBefore(document.createTextNode(String(val)), a.end);
+    }
+  });
+
   Shiny.addCustomMessageHandler('irid-swap', function(msg) {
     var a = lookupAnchors(msg.id);
     if (!a) return;
