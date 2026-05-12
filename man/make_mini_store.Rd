@@ -12,7 +12,7 @@ record (a fully named list).}
 
 \item{set_record}{A 1-arg function called with the new record on
 whole-record write or after a per-field synthetic setter has built
-the patched record.}
+the complete record.}
 
 \item{scope}{A scope from \code{\link[=make_scope]{make_scope()}}. The propagating observer is
 created against \code{scope$session} and registered for cleanup so
@@ -37,13 +37,14 @@ project fine-grained leaf reactivity out of a coarse-grained parent.
 
 Recursive — nested named lists in the initial record become sub-mini-stores
 (so \code{mini$user$name(v)} writes through the same chain as
-\verb{mini$user(<patched-user>)} would).
+\verb{mini$user(<full-user>)} would).
 Each level threads a sub-\code{get}/\code{set} pair down the tree; writes at any
 depth fan out through the chain of synthetic setters until they reach
 the user-supplied \code{set_record}. Shape uses the same shared
 branch-vs-leaf rules as \code{\link[=reactiveStore]{reactiveStore()}} (\code{is_branch}, \code{is_bare_list},
 \code{strip_asis} are reused), and the same recursive \code{\link[=validate_write]{validate_write()}}
-enforces "no unknown keys" at every level on whole-record writes.
+enforces "no unknown keys, no missing keys" at every level on
+whole-record writes.
 
 \strong{Shape is strict.} Writes are validated against the keys captured
 at construction — same contract as a \code{\link[=reactiveStore]{reactiveStore()}} branch.
@@ -53,13 +54,14 @@ collection} directly (e.g. for \code{Each(items, ...)}, write the new
 observes the parent change and rebuilds this mini-store with a
 fresh leaf tree of the new shape on the same flush.
 
-\strong{Patches like \code{\link[=reactiveStore]{reactiveStore()}}.} A branch write merges with the
-current record — omitted keys keep their values. The merged record
-is what reaches \code{set_record}, so the parent collection always sees
-complete records and the projection's read view never disagrees
-with the parent. Dropping a field from the parent is a parent-level
-operation: write the reshaped collection through the source
-callable (\code{items(...)}) and the outer reconciler rebuilds.
+\strong{Writes replace, like \code{\link[=reactiveStore]{reactiveStore()}}.} A branch write must
+include every locked key; missing keys are an error. The complete
+record is what reaches \code{set_record}. Per-field writes
+(\code{mini$field(v)}) remain the dedicated single-slot path — use them
+when you want to update one field without naming the rest. Dropping
+a field is a parent-level operation: write the reshaped collection
+through the source callable (\code{items(...)}) and the outer reconciler
+rebuilds.
 
 Internally, every leaf holds a \code{reactiveVal} kept in sync with the
 parent by a single root-level propagating observer. The observer

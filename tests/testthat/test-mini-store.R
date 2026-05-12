@@ -186,28 +186,30 @@ test_that("write with unnamed list errors", {
   expect_error(fix$mini(list(1, 2)), "named list")
 })
 
-test_that("partial root write patches (omitted keys preserved in parent)", {
-  # Mini-store branch writes patch like reactiveStore — omitted keys
-  # keep their values. The merged record is what reaches set_record,
-  # so the parent collection never has fields silently dropped by a
-  # partial write through the projection. Dropping a field is a
-  # parent-level operation (write the reshaped collection through the
-  # source callable).
+test_that("write with missing keys errors", {
+  # Mini-store branch writes replace, like reactiveStore — every locked
+  # key must be present. Use the per-field setter (`mini$a(v)`) to
+  # update a single slot; that path builds the complete record before
+  # routing to set_record. Dropping a field is a parent-level operation
+  # (write the reshaped collection through the source callable).
   fix <- new_mini(list(a = 1, b = 2))
-  fix$mini(list(a = 99))
-  flushReact()
-  expect_equal(shiny::isolate(fix$parent()), list(a = 99, b = 2))
-  expect_equal(shiny::isolate(fix$mini()), list(a = 99, b = 2))
-  expect_equal(shiny::isolate(fix$mini$b()), 2)
+  expect_error(fix$mini(list(a = 99)), "[Mm]issing.*b")
 })
 
-test_that("nested partial branch write patches the sub-record (omitted keys preserved)", {
-  # Same patch rule applies at sub-branches: writing
-  # `mini$user(list(name = "X"))` keeps `email`. The sub-branch builds
-  # its merged sub-record and the parent's `[[<-` chain replaces the
-  # `user` slot atomically with the merged value.
+test_that("nested branch write with missing keys errors", {
   fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
-  fix$mini$user(list(name = "Bob"))
+  expect_error(
+    fix$mini$user(list(name = "Bob")),
+    "[Mm]issing.*'user'.*email"
+  )
+})
+
+test_that("per-field setter updates one slot, preserving siblings", {
+  # The dedicated single-slot write path. Internally builds the
+  # complete sub-record from the current isolate before chaining up,
+  # so set_record always sees the full record.
+  fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
+  fix$mini$user$name("Bob")
   flushReact()
   expect_equal(
     shiny::isolate(fix$parent()),

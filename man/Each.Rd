@@ -34,9 +34,9 @@ accessor. The reconciliation strategy is selected by \code{by}:
 The list can grow or shrink at the end; in-place value changes
 update each slot's accessor without DOM recreation.
 \item \strong{Keyed} (\verb{by = \\(x) x$id}) — items are tracked across reorders,
-adds, and removes by their key. Kept items have their mini-store
-patched (only changed leaves fire); reordered items have their
-DOM nodes moved (no recreation).
+adds, and removes by their key. Kept items propagate new values
+through their mini-store (only changed leaves fire); reordered
+items have their DOM nodes moved (no recreation).
 }
 
 Records are projected as a per-item mini-store: \code{item()} reads the

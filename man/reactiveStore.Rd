@@ -29,10 +29,12 @@ any value on write. To force a bare named list to be treated as a leaf
 instead of a store, wrap it in \code{\link[base:AsIs]{base::I()}}.
 }
 \details{
-Every node is callable: \code{node()} reads, \code{node(value)} writes. Leaves
-replace; store nodes patch (only the keys present in the patch are
-updated). Unknown keys on a store-node patch are an error. Types are
-not enforced.
+Every node is callable: \code{node()} reads, \code{node(value)} writes. Branch
+writes replace: the input must list every locked key for that branch.
+Both unknown keys and missing keys are an error. Types are not enforced.
+Per-field writes (\code{node$key(value)}) remain the dedicated single-slot
+path — use them when you want to update one field without naming the
+rest.
 
 \code{length()} on a leaf returns \code{1} (the underlying \code{reactiveVal} is a
 callable, and neither R's closure default nor shiny override

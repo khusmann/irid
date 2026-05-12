@@ -7,10 +7,12 @@
 #' any value on write. To force a bare named list to be treated as a leaf
 #' instead of a store, wrap it in [base::I()].
 #'
-#' Every node is callable: `node()` reads, `node(value)` writes. Leaves
-#' replace; store nodes patch (only the keys present in the patch are
-#' updated). Unknown keys on a store-node patch are an error. Types are
-#' not enforced.
+#' Every node is callable: `node()` reads, `node(value)` writes. Branch
+#' writes replace: the input must list every locked key for that branch.
+#' Both unknown keys and missing keys are an error. Types are not enforced.
+#' Per-field writes (`node$key(value)`) remain the dedicated single-slot
+#' path — use them when you want to update one field without naming the
+#' rest.
 #'
 #' `length()` on a leaf returns `1` (the underlying `reactiveVal` is a
 #' callable, and neither R's closure default nor shiny override
@@ -98,11 +100,9 @@ make_store <- function(children, keys, path) {
     if (missing(..1)) {
       stats::setNames(lapply(keys, function(k) children[[k]]()), keys)
     } else {
-      patch <- ..1
-      validate_write(fn, patch)
-      if (length(patch) > 0L) {
-        for (k in names(patch)) children[[k]](patch[[k]])
-      }
+      value <- ..1
+      validate_write(fn, value)
+      for (k in keys) children[[k]](value[[k]])
       invisible(NULL)
     }
   }
@@ -110,14 +110,14 @@ make_store <- function(children, keys, path) {
   fn
 }
 
-# Recursively validates a write/patch against the target subtree without
+# Recursively validates a write against the target subtree without
 # committing — throws on the first shape violation, otherwise returns
 # invisibly. Branch nodes (the `reactiveStore`-classed callables produced
 # by `make_store` and by `make_mini_store`'s recursive branch builder)
-# enforce: list-shaped, fully named, no unknown keys. Leaves accept any
-# value, so they always pass validation. Used by store write paths so a
-# downstream rejection (e.g., an unknown key five levels deep) leaves
-# siblings unmodified.
+# enforce replace semantics: list-shaped, fully named, no unknown keys,
+# no missing keys. Leaves accept any value, so they always pass
+# validation. Used by store write paths so a downstream rejection (e.g.,
+# an unknown key five levels deep) leaves siblings unmodified.
 #
 # Branch detection is by class — anything not classed `reactiveStore` is
 # a leaf. This way the same validator works for `reactiveStore` (leaves
@@ -132,22 +132,29 @@ validate_write <- function(node, value) {
       label, paste(class(value), collapse = "/")
     ), call. = FALSE)
   }
-  if (length(value) == 0L) return(invisible())
-  patch_keys <- names(value)
-  if (is.null(patch_keys) || !all(nzchar(patch_keys))) {
+  write_keys <- names(value)
+  if (length(value) > 0L &&
+      (is.null(write_keys) || !all(nzchar(write_keys)))) {
     stop(sprintf(
       "Write to %s expected a named list (got unnamed elements)",
       label
     ), call. = FALSE)
   }
-  unknown <- setdiff(patch_keys, env$keys)
+  unknown <- setdiff(write_keys, env$keys)
   if (length(unknown) > 0L) {
     stop(sprintf(
       "Unknown keys in store node %s: %s",
       label, paste(unknown, collapse = ", ")
     ), call. = FALSE)
   }
-  for (k in patch_keys) {
+  missing_keys <- setdiff(env$keys, write_keys)
+  if (length(missing_keys) > 0L) {
+    stop(sprintf(
+      "Missing keys in store node %s: %s",
+      label, paste(missing_keys, collapse = ", ")
+    ), call. = FALSE)
+  }
+  for (k in env$keys) {
     validate_write(env$children[[k]], value[[k]])
   }
   invisible()

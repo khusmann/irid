@@ -11,13 +11,14 @@
 #'
 #' Recursive — nested named lists in the initial record become sub-mini-stores
 #' (so `mini$user$name(v)` writes through the same chain as
-#' `mini$user(<patched-user>)` would).
+#' `mini$user(<full-user>)` would).
 #' Each level threads a sub-`get`/`set` pair down the tree; writes at any
 #' depth fan out through the chain of synthetic setters until they reach
 #' the user-supplied `set_record`. Shape uses the same shared
 #' branch-vs-leaf rules as [reactiveStore()] (`is_branch`, `is_bare_list`,
 #' `strip_asis` are reused), and the same recursive [validate_write()]
-#' enforces "no unknown keys" at every level on whole-record writes.
+#' enforces "no unknown keys, no missing keys" at every level on
+#' whole-record writes.
 #'
 #' **Shape is strict.** Writes are validated against the keys captured
 #' at construction — same contract as a [reactiveStore()] branch.
@@ -27,13 +28,14 @@
 #' observes the parent change and rebuilds this mini-store with a
 #' fresh leaf tree of the new shape on the same flush.
 #'
-#' **Patches like [reactiveStore()].** A branch write merges with the
-#' current record — omitted keys keep their values. The merged record
-#' is what reaches `set_record`, so the parent collection always sees
-#' complete records and the projection's read view never disagrees
-#' with the parent. Dropping a field from the parent is a parent-level
-#' operation: write the reshaped collection through the source
-#' callable (`items(...)`) and the outer reconciler rebuilds.
+#' **Writes replace, like [reactiveStore()].** A branch write must
+#' include every locked key; missing keys are an error. The complete
+#' record is what reaches `set_record`. Per-field writes
+#' (`mini$field(v)`) remain the dedicated single-slot path — use them
+#' when you want to update one field without naming the rest. Dropping
+#' a field is a parent-level operation: write the reshaped collection
+#' through the source callable (`items(...)`) and the outer reconciler
+#' rebuilds.
 #'
 #' Internally, every leaf holds a `reactiveVal` kept in sync with the
 #' parent by a single root-level propagating observer. The observer
@@ -48,7 +50,7 @@
 #'   record (a fully named list).
 #' @param set_record A 1-arg function called with the new record on
 #'   whole-record write or after a per-field synthetic setter has built
-#'   the patched record.
+#'   the complete record.
 #' @param scope A scope from [make_scope()]. The propagating observer is
 #'   created against `scope$session` and registered for cleanup so
 #'   `scope$destroy()` tears it down.
@@ -187,14 +189,14 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
 
 # Builds a `reactiveStore`-classed branch callable. Reads recursively
 # call each child's `fn` (subscribing to all descendant leaves); writes
-# validate against the locked shape, patch the locally-tracked record,
-# and route the merged record through `set_self`. Factored out of
-# `build_mini_node` so the closure environment cleanly binds `children`
-# (the named list of child callables) to `fn_children` — this matches
-# `make_store`'s shape so [validate_write()] and `$.reactiveStore` work
-# uniformly across both store kinds.
+# validate against the locked shape and route the full record through
+# `set_internal` (local leaves) and `set_self` (parent collection).
+# Factored out of `build_mini_node` so the closure environment cleanly
+# binds `children` (the named list of child callables) to `fn_children`
+# — this matches `make_store`'s shape so [validate_write()] and
+# `$.reactiveStore` work uniformly across both store kinds.
 #
-# Writes are shape-strict and patch-semantic — the same contract as
+# Writes are shape-strict and replace-semantic — the same contract as
 # `reactiveStore` branches. Both classes carry the same `reactiveStore`
 # class, so a component receiving "a store-like thing" sees one write
 # contract regardless of whether it's a real store or a per-item
@@ -211,21 +213,8 @@ make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
     } else {
       v <- ..1
       validate_write(fn, v)
-      if (length(v) > 0L) {
-        # Patch like reactiveStore: omitted keys keep their values.
-        # Merge the patch over the current record so the parent
-        # collection always sees a complete record write — the
-        # projection's read view never drifts from the parent.
-        # `set_internal` already skips keys missing from the patch, so
-        # only changed leaves invalidate locally; the merged record is
-        # what reaches `set_self`.
-        current <- shiny::isolate(stats::setNames(
-          lapply(keys, function(k) children[[k]]()), keys
-        ))
-        for (k in names(v)) current[[k]] <- v[[k]]
-        set_internal(v)
-        set_self(current)
-      }
+      set_internal(v)
+      set_self(v)
       invisible(NULL)
     }
   }
