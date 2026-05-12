@@ -12,14 +12,30 @@ is_irid_reactive <- function(x) {
   is.function(x) && (identical(class(x), "function") || inherits(x, "reactive"))
 }
 
-# DOM events synthesised for state-binding props. Prop name doubles as the
-# field on the event object the synthetic write-back reads from — irid stays
-# close to the DOM IDL, where `value` and `checked` are both the prop and
-# the readable property.
-STATE_BIND_EVENT <- list(
-  value = "input",
-  checked = "change"
-)
+# State-binding attribute → DOM event name. The prop name doubles as the
+# field on the event object the synthetic write-back reads from (irid
+# stays close to the DOM IDL — `value` and `checked` are both the prop
+# and the readable property), but the DOM event used to write back is
+# element-dependent.
+#
+# `<select value=rv>` synthesises on `change`, not `input`. `change` is
+# the canonical "user picked something" event for a select; `input` also
+# fires but is the wrong one to autobind for two reasons:
+#   1. the per-event default is `event_debounce(200)`, so the write to
+#      `rv` lags the explicit `onChange` by 200ms — within that window
+#      the change-event force-send echoes the OLD `rv` value back to the
+#      client and overwrites the user's selection.
+#   2. landing on `change` lets the autobind synthetic merge with an
+#      explicit `onChange` into one composed handler — autobind runs
+#      first, so the explicit handler observes the updated reactive in
+#      the same flush.
+# Text inputs stay on `input` (keystroke-by-keystroke).
+STATE_BIND_ATTRS <- c("value", "checked")
+state_bind_event <- function(attr_name, tag_name) {
+  if (attr_name == "checked") return("change")
+  if (identical(tag_name, "select")) return("change")
+  "input"
+}
 
 # Can the callable accept a positional argument? Primitives have no
 # explicit formals but accept arguments at the C level; closures with at
@@ -424,12 +440,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       # server write path). The synthetic handler is arity-dispatched —
       # 0-arg callables get a no-op handler; the listener still fires so
       # the optimistic-update protocol can snap the input back.
-      if (name %in% names(STATE_BIND_EVENT) && is_irid_reactive(val)) {
+      if (name %in% STATE_BIND_ATTRS && is_irid_reactive(val)) {
         pending_bindings[[length(pending_bindings) + 1L]] <- list(
           attr = name, fn = val
         )
         pending_events[[length(pending_events) + 1L]] <- list(
-          event = STATE_BIND_EVENT[[name]],
+          event = state_bind_event(name, node$name),
           handler = make_autobind_handler(val, name),
           autobind = TRUE
         )

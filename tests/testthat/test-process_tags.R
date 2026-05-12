@@ -106,7 +106,7 @@ test_that("checked reads from e$checked, value reads from e$value", {
 
   rv_value <- shiny::reactiveVal("")
   res_value <- process_tags(tags$select(value = rv_value))
-  expect_equal(res_value$events[[1]]$event, "input")
+  expect_equal(res_value$events[[1]]$event, "change")
   res_value$events[[1]]$handler(list(value = "opt-2"))
   expect_equal(shiny::isolate(rv_value()), "opt-2")
 })
@@ -156,16 +156,16 @@ test_that("checked + onChange on a checkbox merges into one entry on `change`", 
   expect_equal(result$events[[1]]$event, "change")
 })
 
-test_that("value + onChange on a <select> does NOT merge (different DOM events)", {
-  # `value`'s synthetic event is `input`, the explicit handler is `change`,
-  # so they stay as two separate event entries.
+test_that("value + onChange on a <select> merges into one entry on `change`", {
+  # `<select>` autobinds `value` on `change` (not `input`) so it can merge
+  # with an explicit `onChange` into one composed handler — autobind runs
+  # first, the explicit handler observes the updated reactive.
   rv <- shiny::reactiveVal("")
   result <- process_tags(
     tags$select(value = rv, onChange = function(e) NULL)
   )
-  expect_length(result$events, 2L)
-  events <- vapply(result$events, function(e) e$event, character(1L))
-  expect_setequal(events, c("input", "change"))
+  expect_length(result$events, 1L)
+  expect_equal(result$events[[1]]$event, "change")
 })
 
 test_that("value + onClick stays as two separate entries (no collision)", {

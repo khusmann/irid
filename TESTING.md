@@ -120,13 +120,16 @@ Verify that callable `value`/`checked` props produce both a read binding and
 a write event entry, and that the corresponding DOM event fires the write
 back through the callable. Auto-bind aligns to the DOM IDL: prop name and
 event field name match (`value` ↔ `e$value`, `checked` ↔ `e$checked`).
-`<select>` binds via `value` (its DOM IDL property); radios bind via
-`checked` per-element.
+`<select>` binds via `value` (its DOM IDL property) but writes back on
+`change` rather than `input` — `change` is the canonical "user picked"
+event for a select, and using it lets the autobind synthetic merge with an
+explicit `onChange` into one composed handler in a single flush. Radios
+bind via `checked` per-element.
 
 ### `process_tags` extraction
 
 - [ ] `value = reactiveVal()` on text input produces both a binding (`attr = "value"`) and a synthetic `input` event entry with handler `\(e) val(e$value)`
-- [ ] `value = reactiveVal()` on `<select>` produces both a binding and a synthetic `input` event entry
+- [ ] `value = reactiveVal()` on `<select>` produces both a binding and a synthetic `change` event entry (not `input` — selecting fires `change`, and using `change` lets autobind merge with explicit `onChange`)
 - [ ] `checked = reactiveVal()` on checkbox produces both a binding and a synthetic `change` event entry with handler `\(e) val(e$checked)`
 - [ ] `checked = reactiveVal()` on `<input type="radio">` produces both a binding and a synthetic `change` event entry
 - [ ] 0-arg callable in `value` produces both a binding and a synthetic event entry with a no-op handler (write-attempt + force-send echoes current value back)
@@ -154,9 +157,9 @@ each tier, source-attribute order is preserved.
 
 - [ ] `value = rv` + `onInput` on same `<input>` produces a single event
       entry on `input` (not two)
-- [ ] `value = rv` + `onChange` on same `<select>` does NOT merge — `value`'s
-      synthetic event is `input`, the explicit handler is `change`, so they
-      stay as two separate event entries
+- [ ] `value = rv` + `onChange` on same `<select>` merges into a single
+      event entry on `change` — `<select>` autobinds `value` on `change`
+      so the autobind synthetic + explicit handler compose
 - [ ] `checked = rv` + `onChange` on same checkbox produces a single event
       entry on `change`
 - [ ] No collision (e.g. `value = rv` + `onClick`) leaves the two as
@@ -179,7 +182,7 @@ each tier, source-attribute order is preserved.
 
 - [ ] `value` on `<select>`: `irid-attr` sets `el.value = msg.value`, picking the matching option
 - [ ] `checked` on `<input type="radio">`: `irid-attr` sets `el.checked = msg.value`
-- [ ] `<select>` write-back listens on `input` (the `value` autobind event)
+- [ ] `<select>` write-back listens on `change` (the `value` autobind event for selects)
 - [ ] Radio write-back listens on `change`; only fires when `el.checked === true` (gated by `shouldSkip` to defend against deselect-change)
 
 ## `.event` element config
