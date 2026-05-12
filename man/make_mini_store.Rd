@@ -53,17 +53,13 @@ collection} directly (e.g. for \code{Each(items, ...)}, write the new
 observes the parent change and rebuilds this mini-store with a
 fresh leaf tree of the new shape on the same flush.
 
-\strong{Replace, not patch.} Unlike \code{\link[=reactiveStore]{reactiveStore()}} branch writes,
-mini-store branch writes pass the value verbatim to \code{set_record}
-(and, for sub-branches, replace the slot via \verb{[[<-} in the parent's
-synthetic setter chain). A partial branch write \emph{drops} the omitted
-fields from the parent record — \code{mini$user(list(name = "X"))} on a
-\code{user = list(name, email)} subrecord makes the parent's \code{user}
-become \code{list(name = "X")}. Callers wanting patch semantics must use
-per-field synthetic setters (\code{mini$user$name("X")}) or merge before
-writing. The asymmetry exists because the mini-store is a
-projection: it never owns the record, so it has no business
-deciding how to merge a partial write into the source of truth.
+\strong{Patches like \code{\link[=reactiveStore]{reactiveStore()}}.} A branch write merges with the
+current record — omitted keys keep their values. The merged record
+is what reaches \code{set_record}, so the parent collection always sees
+complete records and the projection's read view never disagrees
+with the parent. Dropping a field from the parent is a parent-level
+operation: write the reshaped collection through the source
+callable (\code{items(...)}) and the outer reconciler rebuilds.
 
 Internally, every leaf holds a \code{reactiveVal} kept in sync with the
 parent by a single root-level propagating observer. The observer

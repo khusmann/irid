@@ -186,30 +186,34 @@ test_that("write with unnamed list errors", {
   expect_error(fix$mini(list(1, 2)), "named list")
 })
 
-test_that("whole-record write replaces (does not patch) the parent record", {
-  # Unlike `reactiveStore`, mini-store branch writes pass the value
-  # verbatim to `set_record`. A partial write at the root drops the
-  # omitted fields from the parent — callers wanting patch semantics
-  # must use the per-field synthetic setter (`mini$a(99)`) or merge
-  # before writing.
+test_that("partial root write patches (omitted keys preserved in parent)", {
+  # Mini-store branch writes patch like reactiveStore — omitted keys
+  # keep their values. The merged record is what reaches set_record,
+  # so the parent collection never has fields silently dropped by a
+  # partial write through the projection. Dropping a field is a
+  # parent-level operation (write the reshaped collection through the
+  # source callable).
   fix <- new_mini(list(a = 1, b = 2))
   fix$mini(list(a = 99))
   flushReact()
-  expect_equal(shiny::isolate(fix$parent()), list(a = 99))
+  expect_equal(shiny::isolate(fix$parent()), list(a = 99, b = 2))
+  expect_equal(shiny::isolate(fix$mini()), list(a = 99, b = 2))
+  expect_equal(shiny::isolate(fix$mini$b()), 2)
 })
 
-test_that("nested branch partial write drops omitted sub-fields from the parent", {
-  # Same replace-not-patch rule applies at sub-branches. Writing
-  # `mini$user(list(name = "X"))` over a `user = list(name, email)`
-  # subrecord drops `email`, because the synthetic setter at the
-  # parent level replaces the slot with the value as written.
+test_that("nested partial branch write patches the sub-record (omitted keys preserved)", {
+  # Same patch rule applies at sub-branches: writing
+  # `mini$user(list(name = "X"))` keeps `email`. The sub-branch builds
+  # its merged sub-record and the parent's `[[<-` chain replaces the
+  # `user` slot atomically with the merged value.
   fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
   fix$mini$user(list(name = "Bob"))
   flushReact()
   expect_equal(
     shiny::isolate(fix$parent()),
-    list(id = 1L, user = list(name = "Bob"))
+    list(id = 1L, user = list(name = "Bob", email = "a@x"))
   )
+  expect_equal(shiny::isolate(fix$mini$user$email()), "a@x")
 })
 
 # --- Scope cleanup -----------------------------------------------------------

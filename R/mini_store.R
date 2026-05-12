@@ -27,17 +27,13 @@
 #' observes the parent change and rebuilds this mini-store with a
 #' fresh leaf tree of the new shape on the same flush.
 #'
-#' **Replace, not patch.** Unlike [reactiveStore()] branch writes,
-#' mini-store branch writes pass the value verbatim to `set_record`
-#' (and, for sub-branches, replace the slot via `[[<-` in the parent's
-#' synthetic setter chain). A partial branch write *drops* the omitted
-#' fields from the parent record — `mini$user(list(name = "X"))` on a
-#' `user = list(name, email)` subrecord makes the parent's `user`
-#' become `list(name = "X")`. Callers wanting patch semantics must use
-#' per-field synthetic setters (`mini$user$name("X")`) or merge before
-#' writing. The asymmetry exists because the mini-store is a
-#' projection: it never owns the record, so it has no business
-#' deciding how to merge a partial write into the source of truth.
+#' **Patches like [reactiveStore()].** A branch write merges with the
+#' current record — omitted keys keep their values. The merged record
+#' is what reaches `set_record`, so the parent collection always sees
+#' complete records and the projection's read view never disagrees
+#' with the parent. Dropping a field from the parent is a parent-level
+#' operation: write the reshaped collection through the source
+#' callable (`items(...)`) and the outer reconciler rebuilds.
 #'
 #' Internally, every leaf holds a `reactiveVal` kept in sync with the
 #' parent by a single root-level propagating observer. The observer
@@ -191,21 +187,22 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
 
 # Builds a `reactiveStore`-classed branch callable. Reads recursively
 # call each child's `fn` (subscribing to all descendant leaves); writes
-# validate against the locked shape and route through `set_self`.
-# Factored out of `build_mini_node` so the closure environment cleanly
-# binds `children` (the named list of child callables) to `fn_children`
-# — this matches `make_store`'s shape so [validate_write()] and
-# `$.reactiveStore` work uniformly across both store kinds.
+# validate against the locked shape, patch the locally-tracked record,
+# and route the merged record through `set_self`. Factored out of
+# `build_mini_node` so the closure environment cleanly binds `children`
+# (the named list of child callables) to `fn_children` — this matches
+# `make_store`'s shape so [validate_write()] and `$.reactiveStore` work
+# uniformly across both store kinds.
 #
-# Writes are shape-strict — the same contract as `reactiveStore`
-# branches. Both classes carry the same `reactiveStore` class, so a
-# component receiving "a store-like thing" sees one write contract
-# regardless of whether it's a real store or a per-item projection.
-# Shape transitions are reshaping operations on the *parent
-# collection*, not on the projection — callers express them by
-# writing the new collection through `items` (or, for Match, the
-# leading callable). The outer reconciler observes the parent change
-# and rebuilds this entry with a fresh mini-store of the new shape.
+# Writes are shape-strict and patch-semantic — the same contract as
+# `reactiveStore` branches. Both classes carry the same `reactiveStore`
+# class, so a component receiving "a store-like thing" sees one write
+# contract regardless of whether it's a real store or a per-item
+# projection. Shape transitions are reshaping operations on the *parent
+# collection*, not on the projection — callers express them by writing
+# the new collection through `items` (or, for Match, the leading
+# callable). The outer reconciler observes the parent change and
+# rebuilds this entry with a fresh mini-store of the new shape.
 make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
   label <- if (nzchar(path)) sprintf("'%s'", path) else "mini-store"
   fn <- function(...) {
@@ -214,14 +211,21 @@ make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
     } else {
       v <- ..1
       validate_write(fn, v)
-      # Push the record into descendant leaves' local `rv`s synchronously
-      # (set_internal recurses; only changed leaves invalidate). Then
-      # chain the write up through `set_self` so the parent collection
-      # sees it. Same reason as the leaf branch: the event-observer
-      # force-send echo runs before the parent-change propagator can
-      # fire on the next flush.
-      set_internal(v)
-      set_self(v)
+      if (length(v) > 0L) {
+        # Patch like reactiveStore: omitted keys keep their values.
+        # Merge the patch over the current record so the parent
+        # collection always sees a complete record write — the
+        # projection's read view never drifts from the parent.
+        # `set_internal` already skips keys missing from the patch, so
+        # only changed leaves invalidate locally; the merged record is
+        # what reaches `set_self`.
+        current <- shiny::isolate(stats::setNames(
+          lapply(keys, function(k) children[[k]]()), keys
+        ))
+        for (k in names(v)) current[[k]] <- v[[k]]
+        set_internal(v)
+        set_self(current)
+      }
       invisible(NULL)
     }
   }
