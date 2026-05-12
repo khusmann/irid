@@ -196,6 +196,11 @@ test_that("write with missing keys errors", {
   expect_error(fix$mini(list(a = 99)), "[Mm]issing.*b")
 })
 
+test_that("empty list write errors (every key missing)", {
+  fix <- new_mini(list(a = 1, b = 2))
+  expect_error(fix$mini(list()), "[Mm]issing.*a.*b")
+})
+
 test_that("nested branch write with missing keys errors", {
   fix <- new_mini(list(id = 1L, user = list(name = "Alice", email = "a@x")))
   expect_error(
