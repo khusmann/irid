@@ -88,8 +88,12 @@ jobs:
       - name: Export shinylive apps
         run: |
           inject_local_wasm <- function(destdir, rwasm_repo, pkg) {
-            r_short <- gsub("\\.[^.]+$", "", as.character(getRversion()))
-            contrib <- file.path(rwasm_repo, "bin", "emscripten", "contrib", r_short)
+            # The Wasm build runs inside webr's docker container (currently R 4.5)
+            # while the host job may be on a different R version, so don't derive
+            # `r_short` from host `getRversion()`; instead pick up whichever R
+            # subdir rwasm actually wrote.
+            contrib_root <- file.path(rwasm_repo, "bin", "emscripten", "contrib")
+            contrib <- list.files(contrib_root, full.names = TRUE)[[1]]
             tgz <- list.files(contrib, pattern = paste0("^", pkg, "_.*\\.tgz$"), full.names = TRUE)[[1]]
             tgz_name <- basename(tgz)
 
