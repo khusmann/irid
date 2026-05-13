@@ -2,21 +2,16 @@
 
 ## Breaking changes
 
-* Auto-bind: `value` and `checked` now accept any callable (`reactiveVal`,
-  store leaf, `reactiveProxy`, plain function) and automatically two-way
-  bind. Reads populate the prop; DOM events on the element write back
-  through the same callable. Explicit `onInput` / `onChange` write handlers
-  can be removed when auto-bind covers them. When auto-bind coexists with
-  an explicit `on*` handler on the same DOM event, the auto-bind write
-  always lands first — your handler observes the post-write state
-  regardless of attribute source order. Auto-bind targets the DOM IDL
-  property of the same name, so `value = rv` works on `<input>`,
-  `<textarea>`, and `<select>`; `checked = rv` works on checkboxes and
-  individual radios.
-* `event_immediate()`, `event_throttle()`, `event_debounce()` no longer
-  wrap a handler. They return a config struct used with the new
-  element-level `.event` prop. Per-handler timing is gone — set timing on
-  the element instead:
+* Auto-bind: `value` and `checked` accept any callable (`reactiveVal`,
+  store leaf, `reactiveProxy`, plain function) and two-way bind
+  automatically. Reads populate the IDL property; DOM events write back
+  through the same callable. When auto-bind coexists with an explicit
+  `on*` handler on the same event, the auto-bind write always lands
+  first regardless of attribute order. Works on `<input>`, `<textarea>`,
+  `<select>` for `value`; checkboxes and radios for `checked`.
+* `event_immediate()` / `event_throttle()` / `event_debounce()` no longer
+  wrap a handler. They return a config used with the element-level
+  `.event` prop. Per-handler timing is gone:
 
   ```r
   # OLD
@@ -26,19 +21,41 @@
   tags$input(value = field, .event = event_debounce(500))
   ```
 
-  `.event` accepts either a single config or a named list keyed by
-  lowercase DOM event name for per-event overrides.
-* `prevent_default` moved off the event constructors and onto the element
-  as `.prevent_default`. Like `.event`, accepts either a logical scalar
-  (broadcasts to every event) or a named list keyed by DOM event for
-  per-event overrides; unmapped events default to `FALSE`.
+  `.event` takes a single config or a named list keyed by lowercase DOM
+  event for per-event overrides.
+* `prevent_default` moved off the event constructors onto the element as
+  `.prevent_default`. Logical scalar broadcasts; named list overrides per
+  event; unmapped events default to `FALSE`.
+* `Each()` redesigned. The callback receives a per-item callable (mini-
+  store for records, scalar accessor for atomics) and an optional `pos`.
+  Reconciliation moves to `by`: `NULL` (default) for positional, `\(x)
+  x$id` for keyed. In-place value changes update accessors without DOM
+  recreation; keyed reorders move DOM nodes.
+* `Match()` projects the bound value as a mini-store for the active
+  case's body (records) or the bare callable (scalars). Active-case
+  change fully tears down the previous case and mounts the new one fresh.
+* `When()` is a fixed-shape binary specialization of `Match()`. `yes` /
+  `otherwise` must be 0-arg functions returning tag trees; each
+  activation builds a fresh tree.
+* `Index()` removed. Covered by `Each(items, fn)` with default `by = NULL`.
 
 ## New features
 
-* `reactiveProxy()` — build a callable from a `get` reader and optional
+* `reactiveProxy()` — callable built from a `get` reader and optional
   `set` writer for validation, transforms, and read-only views at
   component boundaries.
-* `reactiveStore()` — hierarchical reactive state container.
+* `reactiveStore()` — hierarchical reactive state container. Bare named
+  lists become navigable sub-nodes; everything else (including
+  `I()`-wrapped lists) is a `reactiveVal` leaf. Branch writes replace
+  and must list every locked key; `node$key(value)` is the single-slot
+  path.
+* `innerHTML` is now a DOM property, so reactive writes hit the IDL
+  property directly.
+
+## Bug fixes
+
+* Reactive text children use a comment-anchor pair instead of a `<span>`
+  wrapper, so reactive text no longer adds spurious wrappers to the DOM.
 
 # irid 0.1.0
 
