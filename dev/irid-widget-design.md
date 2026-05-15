@@ -13,10 +13,16 @@ listener on the client, and `buildPayload` in `irid.js` reads the DOM event
 object to construct the payload sent to R.
 
 This works for native HTML elements. But JS libraries (CodeMirror, Monaco,
-Leaflet, D3, charting libraries, etc.) expose their own callback API — not
-DOM events. Their events carry library-specific data (cursor positions,
-selected features, zoom levels, data point indices) that the DOM event
-object doesn't contain.
+Leaflet, D3, charting libraries like plotly.js, etc.) expose their own
+callback API — not DOM events. Their events carry library-specific data
+(cursor positions, selected features, zoom levels, data point indices) that
+the DOM event object doesn't contain.
+
+For simple wrappers, the missing piece is the ability to send events into
+irid's pipeline. But complex libraries like plotly introduce additional
+needs: preserving user interaction state (zoom, pan, selection) across
+data updates, distinguishing user-initiated changes from spec-computed
+auto-fit, and snapping back when the server rejects a state write.
 
 `htmlwidgets` solves this via a rigid lifecycle contract: every widget
 implements `renderValue()`, `resize()`, and receives a monolithic JSON blob.
@@ -252,8 +258,8 @@ optional registry.
 
 | Direction | Message | When | Payload |
 |-----------|---------|------|---------|
-| R → client | `irid-widget-init` | On mount | `{id, widget, config, channels: {name: value, ...}}` |
-| R → client | `irid-widget-channel` | Reactive channel fires | `{id, channel: "name", value: ...}` |
+| R → client | `irid-widget-init` | On mount | `{id, widget, render_channel, config, channels: {name: value, ...}}` |
+| R → client | `irid-widget-channel` | Reactive channel fires | `{id, channel: "name", value: ..., isRender: bool}` |
 | R → client | `irid-widget-destroy` | On unmount | `{id}` |
 | Client → R | `irid.sendEvent()` | Library callback fires | Uses existing `irid_ev_{id}_{event}` input |
 
@@ -268,7 +274,84 @@ attribute string. Using `irid-attr` for complex data would require
 `JSON.stringify` / `JSON.parse` round-trips at every update.
 `irid-widget-channel` carries the value verbatim.
 
+### Channel semantics: render vs. tracking
+
+Not all channels are equal. Some channels carry the **primary render
+payload** — the data the widget needs to paint itself (e.g. a serialized
+plotly JSON spec, a set of map markers). Others are **tracking channels**
+— the server's current opinion on a user-controllable field, sent purely
+so the JS can compare it against what the client last sent (for snap-back
+correction when a write is rejected).
+
+To avoid heuristic channel-name checks in JS ("if channel is `spec`, do a
+full render; else just update the tracking map"), `IridWidget` accepts an
+optional `.render` argument that names the render channel:
+
+```r
+IridWidget(
+  dep, container,
+  spec        = merged_spec,    # render channel — triggers Plotly.react()
+  xaxis_range = xrange,         # tracking channel — server's opinion
+  yaxis_range = yrange,         # tracking channel — server's opinion
+  .render = "spec"
+)
+```
+
+When `.render` is set:
+- The `irid-widget-init` message includes `render: "spec"` so the JS
+  knows which channel drives full re-renders.
+- All `irid-widget-channel` messages carry `isRender: true` when the
+  channel matches `.render`, letting the JS dispatch accordingly without
+  hardcoded names.
+- When `.render` is `NULL` (the default), no channel is special — every
+  channel update is handled independently by the widget JS.
+
 ---
+
+### Server-authoritative value tracking (`irid.trackChannel`)
+
+Widgets that bind user-interactive state (axis ranges, selected points,
+drag modes) need to know when the server disagrees with the client's
+current value — typically because a `reactiveProxy` rejected or
+transformed a write. This "snap-back" pattern requires per-field tracking
+of what the client sent vs. what the server last confirmed.
+
+`irid.js` provides a helper for this, scoped per widget element:
+
+```js
+// In widget init code
+var tracker = irid.trackChannel(el);
+
+// Called when the widget sends a user-initiated state change to R
+//   fieldName: e.g. "xaxis_range"
+//   value:     the value just sent via irid.sendEvent()
+tracker.recordSent(fieldName, value);
+
+// Called in the irid-widget-channel listener, after the server pushes back
+//   fieldName, serverValue: from e.detail
+// Returns: "accepted" | "corrected" | "no-change"
+tracker.receiveChannel(fieldName, serverValue, function(newValue) {
+  // If "corrected", newValue is the server-authoritative value.
+  // The widget should force the library to reflect it
+  // (e.g. Plotly.relayout(el, { 'xaxis.range': newValue })).
+  // If "accepted" or "no-change", nothing to do.
+});
+```
+
+Internally, `trackChannel` maintains per-field maps of `lastSent[field]`
+and `lastReceived[field]`. When a channel update arrives, it compares the
+server's value against the last sent value (deep equal). If they differ,
+it calls the correction callback with the server's value. If they match,
+it's a no-op.
+
+The tracker is automatically cleaned up when the widget element is removed
+(handled by `irid-widget-destroy`).
+
+**Why a shared helper:** Every widget with rejectable writes (plotly axis
+ranges, map viewports, editor selections, data-grid sort states) would
+otherwise reimplement this same diff-and-correct loop. `irid.trackChannel`
+is a small piece of shared infrastructure that makes the pattern trivial
+while staying consistent with the "minimal primitives" philosophy.
 
 ## Usage Examples
 
@@ -471,7 +554,7 @@ with many small data channels, each independently reactive.
 
 The following changes are needed to implement this design.
 
-### `inst/js/irid.js` — Add `irid.sendEvent()` and optional widget registry
+### `inst/js/irid.js` — Add `irid.sendEvent()`, widget registry, channel tracking, and correction dispatch
 
 ```js
 // --- Programmatic event dispatch for JS libraries ---
@@ -506,9 +589,11 @@ Shiny.addCustomMessageHandler('irid-widget-channel', function(msg) {
   var widget = document.getElementById(msg.id);
   if (!widget) return;
   // Dispatch a custom event on the element so widget code
-  // can listen without managing multiple Shiny handlers
+  // can listen without managing multiple Shiny handlers.
+  // isRender flag tells the widget whether this channel
+  // drives a full re-render vs. updating tracking state.
   var event = new CustomEvent('irid-widget-channel', {
-    detail: { channel: msg.channel, value: msg.value }
+    detail: { channel: msg.channel, value: msg.value, isRender: !!msg.isRender }
   });
   widget.dispatchEvent(event);
 });
@@ -519,6 +604,56 @@ Shiny.addCustomMessageHandler('irid-widget-destroy', function(msg) {
   var event = new CustomEvent('irid-widget-destroy', { detail: msg });
   widget.dispatchEvent(event);
 });
+
+// --- Server-authoritative value tracking ---
+// Helps widgets detect when the server rejects or transforms
+// a user-initiated state write (snap-back correction).
+irid._trackers = irid._trackers || {};
+
+irid.trackChannel = function(el) {
+  var id = el.id;
+  if (irid._trackers[id]) return irid._trackers[id];
+
+  var lastSent = {};
+  var lastReceived = {};
+
+  function deepEqual(a, b) {
+    if (a === b) return true;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object' || a === null || b === null) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    var keys = Object.keys(a);
+    if (keys.length !== Object.keys(b).length) return false;
+    for (var i = 0; i < keys.length; i++) {
+      if (!deepEqual(a[keys[i]], b[keys[i]])) return false;
+    }
+    return true;
+  }
+
+  var tracker = {
+    recordSent: function(fieldName, value) {
+      lastSent[fieldName] = value;
+    },
+    receiveChannel: function(fieldName, serverValue, onCorrect) {
+      var sent = lastSent[fieldName];
+      lastReceived[fieldName] = serverValue;
+      if (sent === undefined) return 'no-change';
+      if (deepEqual(sent, serverValue)) return 'accepted';
+      if (onCorrect) onCorrect(serverValue);
+      return 'corrected';
+    },
+    _destroy: function() {
+      delete irid._trackers[id];
+    }
+  };
+
+  irid._trackers[id] = tracker;
+  el.addEventListener('irid-widget-destroy', function() {
+    tracker._destroy();
+  });
+
+  return tracker;
+};
 ```
 
 **Why custom events on the element:** Instead of each widget registering
@@ -594,6 +729,7 @@ if (inherits(node, "irid_widget")) {
     id = id,
     dep = node$dep,
     widget_name = node$widget_name,
+    render = node$.render,
     channels = channels,
     config = static_config
   )
@@ -630,6 +766,7 @@ for (w in result$widgets) {
   session$sendCustomMessage("irid-widget-init", list(
     id = w$id,
     widget = w$widget_name,
+    render_channel = w$render,
     config = w$config,
     channels = initial_channels
   ))
@@ -640,12 +777,14 @@ for (w in result$widgets) {
       channel_name <- nm
       channel_fn <- w$channels[[nm]]
       wid <- w$id
+      is_render <- identical(channel_name, w$render)
       obs <- shiny::observe({
         val <- channel_fn()
         session$sendCustomMessage("irid-widget-channel", list(
           id = wid,
           channel = channel_name,
-          value = val
+          value = val,
+          isRender = is_render
         ))
       })
       observers[[length(observers) + 1L]] <<- obs
@@ -688,13 +827,20 @@ for (wid in widget_ids) {
 #'   args and sent to the client on init.
 #' @param .event Optional event timing config (same as the element-level
 #'   `.event` prop).
+#' @param .render Optional string naming the render channel. When set,
+#'   the init message includes `render_channel` and channel updates for
+#'   that channel carry `isRender: true`. The widget JS uses this to
+#'   distinguish full re-render payloads from tracking channels (server-
+#'   authoritative values used for snap-back correction). Defaults to
+#'   `NULL` (no channel is special — the widget JS handles all updates
+#'   independently).
 #' @param .widget_name A string identifying the widget type on the
 #'   client. Defaults to the first registered JS widget matching the
 #'   container's class.
 #' @return An irid widget node.
 #' @export
 IridWidget <- function(dep, container, ..., .config = list(),
-                       .event = NULL, .widget_name = NULL) {
+                       .event = NULL, .render = NULL, .widget_name = NULL) {
   stopifnot(inherits(container, "shiny.tag"))
   args <- list(...)
   structure(
@@ -704,6 +850,7 @@ IridWidget <- function(dep, container, ..., .config = list(),
       args = args,
       .config = .config,
       .event = .event,
+      .render = .render,
       widget_name = .widget_name %||% extract_widget_name(dep)
     ),
     class = "irid_widget"
@@ -751,6 +898,36 @@ node.
 
 ---
 
+## Design Rationale: Complex libraries (plotly-grade)
+
+The widget mechanism provides transport: init, channel push, event receive,
+destroy. It does not prescribe how a widget uses these primitives internally.
+
+Libraries like plotly.js need more than transport — they need:
+
+- **Monolithic render payloads** (a full JSON spec with merged user state)
+  sent as a single channel, distinct from per-field tracking channels.
+- **Snap-back correction** when the server rejects a user state write
+  (e.g. a zoom narrower than a minimum range), requiring per-field
+  comparison of client-sent vs. server-authoritative values.
+- **User-initiated vs. auto-fit filtering** to prevent spec-computed
+  layout changes from being captured as user state.
+
+All three are implemented *on top of* `IridWidget`, not inside it:
+
+| Concern | Where it lives |
+|---------|---------------|
+| Spec serialization + merge | R-side wrapper (e.g. `PlotlyOutput()`) |
+| Render vs. tracking distinction | `.render` annotation on `IridWidget` |
+| Snap-back tracking | `irid.trackChannel(el)` JS helper |
+| User-vs-auto event filtering | Custom JS in the widget bundle |
+| Lifecycle, events, deps, timing | `IridWidget` + `irid.sendEvent()` |
+
+`IridWidget` stays minimal. The `.render` annotation and `trackChannel`
+helper are small additions that prevent every complex widget from
+reinventing the same wire-level patterns, without turning the mechanism
+into a framework.
+
 ## Open Questions
 
 1. **Channel deduplication.** When a channel's value hasn't changed, should
@@ -768,7 +945,16 @@ node.
    This is benign — the JS library's `setValue` is idempotent — but worth
    noting.
 
-3. **Throttle/debounce on `sendEvent`.** Currently `sendEvent` calls
+3. **Per-field tracking overhead.** `irid.trackChannel` maintains per-field
+   maps of `lastSent` and `lastReceived`. For widgets with many bound
+   fields (e.g. a plot with many subplot axes), this accumulates state.
+   However, the arrays involved are typically two numbers (axis ranges),
+   a small set of point indices (selection), or a short string (drag
+   mode) — the overhead is negligible. Deep comparison uses a simple
+   structural equal; if this becomes a bottleneck, widget authors can
+   opt out of tracking and implement their own comparison.
+
+4. **Throttle/debounce on `sendEvent`.** Currently `sendEvent` calls
    `sendPayload` directly (immediate dispatch). Should it respect the
    event-level timing config that `mount` registered? This would require
    the JS to know the throttle/debounce config, which is available in the
@@ -780,13 +966,13 @@ node.
    rate limiting, the R handler uses `event_throttle` / `event_debounce`
    via `.event`, same as DOM events.
 
-4. **Container element restrictions.** The container is a static `shiny.tag`.
+5. **Container element restrictions.** The container is a static `shiny.tag`.
    Most libraries expect a `<div>`, but some need `<textarea>`, `<canvas>`,
    or `<video>`. The design imposes no restriction — the container can be
    any tag. The `id` is injected and the `irid-widget` class is added by
    `process_tags`.
 
-5. **Nested widget content (children).** Can a widget contain reactive
+6. **Nested widget content (children).** Can a widget contain reactive
    children (e.g. a Leaflet popup that uses irid bindings)? This would
    require `process_tags` to walk the widget's container children and
    extract bindings, events, etc. — adding significant complexity.
