@@ -98,34 +98,34 @@ reactive graph.
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│  R session                                   │
-│                                              │
-│  process_tags(widget_node)                   │
-│    → id, events, channels, deps              │
-│                                              │
-│  irid_mount_processed(result, session)       │
-│    → irid-widget-init (once)                  │
-│    → observe(channel) → irid-widget-channel  │
-│    → observeEvent(irid_ev_{id}_{ev}) → handler│
-│    → destroy → irid-widget-destroy           │
-└───────────┬─────────────────────┬────────────┘
-            │ custom messages     │ Shiny.setInputValue
-            ▼                     │ (irid_ev_*)
-┌─────────────────────────┐       │
-│  Browser (irid.js)      │       │
-│                         │       │
-│  irid.widgets[name](msg)│◄──────┘
-│    → init library       │
-│    → register listener  │
-│      → irid.sendEvent() │──────► irid_ev_{id}_{ev}
-│                         │
-│  widget.addEventListener│◄────── irid-widget-channel
+┌────────────────────────────────────────────────┐
+│  R session                                     │
+│                                                │
+│  process_tags(widget_node)                     │
+│    → id, events, channels, deps                │
+│                                                │
+│  irid_mount_processed(result, session)         │
+│    → irid-widget-init (once)                   │
+│    → observe(channel) → irid-widget-channel    │
+│    → observeEvent(irid_ev_{id}_{ev}) → handler │
+│    → destroy → irid-widget-destroy             │
+└───────────┬───────────────────────┬────────────┘
+            │ custom messages       │ Shiny.setInputValue
+            ▼                       │ (irid_ev_*)
+┌───────────────────────────┐       │
+│  Browser (irid.js)        │       │
+│                           │       │
+│  irid.widgets[name](msg)  │◄──────┘
+│    → init library         │
+│    → register listener    │
+│      → irid.sendEvent()   │──────► irid_ev_{id}_{ev}
+│                           │
+│  widget.addEventListener  │◄────── irid-widget-channel
 │    ('irid-widget-channel')│     irid-widget-destroy
-│                         │
-│  widget.addEventListener│◄────── irid-widget-destroy
+│                           │
+│  widget.addEventListener  │◄────── irid-widget-destroy
 │    ('irid-widget-destroy')│
-└─────────────────────────┘
+└───────────────────────────┘
 ```
 
 ### Key data structures
