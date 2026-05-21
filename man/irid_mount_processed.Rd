@@ -4,13 +4,18 @@
 \alias{irid_mount_processed}
 \title{Mount a pre-processed irid tag tree}
 \usage{
-irid_mount_processed(result, session)
+irid_mount_processed(result, session, depth = 0L)
 }
 \arguments{
 \item{result}{A list returned by \code{\link[=process_tags]{process_tags()}}, containing \verb{$tag},
 \verb{$bindings}, \verb{$events}, \verb{$control_flows}, and \verb{$shiny_outputs}.}
 
 \item{session}{A Shiny session object.}
+
+\item{depth}{Nesting depth used to compute binding priority. Top-level
+mounts (\code{iridApp}, \code{renderIrid}) use the default \code{0}; recursive calls
+from inside \code{When}/\code{Each}/\code{Match} increment it so nested bindings fire
+before their parent's.}
 }
 \value{
 A mount handle with \verb{$tag} (the processed HTML) and \verb{$destroy()}
@@ -20,5 +25,17 @@ A mount handle with \verb{$tag} (the processed HTML) and \verb{$destroy()}
 Takes the output of \code{\link[=process_tags]{process_tags()}} and wires up Shiny observers for
 reactive attribute bindings, event listeners, Shiny outputs, and
 control-flow nodes (\code{When}, \code{Each}, \code{Match}).
+}
+\details{
+Binding observers run at \code{priority = -100 + depth}, so deeper-nested
+bindings fire before shallower ones in the same flush. Control flow
+observers stay at the default priority 0 and always fire first. This
+guarantees that on initial mount (and on any cascading re-render),
+content inserted by a control flow is fully populated by its inner
+bindings before any parent attribute binding observes it. The motivating
+case is \verb{<select value=rv>} whose options come from \code{Each} — the parent's
+\code{value} binding must fire \emph{after} the options exist and have their
+\code{value} attributes set, otherwise the browser silently sets
+\code{selectedIndex = -1} and the select renders blank.
 }
 \keyword{internal}

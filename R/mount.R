@@ -1,3 +1,28 @@
+#' Render a processed tag to HTML including its dependency scripts
+#'
+#' `htmltools::as.character()` on a `shiny.tag` strips its
+#' `html_dependency` metadata — the resulting HTML has no `<script>` or
+#' `<link>` tags for the dependencies. This helper finds all dependencies
+#' via [htmltools::findDependencies()], renders them via
+#' [htmltools::renderDependencies()], and prepends them to the tag HTML.
+#'
+#' Without this, any tag tree inserted via `irid-swap` or `irid-mutate`
+#' would lose its external scripts and stylesheets (e.g. a CodeMirror
+#' widget\'s CDN deps and binding JS).
+#' @param tag A `shiny.tag` to render.
+#' @return A character string of HTML.
+#' @keywords internal
+render_tag_html <- function(tag) {
+  deps <- htmltools::findDependencies(tag)
+  dep_html <- if (length(deps) > 0L) {
+    as.character(htmltools::renderDependencies(deps))
+  } else {
+    ""
+  }
+  tag_html <- as.character(tag)
+  paste0(dep_html, "\n", tag_html)
+}
+
 #' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
@@ -178,7 +203,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             # Swap first so elements exist in DOM
             session$sendCustomMessage("irid-swap", list(
               id = cf_id,
-              html = as.character(processed$tag)
+              html = render_tag_html(processed$tag)
             ))
 
             # Then mount observers/events
@@ -389,7 +414,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               k <- key
               idx <- match(k, new_keys)
               entry <- build_entry(k, idx, item_list[[idx]])
-              inserts[[length(inserts) + 1L]] <<- as.character(
+              inserts[[length(inserts) + 1L]] <<- render_tag_html(
                 entry$processed$tag
               )
               env$item_mounts[[k]] <- entry
@@ -478,7 +503,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             for (i in build_indices) local({
               ii <- i
               entry <- build_entry(ii, ii, item_list[[ii]])
-              inserts[[length(inserts) + 1L]] <<- as.character(
+              inserts[[length(inserts) + 1L]] <<- render_tag_html(
                 entry$processed$tag
               )
               env$item_mounts[[ii]] <- entry
@@ -596,7 +621,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           processed <- process_tags(tag_tree, counter = counter)
           session$sendCustomMessage("irid-swap", list(
             id = cf_id,
-            html = as.character(processed$tag)
+            html = render_tag_html(processed$tag)
           ))
           env$current_mount <- irid_mount_processed(
             processed, session, depth = depth + 1L
@@ -604,6 +629,50 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
+      })
+    }
+  }
+
+  # Set up widget channels and lifecycle
+  widget_ids <- character(0)
+
+  if (length(result$widgets) > 0L) {
+    for (w in result$widgets) {
+      id <- w$id
+
+      # Collect initial channel values
+      initial_channels <- lapply(w$channels, function(ch) isolate(ch()))
+
+      # Send init message
+      session$sendCustomMessage("irid-widget-init", list(
+        id = id,
+        widget = w$widget_name,
+        render_channel = w$render %||% NULL,
+        config = w$config,
+        channels = initial_channels
+      ))
+
+      widget_ids <- c(widget_ids, id)
+
+      # Create one observer per reactive channel.
+      # Use local() for closure scoping — without it, all observers
+      # would share the last iteration's ch_name/ch_fn/is_render.
+      for (ch_name in names(w$channels)) local({
+        ch_name_local <- ch_name
+        ch_fn <- w$channels[[ch_name_local]]
+        is_render <- identical(ch_name_local, w$render)
+        local_id <- id
+
+        obs <- observe({
+          val <- ch_fn()
+          session$sendCustomMessage("irid-widget-channel", list(
+            id = local_id,
+            channel = ch_name_local,
+            value = val,
+            isRender = is_render
+          ))
+        })
+        observers[[length(observers) + 1L]] <<- obs
       })
     }
   }
@@ -625,6 +694,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             if (!is.null(m$scope)) m$scope$destroy()
           }
         }
+      }
+      # Destroy all tracked widget elements
+      for (wd_id in widget_ids) {
+        session$sendCustomMessage("irid-widget-destroy", list(id = wd_id))
       }
     }
   )

@@ -309,6 +309,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
   events <- list()
   control_flows <- list()
   shiny_outputs <- list()
+  widgets <- list()
 
   walk <- function(node) {
     if (is.null(node)) return(NULL)
@@ -350,6 +351,91 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         otherwise = node$otherwise
       )
       return(anchor_pair(id))
+    }
+
+    if (inherits(node, "irid_widget")) {
+      id <- next_id()
+
+      # Separate args into events (on*), channels (reactive), and static config
+      pending_events <- list()
+      channels <- list()
+      static_config <- list()
+      args <- node$args
+      arg_names <- names(args)
+
+      if (length(args) > 0L && !is.null(arg_names)) {
+        for (i in seq_along(args)) {
+          nm <- arg_names[[i]]
+          val <- args[[i]]
+
+          if (grepl("^on[A-Z]", nm) && is.function(val)) {
+            js_event <- tolower(sub("^on", "", nm))
+            pending_events[[length(pending_events) + 1L]] <- list(
+              event = js_event, handler = val, autobind = FALSE
+            )
+          } else if (is_irid_reactive(val)) {
+            channels[[nm]] <- val
+          } else {
+            # Static config — will be merged with .config below
+            static_config[[nm]] <- val
+          }
+        }
+      }
+
+      # Merge static config with .config (.config wins on name collision)
+      merged_config <- node$.config
+      for (nm in names(static_config)) {
+        if (!(nm %in% names(merged_config))) {
+          merged_config[[nm]] <- static_config[[nm]]
+        }
+      }
+
+      # Merge events that share a DOM event name, then resolve timing.
+      # Timing must be resolved AFTER merge, because merge_pending_events
+      # strips all non-event/non-handler fields. This mirrors how the
+      # regular shiny.tag branch handles timing — resolve after merge.
+      pending_events <- merge_pending_events(pending_events)
+
+      element_event_lookup <- normalize_element_event(node$.event)
+      for (i in seq_along(pending_events)) {
+        e <- pending_events[[i]]
+        cfg <- resolve_event_config(e$event, element_event_lookup)
+        pending_events[[i]]$mode <- cfg$mode
+        pending_events[[i]]$ms <- cfg$ms
+        pending_events[[i]]$leading <- cfg$leading
+        pending_events[[i]]$coalesce <- cfg$coalesce
+        pending_events[[i]]$prevent_default <- FALSE
+      }
+
+      # Add events to result
+      for (e in pending_events) {
+        e$id <- id
+        e$prevent_default <- FALSE
+        events[[length(events) + 1L]] <<- e
+      }
+
+      # Add widget entry to result
+      widgets[[length(widgets) + 1L]] <<- list(
+        id = id,
+        widget_name = node$widget_name,
+        dep = node$dep,
+        render = node$.render,
+        channels = channels,
+        config = merged_config
+      )
+
+      # Inject ID into container, add class, attach dependency
+      container <- node$container
+      container$attribs$id <- id
+      existing_class <- container$attribs$class
+      container$attribs$class <- if (is.null(existing_class) || !nzchar(existing_class)) {
+        "irid-widget"
+      } else {
+        paste(existing_class, "irid-widget")
+      }
+      container <- htmltools::attachDependencies(container, node$dep)
+
+      return(container)
     }
 
     if (is.function(node) && is_irid_reactive(node)) {
@@ -514,7 +600,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
   cleaned_tag <- walk(tag)
   list(tag = cleaned_tag, bindings = bindings, events = events,
        control_flows = control_flows, shiny_outputs = shiny_outputs,
-       counter = counter)
+       widgets = widgets, counter = counter)
 }
 
 #' irid JavaScript dependency

@@ -38,4 +38,8 @@ irid applies controlled input changes immediately in the browser before the serv
 
 irid components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `iridOutput()` and `renderIrid()`.
 
+### [CodeMirror Widget](../examples/codemirror/app.R){target="_blank"}
+
+A CodeMirror code editor wrapped as an irid widget, demonstrating the full widget mechanism: `htmlDependency`, `irid.registerWidget()`, `irid.sendEvent()`, and `IridWidget()`. The editor content and syntax-highlighting mode are reactive channels; changes are forwarded to R via `onChange` and `onCursorActivity` event handlers. The editor's lifecycle is managed by `When` — showing and hiding the editor triggers widget init and destroy messages. Requires internet access for the CodeMirror CDN.
+
 </div>

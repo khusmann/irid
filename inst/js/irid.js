@@ -8,6 +8,20 @@
   var staleShowTimerId = null;
   var staleClearTimerId = null;
   var STALE_CLEAR_DELAY = 100;  // ms to wait after idle before removing overlay
+  window.irid = window.irid || {};
+  irid.widgets = {};
+  irid._pendingInits = {};
+  irid.registerWidget = function(name, initFn) {
+    irid.widgets[name] = initFn;
+    // Flush any pending inits queued while this widget script was loading.
+    var pending = irid._pendingInits[name];
+    if (pending) {
+      for (var i = 0; i < pending.length; i++) {
+        initFn(pending[i]);
+      }
+      delete irid._pendingInits[name];
+    }
+  };
 
   function markStale() {
     if (staleClearTimerId !== null) {
@@ -503,4 +517,107 @@
       }
     });
   });
+
+  // --- Deep equality helper (for widget tracking) ---
+
+  function deepEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null) return false;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return false;
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!deepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    var keysA = Object.keys(a);
+    var keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (var k = 0; k < keysA.length; k++) {
+      if (!Object.prototype.hasOwnProperty.call(b, keysA[k])) return false;
+      if (!deepEqual(a[keysA[k]], b[keysA[k]])) return false;
+    }
+    return true;
+  }
+
+  // --- irid.sendEvent ---
+  // Programmatic event dispatch for widget JS. Shares the `sequences`
+  // counter and `sendPayload` path with DOM events so optimistic-update
+  // tracking and stale-indicator integration work identically.
+  irid.sendEvent = function(elementId, eventName, payload) {
+    var inputId = 'irid_ev_' + elementId + '_' + eventName.toLowerCase();
+    payload = payload || {};
+    payload.id = elementId;
+    payload.nonce = Math.random();
+    if (!sequences[elementId]) sequences[elementId] = 0;
+    payload.__irid_seq = ++sequences[elementId];
+    sendPayload(inputId, payload);
+  };
+
+  // --- Widget message handlers ---
+
+  Shiny.addCustomMessageHandler('irid-widget-init', function(msg) {
+    var init = irid.widgets[msg.widget];
+    if (init) {
+      init(msg);
+    } else {
+      // Widget script hasn't loaded yet — queue the init so it fires
+      // when irid.registerWidget() is called.
+      irid._pendingInits[msg.widget] = irid._pendingInits[msg.widget] || [];
+      irid._pendingInits[msg.widget].push(msg);
+    }
+  });
+
+  Shiny.addCustomMessageHandler('irid-widget-channel', function(msg) {
+    var el = document.getElementById(msg.id);
+    if (!el) return;
+    el.dispatchEvent(new CustomEvent('irid-widget-channel', {
+      detail: { channel: msg.channel, value: msg.value, isRender: !!msg.isRender }
+    }));
+  });
+
+  Shiny.addCustomMessageHandler('irid-widget-destroy', function(msg) {
+    var el = document.getElementById(msg.id);
+    if (!el) return;
+    el.dispatchEvent(new CustomEvent('irid-widget-destroy', { detail: msg }));
+  });
+
+  // --- Widget per-field tracking ---
+
+  irid._trackers = {};
+
+  irid.trackChannel = function(el) {
+    var id = el.id;
+    if (irid._trackers[id]) return irid._trackers[id];
+
+    var lastSent = {};
+    var lastReceived = {};
+
+    var tracker = {
+      recordSent: function(fieldName, value) {
+        lastSent[fieldName] = value;
+      },
+      receiveChannel: function(fieldName, serverValue, onCorrect) {
+        var sent = lastSent[fieldName];
+        lastReceived[fieldName] = serverValue;
+        if (sent === undefined) return 'no-change';
+        if (deepEqual(sent, serverValue)) return 'accepted';
+        if (onCorrect) onCorrect(serverValue);
+        return 'corrected';
+      },
+      _destroy: function() {
+        delete irid._trackers[id];
+      }
+    };
+
+    irid._trackers[id] = tracker;
+    el.addEventListener('irid-widget-destroy', function() {
+      tracker._destroy();
+    });
+
+    return tracker;
+  };
 })();
