@@ -60,7 +60,7 @@ as a single R component constructor that composes inside `When` / `Each` /
 
 ```r
 IridWidget(
-  type,           # string — registry key, must match a JS-side defineWidget
+  name,           # string — registry key, must match a JS-side defineWidget
   props    = list(),
   events   = list(),
   deps     = NULL,
@@ -71,9 +71,9 @@ IridWidget(
 
 ### Argument semantics
 
-- **`type`** (required, character scalar). The widget kind, e.g.
-  `"codemirror"`. The client looks this up in its `defineWidget`
-  registry. If the type isn't registered when an init message arrives
+- **`name`** (required, character scalar). The widget's registry name,
+  e.g. `"codemirror"`. The client looks this up in its `defineWidget`
+  registry. If the name isn't registered when an init message arrives
   (because the script tag hasn't finished loading), the init is queued
   and drained when the matching `defineWidget` call lands. The user
   picks the string; convention is to use the package- or
@@ -126,9 +126,9 @@ IridWidget(
   the worked example.
 
 - **`events`** (named list of handler functions). Event sinks flowing
-  client→server. Each entry `name = handler` becomes an event entry in
+  client→server. Each entry `<event> = handler` becomes an event entry in
   `process_tags` output with:
-  - `event = name` (lowercase, the convention is `change`, `select`,
+  - `event = <event>` (lowercase, the convention is `change`, `select`,
     `zoom`, `mouseover`, etc. — no `on` prefix because there's no DOM
     event mediating)
   - `handler = handler`
@@ -158,7 +158,7 @@ IridWidget(
 - **`container`** (`shiny.tag` or `NULL`). Optional user-supplied
   wrapper. Defaults to `tags$div()`. irid imposes only two invariants:
   the container is given an auto-generated `id`, and a
-  `data-irid-widget="<type>"` attribute is added so the client's
+  `data-irid-widget="<name>"` attribute is added so the client's
   detach-walker can find live widget instances inside a range that is
   about to be torn down. If the user pre-sets `id`, irid honors it
   (mirrors the existing `process_tags` behaviour for `id` on event
@@ -212,7 +212,7 @@ common pattern). The canonical wrapper:
 ```r
 CodeMirror <- function(content, on_change = NULL, ...) {
   IridWidget(
-    type   = "codemirror",
+    name   = "codemirror",
     props  = list(content = content),
     events = list(change = write_back(content, "content", then = on_change)),
     ...
@@ -318,7 +318,7 @@ parameter, default `NULL`, layer wrapper defaults via
 ```r
 CodeMirror <- function(content, ..., .event = NULL) {
   IridWidget(
-    type   = "codemirror",
+    name   = "codemirror",
     props  = list(content = content),
     events = list(change = write_back(content, "content")),
     .event = event_defaults(
@@ -367,7 +367,7 @@ processed tag tree:
   bug.)
 - One entry appended to `$widget_inits` — a new sibling list to
   `$bindings` / `$events` / `$control_flows` / `$shiny_outputs` —
-  carrying `{id, type, prop_fns, static_props, deps}` where
+  carrying `{id, name, prop_fns, static_props, deps}` where
   `prop_fns` is the named list of callable prop entries and
   `static_props` is the named list of non-callable entries. Mount
   resolves them at init-message construction: `isolate(fn())` for
@@ -514,15 +514,15 @@ mount.R.
 ```js
 {
   id: "irid-7",
-  type: "codemirror",
+  name: "codemirror",          // widget registry name
   props: {
-    content: "initial code\n",   // came from a reactive on R side
-    theme: "dracula",            // came from a constant on R side
+    content: "initial code\n", // came from a reactive on R side
+    theme: "dracula",          // came from a constant on R side
     language: "r",
     lineNumbers: true
   },
   deps: [
-    { name: "codemirror", version: "6.0.1",
+    { name: "cm6", version: "6.0.1",    // htmltools dep name (separate concept)
       script: "...", stylesheet: "..." }
   ]
 }
@@ -545,13 +545,13 @@ Client receipt:
    `<link>` and `<script>` tags into `<head>`. Already-loaded deps
    are no-ops. Returns a promise (or accepts a callback) for "all
    deps ready".
-2. Once deps ready, look up `defineWidget`'s registry for `type`.
-3. **If type is registered**: look up `document.getElementById(id)`,
+2. Once deps ready, look up `defineWidget`'s registry for `name`.
+3. **If the name is registered**: look up `document.getElementById(id)`,
    call the factory `init(el, props, send)`, store the returned
    `{update, destroy}` handle in a per-id widget map.
-4. **If type is not registered** (script still parsing /
-   load order race): queue `{id, props, el}` under the type key.
-   `defineWidget(type, factory)` drains the queue for `type` when
+4. **If the name is not registered** (script still parsing /
+   load order race): queue `{id, props, el}` under the name key.
+   `defineWidget(name, factory)` drains the queue for `name` when
    called.
 
 The init message is **idempotent on the client**: if a widget is
@@ -563,7 +563,7 @@ by the server (it shouldn't, but defense in depth costs nothing).
 
 - **Async `<script>` order.** Handled by the registry queue:
   `irid-widget-init` can arrive before its `defineWidget` call lands.
-  The init is buffered until the type is registered.
+  The init is buffered until the name is registered.
 - **Repeated re-insertion of `<script src=>`.** Deps never flow
   through the HTML stream. `irid-swap` / `irid-mutate` HTML carries
   only the container element. Deps come in on `irid-widget-init`,
@@ -593,15 +593,15 @@ A small object exported on `window.irid`:
 
 ```js
 window.irid = {
-  defineWidget(type, factory) { ... },
+  defineWidget(name, factory) { ... },
   sendWidgetEvent(id, event, payload) { ... }
 }
 ```
 
-- **`defineWidget(type, factory)`**: register a widget kind. `factory`
-  is `function (el, props, send) -> { update, destroy }`. If the type
-  already has queued inits, the registration drains them in arrival
-  order before returning.
+- **`defineWidget(name, factory)`**: register a widget under a given
+  registry name. `factory` is `function (el, props, send) -> { update,
+  destroy }`. If the name already has queued inits, the registration
+  drains them in arrival order before returning.
 - **`sendWidgetEvent(id, event, payload)`**: route an event payload
   through the managed-state pipeline for the `(id, event)` pair.
   `event` is the lowercase event name from the R `events` list. The
@@ -736,7 +736,7 @@ CodeMirror <- function(
   .event   = NULL
 ) {
   IridWidget(
-    type   = "codemirror",
+    name   = "codemirror",
     props  = list(content = content, theme = theme, language = language),
     events = list(change = write_back(content, "content", then = onChange)),
     deps   = CodeMirrorDeps(),
@@ -943,16 +943,16 @@ every caller.
 | Constructor signature — reactive in, events out, static config? | Two named-list args: `props` (per-key dispatch on `is.function()` — callable = observed reactive, non-callable = init-only constant), `events` (callbacks out, registered per event name). Plus `container`, `deps`, `.event`. No separate `state` / `config` split; the distinction lives per-key inside `props` and matches irid's "functions, not expressions" rule. |
 | Should widgets autobind? | **No framework-level autobind; per-widget round-trip lives in the wrapper.** irid exports two helpers: `can_accept_write()` (writability predicate) and `write_back(callable, field, then = NULL)` (handler factory that combines the write, the writability gate, and an optional chained user handler in one line per event). Read-only snap-back happens automatically via the existing force-send-on-no-op path — `write_back` only needs the listener registered. Boilerplate is paid once per wrapper, never per call. |
 | JS/CSS dep attachment? | `deps = ` arg accepts one `html_dependency` or a list. `process_tags` lifts them off the widget node into `widget_inits` because `htmltools::as.character()` strips them. Mount ships them on the `irid-widget-init` message; client renders via `Shiny.renderDependencies` (dedup by name+version). |
-| How does the JS file declare "I handle widget type X"? | Explicit registry: `irid.defineWidget("type", factory)`. Inits arriving before the registration are queued and drained on registration. Robust under arbitrary script load order. |
+| How does the JS file declare "I handle widget named X"? | Explicit registry: `irid.defineWidget("name", factory)`. Inits arriving before the registration are queued and drained on registration. Robust under arbitrary script load order. |
 | JS lifecycle contract? | Factory returns `{update, destroy}`. `update(key, value, sequence)` per-key — only fires for keys that were callable on the R side; init-only keys have no update branch. `destroy()` before container detachment. Factory signature `(el, props, send)`. |
 | `When`/`Each`/`Match` teardown ordering? | Server-side: `irid_mount_processed`'s `destroy()` tears down prop and event observers as part of the enclosing mount's `observers` list. Client-side: `irid-swap` / `irid-mutate` detach walkers find `data-irid-widget` elements in the detached fragment and call their `destroy()` hooks before GC. No `irid-widget-destroy` message — purely client-driven. |
-| Container element ownership? | User-supplied via `container = tags$div(...)`. irid injects `id` and `data-irid-widget = type`. User can set classes, styles, even children. Default `tags$div()`. |
+| Container element ownership? | User-supplied via `container = tags$div(...)`. irid injects `id` and `data-irid-widget = name`. User can set classes, styles, even children. Default `tags$div()`. |
 | Widget identity across re-renders? | Tied to container's DOM element identity. **Survives** `Each` keyed reorders (insertBefore preserves identity). **Does not survive** `When`/`Match` branch flips or `Each` shape-change rebuilds — those rebuild the widget fresh. Same semantics as `<input>` focus/scroll/selection state. |
 | Initial props read — reactive dep? | Callable props are read via `isolate(fn())` at init-message construction. Static props pass through literally. Mount itself does not subscribe to widget props. The per-key bindings (one per callable prop) subscribe — same `observe()` pattern as existing reactive attrs. |
 | Widget events sharing timing / sequence machinery? | Yes. Widget events ride `irid-events` with `source: "widget"`. The client initializes managed state (throttle/debounce/coalesce/sequence) but skips `addEventListener`. The widget JS pushes via `irid.sendWidgetEvent`, which routes through the managed state and `Shiny.setInputValue` — `.event` config and stale indicator work transparently. |
 | `.event` defaults for widget events? | Three-tier: caller's `.event` > wrapper defaults (via `event_defaults()` helper) > framework default = `event_immediate()` for every widget event (no `input → debounce(200)` special case — that rule is DOM-tuned). Wrapper convention is to accept `.event` as a passthrough arg and layer per-event defaults with `event_defaults(.event, change = ..., ...)`. |
 | DOM events on the widget container? | Allowed — `container = tags$div(onClick = ...)` works; `process_tags` extracts those as ordinary DOM events. They coexist with widget events on the same element id and share the same `.event` lookup. Name collisions (e.g. widget JS emits `"click"` while user has `onClick`) are author error. |
-| Race: script not loaded when init arrives? | Registry queue. Inits buffer per type until `defineWidget(type, ...)` lands; drained on registration. |
+| Race: script not loaded when init arrives? | Registry queue. Inits buffer per name until `defineWidget(name, ...)` lands; drained on registration. |
 | Race: `<script src>` re-execution on re-insertion? | Avoided. Deps never flow through swap/mutate HTML. They ride `irid-widget-init` and `Shiny.renderDependencies` dedupes — one `<script>` fetch per session. |
 
 ---
@@ -963,7 +963,7 @@ The widget mechanism extends three existing testing surfaces and adds a
 fourth:
 
 - **`process_tags` extraction** gets:
-  - widget node produces `$widget_inits` entry with `{id, type, prop_fns, static_props, deps}`
+  - widget node produces `$widget_inits` entry with `{id, name, prop_fns, static_props, deps}`
   - callable prop keys become `$bindings` with `attr = "widget:<key>"`
   - non-callable prop keys produce no binding (their value rides in
     `static_props` on the init message only)

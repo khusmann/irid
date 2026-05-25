@@ -412,7 +412,7 @@ PlotlyOutput <- function(
   spec_prop <- function() to_plotly_spec(spec())
 
   IridWidget(
-    type   = "plotly",
+    name   = "plotly",
     props  = c(list(spec = spec_prop), state),
     events = build_event_handlers(
       state               = state,
@@ -557,7 +557,7 @@ Notes on what's load-bearing on the substrate:
 
 No new messages. The traffic is exactly the widget-substrate messages:
 
-- **`irid-widget-init`** — `{ id, type: "plotly", props: { spec, xaxis_range, ... }, deps: [plotlyDep] }`. Sent after the swap that introduces the placeholder div.
+- **`irid-widget-init`** — `{ id, name: "plotly", props: { spec, xaxis_range, ... }, deps: [plotlyDep] }`. Sent after the swap that introduces the placeholder div.
 - **`irid-attr widget:<key>`** — fired by the per-key prop observers on the R side. The widget routes these to its `update(key, value, sequence)` hook.
 - **`irid-events`** with `source: "widget"` — set up at mount for each registered event in the wrapper's `events` list, with the wrapper's `.event` timing applied.
 
