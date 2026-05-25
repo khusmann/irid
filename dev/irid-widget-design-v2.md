@@ -128,9 +128,14 @@ IridWidget(
 - **`events`** (named list of handler functions). Event sinks flowing
   client→server. Each entry `<event> = handler` becomes an event entry in
   `process_tags` output with:
-  - `event = <event>` (lowercase, the convention is `change`, `select`,
-    `zoom`, `mouseover`, etc. — no `on` prefix because there's no DOM
-    event mediating)
+  - `event = <event>` (lowercase kebab-case by convention, matching the
+    web's `CustomEvent` tradition — single-word names like `change`,
+    `select`, `zoom`; multi-word names like `cursor-changed`, `doc-change`.
+    No `on` prefix because there's no DOM event mediating. The R-side
+    wrapper translates between this wire name and its R-facing `on*` arg
+    — see the *Multi-event wrappers* sketch for the pairing. Multi-word
+    entries need backticks in R, e.g. `` `cursor-changed` = handler ``,
+    which usefully signals "wire name, not R identifier" at the call site.)
   - `handler = handler`
   - `source = "widget"` — a new field that mount forwards to the client
     on the `irid-events` message. The client distinguishes widget events
@@ -279,19 +284,41 @@ deviations should be documented.
 #### Multi-event wrappers
 
 For widgets with several round-trip keys, the wrapper becomes a
-table of `write_back` calls:
+table of `write_back` calls. The R-side wrapper args are camelCase
+`on*` (mirroring the DOM-event convention elsewhere in irid); the
+events-list keys are kebab-case (the wire/JS name, matching the web's
+`CustomEvent` convention), and the wrapper provides the translation:
 
 ```r
-events = list(
-  change           = write_back(content,   "content",   then = onChange),
-  `cursor-changed` = write_back(cursor,    "cursor",    then = onCursor),
-  scroll           = write_back(scrollTop, "scrollTop"),
-  blur             = onBlur %||% function(e) NULL
-)
+# Wrapper signature: camelCase on* args
+MyWidget <- function(
+  content, cursor, scrollTop,
+  onChange        = NULL,
+  onCursorChanged = NULL,
+  onScroll        = NULL,
+  onBlur          = NULL,
+  ...
+) {
+  IridWidget(
+    name   = "my-widget",
+    props  = list(content = content, cursor = cursor, scrollTop = scrollTop),
+    events = list(                                # kebab-case wire names
+      change           = write_back(content,   "content",   then = onChange),
+      `cursor-changed` = write_back(cursor,    "cursor",    then = onCursorChanged),
+      scroll           = write_back(scrollTop, "scrollTop", then = onScroll),
+      blur             = onBlur %||% function(e) NULL
+    ),
+    ...
+  )
+}
 ```
 
-One line per event. The wrapper stays narrow regardless of how many
-round-trip keys the widget exposes.
+One line per event in the `events` list. The R↔wire mapping is "strip
+`on`, kebab the camelCase" — i.e. `onCursorChanged` ↔ `cursor-changed`.
+For standard DOM events on the container (`onClick`, `onMouseDown`), the
+platform happens to use no-separator instead (`click`, `mousedown`), but
+the mental model is the same: R-side stays camelCase, wire-side follows
+the appropriate web convention for its category.
 
 ### Wrapper defaults — `event_defaults()`
 
@@ -1056,3 +1083,15 @@ fourth:
 - **Built-in widgets shipped in the `irid` package.** Widgets live in
   user packages or example dirs; `irid` provides only `IridWidget()`
   and the JS runtime.
+- **Custom DOM events on regular `tags$*` elements.** This doc sets a
+  kebab-case convention for *widget* events (matching the web's
+  `CustomEvent` tradition), but irid's existing DOM-event surface on
+  regular tags transforms `on*` args to no-separator form
+  (`onMouseDown` → `mousedown`) to match standard DOM event names.
+  Custom DOM events fired by Web Components or third-party JS —
+  `CustomEvent("cursor-changed")` — are therefore not reachable through
+  `tags$*(onCursorChanged = ...)` today. Aligning the DOM-event surface
+  to use a *lookup-with-kebab-fallback* transformation (standard event
+  names keep no-separator; everything else falls back to kebab) is the
+  follow-up that closes this gap and unlocks the Web Components
+  ecosystem at low ceremony. See `custom-dom-events-design.md`.
