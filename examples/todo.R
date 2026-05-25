@@ -1,27 +1,28 @@
 # Todo List
 #
 # A TodoMVC-style application demonstrating reactive list management with irid.
-# Items are stored as a `reactiveVal` holding a plain R list; adding, toggling,
-# and removing items are ordinary functions that update that list. The filter
-# tabs and item count derive reactively from the same source, so everything
-# stays consistent without any manual synchronization.
+# Items are stored as a `reactiveVal` holding a plain R list; adding and
+# removing items are ordinary functions that update that list. Toggling
+# happens through the per-item mini-store autobind — `checked = todo$done`
+# writes back through the slot accessor into `todos`, no explicit handler
+# needed.
 #
-# `Each(filtered, ...)` uses positional reconciliation (the default
-# `by = NULL`): each slot is a mini-store over `filtered()[[i]]`, so when
-# the filter changes the same DOM nodes are reused and only the fields
-# that changed fire their bindings.
+# `Each(todos, by = \(t) t$id, ...)` iterates the live, writable source so
+# autobind writes have somewhere to go. Filtering is per-item: each entry
+# wraps its body in `When(\() matches_filter(...), ...)`, so hidden items
+# yield nothing while their slot identity (and any DOM state) is preserved
+# across filter changes.
 
 library(irid)
 library(bslib)
 
-TodoItem <- function(todo, on_toggle, on_remove) {
+TodoItem <- function(todo, on_remove) {
   tags$li(
     class = "list-group-item d-flex align-items-center gap-2",
     tags$input(
       type = "checkbox",
       class = "form-check-input mt-0",
-      checked = todo$done,
-      onClick = \() on_toggle()
+      checked = todo$done
     ),
     tags$span(
       class = \() if (todo$done()) "flex-grow-1 text-decoration-line-through text-muted" else "flex-grow-1",
@@ -30,7 +31,7 @@ TodoItem <- function(todo, on_toggle, on_remove) {
     tags$button(
       class = "btn btn-sm btn-outline-danger",
       onClick = \() on_remove(),
-      "\u00d7"
+      "×"
     )
   )
 }
@@ -53,27 +54,22 @@ TodoApp <- function() {
     }
   }
 
-  toggle_todo <- function(id) {
-    todos(
-      lapply(todos(), \(t) {
-        if (t$id == id) { t$done <- !t$done }
-        t
-      })
-    )
-  }
-
   remove_todo <- function(id) {
     todos(Filter(\(t) t$id != id, todos()))
   }
 
-  filtered <- \() switch(
-    filter(),
-    all = todos(),
-    active = Filter(\(t) !t$done, todos()),
-    completed = Filter(\(t) t$done, todos())
-  )
+  matches_filter <- function(done, f) {
+    switch(f, all = TRUE, active = !done, completed = done)
+  }
 
   remaining <- \() sum(!vapply(todos(), \(t) t$done, logical(1)))
+  visible_count <- \() {
+    sum(vapply(
+      todos(),
+      \(t) matches_filter(t$done, filter()),
+      logical(1)
+    ))
+  }
 
   page_fluid(
     # Add form
@@ -133,21 +129,20 @@ TodoApp <- function() {
       card_body(
         class = "p-0",
         When(
-          \() length(filtered()) > 0,
+          \() visible_count() > 0,
           \() tags$ul(
             class = "list-group list-group-flush",
-            Each(filtered, \(todo) {
-              TodoItem(
-                todo,
-                on_toggle = \() toggle_todo(todo$id()),
-                on_remove = \() remove_todo(todo$id())
+            Each(todos, by = \(t) t$id, \(todo) {
+              When(
+                \() matches_filter(todo$done(), filter()),
+                \() TodoItem(todo, on_remove = \() remove_todo(todo$id()))
               )
             })
           ),
           otherwise = \() tags$div(
             class = "text-center text-muted p-4",
             When(
-              \() filter() == "all",
+              \() length(todos()) == 0,
               \() "No todos yet. Add one above!",
               otherwise = \() "No matching todos."
             )
