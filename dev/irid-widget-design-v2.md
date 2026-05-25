@@ -169,13 +169,38 @@ IridWidget(
 
 - **`.event`** (`irid_event_config` or named list). Element-level
   timing config — same shape and semantics as on a plain tag. A
-  scalar `event_throttle(...)` covers every event the widget emits; a
-  named list keyed by widget-event name overrides per event. Unmapped
-  events fall back to the per-event default rule. Because widget event
-  names aren't DOM events, the default rule keys on `input` →
-  `event_debounce(200)`, everything else → `event_immediate()` — same
-  as for plain tags. (Authors who want a different default per widget
-  type document it; we don't have a per-type override layer.)
+  scalar `event_throttle(...)` broadcasts to every event on the
+  element; a named list keyed by event name overrides per event.
+  Resolution is **three-tier**:
+
+  1. **Caller's `.event`** (highest). Whatever the wrapper passes
+     in. A scalar broadcasts and wins everywhere; a named list wins
+     per-event.
+  2. **Wrapper defaults** (middle). The wrapper layers its preferred
+     per-event config via `event_defaults(.event, change = ...)`
+     before handing `.event` to `IridWidget`. See the *Wrapper
+     defaults* section below.
+  3. **Framework default** (lowest). For widget events, every event
+     defaults to `event_immediate()` — no `input → debounce(200)`
+     special case (that rule is DOM-tuned and doesn't fit
+     library-specific widget event names). For DOM events on the
+     container — see next bullet — the existing tag rule applies
+     (`input → debounce(200)`, everything else `immediate`).
+
+  This `.event` covers both *widget* events (from the `events` arg)
+  and any *DOM* events the user puts directly on the container (see
+  next bullet). Both join the same per-element event table and look
+  up by event name. Collision between a widget event name and a DOM
+  event name on the same container is author error; we don't
+  disambiguate. In practice JS libraries use library-specific names
+  (`cursor-changed`, `nodeSelect`) that don't collide with DOM
+  event names.
+
+- **DOM events on the container.** The container is a normal
+  `shiny.tag`, so `container = tags$div(onClick = \() ...)` works
+  and the `onClick` is extracted by `process_tags` exactly like a
+  regular DOM event. DOM and widget events coexist on the same
+  element id, both subject to the same `.event` lookup.
 
 - **`.prevent_default`** unused for widget events (no underlying DOM
   event to suppress) but accepted for shape-consistency with `tags$*`
@@ -273,6 +298,63 @@ events = list(
 
 One line per event. The wrapper stays narrow regardless of how many
 round-trip keys the widget exposes.
+
+### Wrapper defaults — `event_defaults()`
+
+Different widgets want different transport defaults: a CodeMirror
+`change` is best debounced; a Plotly `click` should fire immediately;
+a Leaflet `moveend` might want throttling. The widget *wrapper*
+knows what's sensible; the framework can't. So irid exports a small
+helper that lets the wrapper layer its preferred per-event defaults
+underneath whatever `.event` the caller passes:
+
+```r
+event_defaults <- function(user, ...) {
+  defaults <- list(...)
+  if (is.null(user)) return(defaults)
+  if (inherits(user, "irid_event_config")) return(user)  # caller scalar wins everywhere
+  modifyList(defaults, user)                              # caller's per-event entries win
+}
+```
+
+The canonical wrapper convention: accept `.event` as a passthrough
+parameter, default `NULL`, layer wrapper defaults via
+`event_defaults()`:
+
+```r
+CodeMirror <- function(content, ..., .event = NULL) {
+  IridWidget(
+    type   = "codemirror",
+    props  = list(content = content),
+    events = list(change = write_back(content, "content")),
+    .event = event_defaults(
+      .event,
+      change = event_debounce(200, coalesce = TRUE)
+    ),
+    ...
+  )
+}
+```
+
+Three call-site shapes work uniformly:
+
+```r
+# 1) Caller passes nothing → wrapper defaults apply.
+CodeMirror(content = doc)
+
+# 2) Caller passes a scalar → broadcasts and wins everywhere,
+#    wrapper defaults are dropped.
+CodeMirror(content = doc, .event = event_throttle(100))
+
+# 3) Caller passes a named list → per-event override; wrapper
+#    defaults fill in any events the caller didn't mention.
+CodeMirror(content = doc, .event = list(change = event_immediate()))
+```
+
+`event_defaults()` is generic — plain-tag wrappers can use it too.
+A `SearchInput` wrapper might write
+`event_defaults(.event, input = event_debounce(500))` to make
+debounced-input the default for its callers.
 
 ### What `IridWidget` is, structurally
 
@@ -654,7 +736,8 @@ CodeMirror <- function(
   content,
   theme     = "dracula",
   language  = "r",
-  on_change = NULL
+  on_change = NULL,
+  .event    = NULL
 ) {
   IridWidget(
     type   = "codemirror",
@@ -665,7 +748,10 @@ CodeMirror <- function(
       class = "border rounded",
       style = "height: 300px; overflow: hidden;"
     ),
-    .event = event_debounce(200, coalesce = TRUE)
+    .event = event_defaults(
+      .event,
+      change = event_debounce(200, coalesce = TRUE)
+    )
   )
 }
 ```
@@ -868,6 +954,8 @@ every caller.
 | Widget identity across re-renders? | Tied to container's DOM element identity. **Survives** `Each` keyed reorders (insertBefore preserves identity). **Does not survive** `When`/`Match` branch flips or `Each` shape-change rebuilds — those rebuild the widget fresh. Same semantics as `<input>` focus/scroll/selection state. |
 | Initial props read — reactive dep? | Callable props are read via `isolate(fn())` at init-message construction. Static props pass through literally. Mount itself does not subscribe to widget props. The per-key bindings (one per callable prop) subscribe — same `observe()` pattern as existing reactive attrs. |
 | Widget events sharing timing / sequence machinery? | Yes. Widget events ride `irid-events` with `source: "widget"`. The client initializes managed state (throttle/debounce/coalesce/sequence) but skips `addEventListener`. The widget JS pushes via `irid.sendWidgetEvent`, which routes through the managed state and `Shiny.setInputValue` — `.event` config and stale indicator work transparently. |
+| `.event` defaults for widget events? | Three-tier: caller's `.event` > wrapper defaults (via `event_defaults()` helper) > framework default = `event_immediate()` for every widget event (no `input → debounce(200)` special case — that rule is DOM-tuned). Wrapper convention is to accept `.event` as a passthrough arg and layer per-event defaults with `event_defaults(.event, change = ..., ...)`. |
+| DOM events on the widget container? | Allowed — `container = tags$div(onClick = ...)` works; `process_tags` extracts those as ordinary DOM events. They coexist with widget events on the same element id and share the same `.event` lookup. Name collisions (e.g. widget JS emits `"click"` while user has `onClick`) are author error. |
 | Race: script not loaded when init arrives? | Registry queue. Inits buffer per type until `defineWidget(type, ...)` lands; drained on registration. |
 | Race: `<script src>` re-execution on re-insertion? | Avoided. Deps never flow through swap/mutate HTML. They ride `irid-widget-init` and `Shiny.renderDependencies` dedupes — one `<script>` fetch per session. |
 
@@ -913,6 +1001,21 @@ fourth:
   - missing `field` in payload at runtime → `callable(NULL)`; the
     widget author / wrapper author is responsible for emitting the
     declared field
+
+- **Public helper `event_defaults(user, ...)`** gets:
+  - `user = NULL` → returns the `...` list as-is
+  - `user` is a scalar `irid_event_config` → returns `user` unchanged
+    (caller scalar wins everywhere; wrapper defaults dropped)
+  - `user` is a named list → returns a `modifyList` merge where
+    `user`'s entries win over the `...` defaults; defaults fill in
+    for events `user` didn't mention
+  - malformed `user` (anything else) → defers to the existing
+    `normalize_element_event` validation in `process_tags.R`, so
+    errors surface at process time with the same messages
+  - widget framework default = `event_immediate()` for every event
+    (no `input` special case)
+  - DOM framework default unchanged: `input → event_debounce(200)`,
+    everything else → `event_immediate()`
 
 - **Observer lifecycle** gets:
   - destroying the enclosing mount tears down widget prop observers and event observers
