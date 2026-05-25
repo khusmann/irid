@@ -289,10 +289,10 @@ table of `write_back` calls:
 
 ```r
 events = list(
-  change           = write_back(content,   "content",   then = on_change),
-  `cursor-changed` = write_back(cursor,    "cursor",    then = on_cursor),
+  change           = write_back(content,   "content",   then = onChange),
+  `cursor-changed` = write_back(cursor,    "cursor",    then = onCursor),
   scroll           = write_back(scrollTop, "scrollTop"),
-  blur             = on_blur %||% function(e) NULL
+  blur             = onBlur %||% function(e) NULL
 )
 ```
 
@@ -730,19 +730,21 @@ CodeMirrorDeps <- function() {
 #'   are applied live via the JS `setTheme` API.
 #' @param language  language name. **Init-only** per CodeMirror's API.
 #'   A reactive value is read once at mount; later changes are ignored.
-#' @param on_change optional side handler `\(e) ...` to run after the
-#'   write-back. Useful for logging or cross-field effects.
+#' @param onChange  optional side handler `\(e) ...` to run after the
+#'   write-back. Named `onChange` to mirror irid's tag-event convention
+#'   (`tags$input(onChange = ...)`). Useful for logging or cross-field
+#'   effects.
 CodeMirror <- function(
   content,
-  theme     = "dracula",
-  language  = "r",
-  on_change = NULL,
-  .event    = NULL
+  theme    = "dracula",
+  language = "r",
+  onChange = NULL,
+  .event   = NULL
 ) {
   IridWidget(
     type   = "codemirror",
     props  = list(content = content, theme = theme, language = language),
-    events = list(change = write_back(content, "content", then = on_change)),
+    events = list(change = write_back(content, "content", then = onChange)),
     deps   = CodeMirrorDeps(),
     container = tags$div(
       class = "border rounded",
@@ -776,10 +778,10 @@ CodeMirror(content = doc, theme = current_theme)
 CodeMirror(content = reactive(paste0("# Generated\n", source_text())))
 
 # Bring-your-own side handler. The wrapper's `change` handler calls
-# `on_change(e)` after the write, in the same flush.
+# `onChange(e)` after the write, in the same flush.
 CodeMirror(
-  content   = doc,
-  on_change = \(e) audit_log(now(), e$content)
+  content  = doc,
+  onChange = \(e) audit_log(now(), e$content)
 )
 
 # Caller passes a reactive to `language` — silently one-shot,
