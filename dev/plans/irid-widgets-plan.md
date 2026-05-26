@@ -61,17 +61,29 @@ suggested dependency; bundling it with the framework would muddy the
      (lowercase kebab — no `on*` stripping). Timing comes from `.event`
      via the same lookup as DOM events, but the framework default for
      widget events is `event_immediate()` (no `input → debounce(200)`
-     special case). Add a `widget_default_for_event()` helper that
-     returns `event_immediate()` unconditionally, and dispatch on a new
-     `source` arg threaded through `resolve_event_config()`.
+     special case — that rule is DOM-tuned). Implementation: define
+     `widget_default_for_event(event_name) { event_immediate() }` and
+     call it from the widget branch where the DOM branch calls
+     `default_for_event`. No threading needed — the branches already
+     diverge on construct class.
   4. Appends one entry to a new top-level `widget_inits` list:
      `{id, name, prop_fns, static_props, deps}`. `prop_fns` is the
      named list of callable props (so mount can `isolate(fn())` them
      into the init message); `static_props` carries the literal
-     non-callable values.
-  5. Returns the user-supplied container (or `tags$div()`), stamped
-     with the auto-id and `data-irid-widget = name`. Container children
-     pass through unchanged.
+     non-callable values. **`static_props` shape contract:** these
+     values are JSON-serialized into the init message, so widgets
+     should accept scalars, vectors, lists, and named lists. Complex
+     R objects (data frames, S4, environments) don't survive
+     `jsonlite` cleanly — that's the wrapper author's problem to
+     pre-serialize (e.g. PlotlyOutput's `to_plotly_spec` converts a
+     plotly object to a JSON-clean list before it reaches the
+     framework).
+  5. Returns the user-supplied container (or `tags$div()`) with
+     `attribs$id` set (honoring a user-supplied id, otherwise the
+     auto-generated one — same posture as the existing event-element
+     path) and `attribs[["data-irid-widget"]]` set to `name` (irid
+     owns this attribute; if the user set it on the container, irid
+     overwrites). Container children pass through unchanged.
 
 - `process_tags`'s top-level return value gains a `$widget_inits` slot
   alongside `$bindings`, `$events`, `$control_flows`, `$shiny_outputs`,
@@ -130,12 +142,16 @@ suggested dependency; bundling it with the framework would muddy the
   alongside. Add a small helper `collect_widget_deps(processed)` in
   `R/widget.R` that flattens `processed$widget_inits[[i]]$deps`
   into a single list, drops `NULL` entries, and returns the result
-  ready for `attachDependencies`.
-- For dynamic mounts (`When` / `Each` / `Match`), no top-level
-  attachment is possible; the deps still ride on `irid-widget-init`
-  and the client renders them via `Shiny.renderDependencies` (dedup
-  by name is a no-op for already-loaded deps — Shiny dedups by name
-  alone, so a same-name dep with a different version is also
+  ready for `attachDependencies`. **Scope:** this only walks the
+  top-level pass — control-flow bodies (`When` / `Each` / `Match`)
+  aren't processed until their observer fires at mount time, so
+  widgets that *only* appear inside those bodies have their deps
+  shipped on the `irid-widget-init` message instead. That's by
+  design; the init message always carries the deps anyway, so
+  dynamic widgets are fully self-sufficient.
+- For dynamic mounts (`When` / `Each` / `Match`), the client renders
+  the message's deps via `Shiny.renderDependencies` (dedup is by
+  name alone — a same-name dep with a different version is also
   skipped, which is harmless for the framework's use case).
 
 **`NAMESPACE` updates** (regenerated via `devtools::document()`):
@@ -162,10 +178,12 @@ suggested dependency; bundling it with the framework would muddy the
 - Add `Shiny.addCustomMessageHandler('irid-widget-init', ...)`:
   1. If `widgets[id]` already exists, drop (idempotence — design §2
      "The init message is idempotent on the client").
-  2. Load `msg.deps` via `Shiny.renderDependencies(msg.deps)`. Returns
-     a promise (modern `htmltools::Shiny.renderDependencies` returns
-     a Promise; legacy returns void after sync injection — handle both
-     via `Promise.resolve()` wrap).
+  2. Load `msg.deps` via
+     `Promise.resolve(Shiny.renderDependencies(msg.deps)).then(...)`.
+     The probe (since deleted) showed the function returns
+     `undefined` synchronously in current Shiny — `Promise.resolve`
+     normalizes both that and the documented Promise-returning shape
+     so the `.then` continuation works either way.
   3. After deps ready, look up `defined.get(msg.name)`. If absent,
      push `{id, props}` onto `pendingInits[msg.name]` keyed queue.
   4. If present, look up `document.getElementById(msg.id)`, call
@@ -238,8 +256,10 @@ Add to `tests/testthat/`:
 - `event_defaults`: `user = NULL`, scalar config, named list merge,
   malformed `user` deferred to existing validation
 
-**Manual / browser-tested** (no testthat — these need a real
-session, captured as a checklist in this plan):
+**Manual / browser-tested** (no testthat — irid has no JS test
+infrastructure today, by intent, so the client-side surface is
+exercised through real-session browser checks. The checklist is
+captured here):
 
 - Widget inside `When` mounts on toggle (init message after swap;
   destroy via detach walker on toggle-off)
@@ -279,7 +299,7 @@ CodeMirror example in Commit 2 and the plotly example in Commit 3.
 6. `devtools::document()` to regenerate `NAMESPACE` for the new
    exports.
 
-Commit message: `Widget impl: IridWidget framework — R-side constructor + process_tags / mount extensions, JS runtime, wire-protocol additive fields`
+Commit message: `Widget impl: IridWidget framework — R + JS runtime`
 
 ---
 
@@ -307,7 +327,6 @@ raw `<script type="module">` tag into `<head>`.
 # examples/codemirror.R
 
 library(irid)
-library(bslib)
 
 CodeMirrorDeps <- function() {
   htmltools::htmlDependency(
@@ -403,7 +422,7 @@ The app body covers the round-trip surfaces enumerated in design §4
   events case where `irid-widget-init` arrives before the ES module
   finishes loading. The init buffers under `"codemirror"` and drains
   when the module's `irid.defineWidget("codemirror", ...)` call lands.
-- `Shiny.renderDependencies` dedups by `(name, version)`, so re-firing
+- `Shiny.renderDependencies` dedups by name, so re-firing
   `irid-widget-init` after a `When` toggle is a no-op for the deps
   step — the module script tag stays in `<head>` and the browser
   uses its module cache.
@@ -428,7 +447,7 @@ The app body covers the round-trip surfaces enumerated in design §4
    - DevTools Network: one fetch per esm.sh import per session
      (browser module cache).
 
-Commit message: `CodeMirror example — CDN-loaded widget demo exercising When + reactive round-trip`
+Commit message: `Widget example: CodeMirror via inline ES module from esm.sh`
 
 ---
 
@@ -542,7 +561,7 @@ checklist if `IridWidget` changes later.
    the auto-fit), engage the gated proxy (snap-back observed).
 5. `devtools::document()` for the `PlotlyOutput` export.
 
-Commit message: `PlotlyOutput — plotly.js wrapper on IridWidget substrate, with example`
+Commit message: `PlotlyOutput: plotly.js wrapper on IridWidget substrate, with example`
 
 ---
 
