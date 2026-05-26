@@ -7,16 +7,8 @@
 
 ## 1. Motivation
 
-The widget framework (`irid-widget-design-v2.md`,
-`dev/plans/irid-widgets-plan.md`) introduces an explicit **`target`**
-field on `irid-attr` messages with values `"dom"` and `"widget"` to
-route binding updates between DOM property mutations and widget
-`update`-hook calls. That field is the wedge for a broader cleanup
-in the existing binding routing.
-
 irid today routes reactive text children — `\() doc()` as a child of
-a tag — via two awkward mechanisms inherited from before `target`
-existed:
+a tag — via two awkward mechanisms:
 
 1. **Magic string in the `attr` field.** Reactive text children
    produce a binding with `attr = "irid:text"`, and `mount.R` checks
@@ -31,19 +23,36 @@ existed:
    detaching old children, inserting new content) overlaps with the
    comment-anchor protocol shared with `irid-swap` / `irid-mutate`,
    but it ships as its own message type because the dispatch field
-   (`attr`) is stringly-typed and predates `target`.
+   (`attr`) is stringly-typed and only one extra routing case exists
+   today.
 
-Once `target` exists as a discrete dispatch field, the cleanup is
-obvious: add a third value `"text"` to the field, retire the
-`attr = "irid:text"` magic string, and fold the `irid-text`
-message type into `irid-attr` with `target: "text"`. After the
-refactor, all binding-update routing is data-driven dispatch on one
-field, with one message type (`irid-attr`) carrying three target
-values: `"dom"`, `"widget"`, `"text"`.
+The widget framework (`irid-widget-design-v2.md`,
+`dev/plans/irid-widgets-plan.md`) is about to add a third routing
+case: callable widget props produce bindings that need to call the
+widget instance's `update` hook rather than touch the DOM directly.
+Rather than pile a *second* magic string on top of `attr = "irid:text"`
+(e.g. `attr = "widget:content"`), this doc introduces an explicit
+**`target`** field on binding rows and on `irid-attr` messages,
+retires the existing magic string, and folds `irid-text` into
+`irid-attr` with `target: "text"`. The widget commit then extends
+the field with a third value `"widget"` rather than introducing the
+field itself.
+
+After both commits, all binding-update routing is data-driven
+dispatch on one field, with one message type (`irid-attr`) carrying
+three target values: `"dom"`, `"text"`, `"widget"`. *This* commit
+ships the field with the first two; the widget commit adds the
+third.
 
 ---
 
 ## 2. Design
+
+This doc covers the introduction of `target` and the two values that
+land in *this* commit (`"dom"` and `"text"`). The widget framework
+adds `"widget"` as a third value in a subsequent commit; that
+extension is forward-referenced where relevant but not implemented
+here. See § 6 "Relation to other work" and § 7 "Order of work."
 
 ### Binding row shape
 
@@ -54,15 +63,18 @@ top-level `bindings` list. The row gains a `target` field:
 |---------|-----------------|---------|
 | `"dom"` | `attr`, `id`, `fn` | set a DOM attribute or property on `getElementById(id)` |
 | `"text"` | `id`, `fn` (no `attr`) | replace the content between the comment-anchor pair `id` with a text node |
-| `"widget"` | `attr` (the prop key), `id`, `fn` | call the widget instance at `id`'s `update(attr, value, sequence)` hook |
+
+(Future, in the widget commit: `"widget"` with fields `attr` (prop
+key), `id`, `fn` → calls the widget instance at `id`'s
+`update(attr, value, sequence)` hook. The framework presented here
+is designed to accept that extension additively.)
 
 Every binding row carries a `target`, always set explicitly — no
 defaulting or absence. Existing extraction sites that previously
 produced rows without thinking about the field now set it
 explicitly: DOM attrs at the auto-bind / `on*` / reactive-attr paths
 in `process_tags` get `target = "dom"`; the reactive-text-child
-branch gets `target = "text"`; the widget extraction branch (when
-widgets land) gets `target = "widget"`.
+branch gets `target = "text"`.
 
 ### `mount.R` dispatch
 
@@ -74,9 +86,8 @@ lapply(result$bindings, function(b) {
   obs <- observe({
     val <- b$fn()
     msg <- switch(b$target,
-      dom    = list(id = b$id, target = "dom",    attr = b$attr, value = val),
-      text   = list(id = b$id, target = "text",                   value = val),
-      widget = list(id = b$id, target = "widget", attr = b$attr, value = val)
+      dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
+      text = list(id = b$id, target = "text",                value = val)
     )
     seq_info <- session$userData$irid_current_sequence
     if (!is.null(seq_info) && seq_info$source == b$id) {
@@ -88,27 +99,25 @@ lapply(result$bindings, function(b) {
 })
 ```
 
-Three branches, one message type. The sequence-attaching logic is
-shared across all three (currently it sits inside the `else` branch
-that handles `irid-attr`).
+Two branches, one message type. The sequence-attaching logic is
+shared across both (currently it sits inside the `else` branch
+that handles `irid-attr`). The switch is structured so the widget
+commit can add a `widget = list(...)` branch without restructuring.
 
 ### Wire — `irid-attr`
 
 ```js
 // target = "dom"
-{ id: "irid-3", target: "dom",    attr: "value", value: "hello", sequence: 12 }
+{ id: "irid-3", target: "dom",  attr: "value", value: "hello", sequence: 12 }
 
 // target = "text"
-{ id: "irid-5", target: "text",                   value: "Count: 42" }
-
-// target = "widget"
-{ id: "irid-7", target: "widget", attr: "content", value: "...", sequence: 12 }
+{ id: "irid-5", target: "text",                value: "Count: 42" }
 ```
 
-The `attr` field is present when `target ∈ {"dom", "widget"}` and
-absent when `target = "text"`. (Text replaces the entire range; no
-attribute name applies.) Sequence numbers attach to whichever target
-applies, with the same source-match rule as today.
+The `attr` field is present when `target = "dom"` and absent when
+`target = "text"` (text replaces the entire range; no attribute name
+applies). Sequence numbers attach to whichever target applies, with
+the same source-match rule as today.
 
 ### Wire — `irid-text` is removed
 
@@ -122,13 +131,6 @@ handler.
 
 ```js
 Shiny.addCustomMessageHandler('irid-attr', function (msg) {
-  if (msg.target === "widget") {
-    var w = widgets[msg.id];
-    if (!w) return;
-    w.handle.update(msg.attr, msg.value, msg.sequence);
-    return;
-  }
-
   if (msg.target === "text") {
     var a = lookupAnchors(msg.id);
     if (!a) return;
@@ -168,34 +170,26 @@ Shiny.addCustomMessageHandler('irid-attr', function (msg) {
 });
 ```
 
-Three branches dispatched on `msg.target`, no string-prefix parsing.
+Two branches dispatched on `msg.target`, no string-prefix parsing.
+The widget commit adds a `msg.target === "widget"` branch above the
+text branch.
 
-### `irid-events` — `source` field
+### Aside — `source` on `irid-events` (widget commit, not this one)
 
-A companion field-rename on `irid-events`. The current message
-shape has no field that names "what kind of event source produces
-input here"; the existence of a managed-state entry and the call to
-`el.addEventListener` are implicit. To support widgets (which need
-managed state but no `addEventListener`), the message gains an
-explicit `source` field:
+The widget commit (per `dev/plans/irid-widgets-plan.md`) adds an
+analogous discrete-field dispatch on `irid-events`: a new
+**`source`** field with values `"widget"` or `"dom"`. The semantic
+analog of `target` for events. **Different field name on purpose:**
+events have a *source* — they originate somewhere (a DOM listener,
+a widget's `send()` call). Attrs have a *target* — they land
+somewhere (a DOM property, an anchored range, a widget update hook).
+Semantics diverge, names diverge.
 
-```js
-// source = "dom" (existing)
-{ id: "irid-2", event: "input", inputId: "...", mode: "debounce", ms: 200, ..., source: "dom" }
-
-// source = "widget" (new)
-{ id: "irid-7", event: "change", inputId: "...", mode: "debounce", ms: 200, ..., source: "widget" }
-```
-
-The client checks `msg.source === "widget"` and skips
-`el.addEventListener`; managed-state setup is identical in both
-branches. Always set explicitly server-side, no `%||%` default.
-
-**Why a different field name from `irid-attr`'s `target`.** Events
-have a source — they originate somewhere (a DOM listener, a widget's
-`send()` call). Attrs have a target — they land somewhere (a DOM
-property, an anchored range, a widget update hook). The semantics
-diverge, so the field names diverge.
+The `source` field is not introduced by this commit; it ships with
+the widget commit and is specced there. It's mentioned here only
+because the field-naming decision (`target` vs `source`) is part
+of the same broader cleanup, and a reader of either doc should
+understand why the two fields aren't unified under one name.
 
 ---
 
@@ -223,9 +217,10 @@ diverge, so the field names diverge.
   `attr = "value"` — unchanged.
 - The sequence-number threading from event observers to binding
   echoes — unchanged.
-- The `irid-swap` / `irid-mutate` / `irid-widget-init` /
-  `irid-events` / `irid-config` message types — unchanged in shape
-  apart from `irid-events`'s new `source` field.
+- The `irid-swap` / `irid-mutate` / `irid-events` / `irid-config`
+  message types — unchanged in shape. (`irid-events` gains a
+  `source` field, but that lands in the widget commit, not this
+  one. `irid-widget-init` is new in the widget commit.)
 
 ### Backwards compatibility
 
@@ -246,9 +241,10 @@ lockstep; no transitional period needed.
   A binding with `target = "dom"` produces an `irid-attr` message
   carrying the `attr` field. (The `irid-text` message-type
   expectation in existing tests goes away.)
-- **Client**: `irid-attr` handler tests assert the three branches
-  dispatch correctly on `msg.target`. The deleted `irid-text`
-  handler tests are removed.
+- **Client**: `irid-attr` handler tests assert the two branches
+  (`"dom"` and `"text"`) dispatch correctly on `msg.target`. The
+  deleted `irid-text` handler tests are removed. (The widget commit
+  adds tests for the third branch.)
 
 ---
 
@@ -264,8 +260,8 @@ lockstep; no transitional period needed.
   `iridOutput`) — those go through Shiny's own output binding path,
   not irid-attr.
 - **Renaming `target` and `source` to share a name.** They are
-  intentionally different — see Design § 2 "Why a different field
-  name from irid-attr's target."
+  intentionally different — see Design § 2 "Aside — `source` on
+  `irid-events`."
 - **Touching the irid-attr / target = "dom" path** beyond adding the
   field. Existing focused-element gating, PROP_ATTRS table, and
   removeAttribute behavior carry forward verbatim.
