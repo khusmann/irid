@@ -87,8 +87,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         if (!is.null(seq) && length(source_bindings) > 0L) {
           for (sb in source_bindings) {
             val <- isolate(sb$fn())
-            msg <- list(id = sb$id, attr = sb$attr, value = val,
-                        sequence = seq)
+            msg <- switch(sb$target,
+              dom  = list(id = sb$id, target = "dom",  attr = sb$attr,
+                          value = val, sequence = seq),
+              text = list(id = sb$id, target = "text",
+                          value = val, sequence = seq)
+            )
             session$sendCustomMessage("irid-attr", msg)
           }
         }
@@ -114,23 +118,22 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # inserted. Priority decreases with depth so deeper bindings fire before
   # shallower ones — see the function-level docs for the motivating case.
   #
-  # `irid:text` bindings target a comment-anchor pair rather than an
-  # element id, so they go out via `irid-text` (text-only range replace);
-  # everything else is a real DOM attribute / property write via
-  # `irid-attr`.
+  # All bindings ride `irid-attr` with a `target` field. `target = "dom"`
+  # is a real DOM attribute / property write on `getElementById(b$id)`;
+  # `target = "text"` replaces the content between the comment-anchor
+  # pair `b$id`. Dispatch happens client-side on `msg.target`.
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      if (identical(b$attr, "irid:text")) {
-        session$sendCustomMessage("irid-text", list(id = b$id, value = val))
-      } else {
-        msg <- list(id = b$id, attr = b$attr, value = val)
-        seq_info <- session$userData$irid_current_sequence
-        if (!is.null(seq_info) && seq_info$source == b$id) {
-          msg$sequence <- seq_info$seq
-        }
-        session$sendCustomMessage("irid-attr", msg)
+      msg <- switch(b$target,
+        dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
+        text = list(id = b$id, target = "text",                value = val)
+      )
+      seq_info <- session$userData$irid_current_sequence
+      if (!is.null(seq_info) && seq_info$source == b$id) {
+        msg$sequence <- seq_info$seq
       }
+      session$sendCustomMessage("irid-attr", msg)
     }, priority = binding_priority)
     observers[[length(observers) + 1L]] <<- obs
   })

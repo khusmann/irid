@@ -54,7 +54,16 @@ Walks the tag tree recursively and produces:
   (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
   should be inserted. Element-level config (`.event`, `.prevent_default`)
   is stripped before HTML serialization.
-- **`bindings`** — List of `{id, attr, fn}` for each reactive attribute.
+- **`bindings`** — List of binding rows for each reactive attribute or
+  reactive text child, each carrying a `target` field that drives
+  client-side dispatch. `target = "dom"` rows are `{id, target, attr, fn}`
+  — the binding mutates a DOM attribute/property on
+  `getElementById(id)`. `target = "text"` rows are `{id, target, fn}`
+  (no `attr`) — the binding replaces the content between the
+  comment-anchor pair `id` with a single text node. Reactive text
+  children use the anchor-pair form so they remain valid inside
+  restricted-content parents (`<option>`, `<textarea>`, ...) where a
+  `<span>` wrapper would be stripped by the HTML parser.
 - **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce, prevent_default}`,
   one entry per `(id, DOM event)`. Auto-bind synthetic and explicit `on*`
   on the same DOM event are merged into one composed handler.
@@ -241,18 +250,30 @@ anchor references are preserved across moves.
 
 ## Client-Side Protocol
 
-`irid.js` registers four Shiny custom message handlers:
+`irid.js` registers Shiny custom message handlers for `irid-config`,
+`irid-attr`, `irid-swap`, `irid-mutate`, and `irid-events`.
 
 ### `irid-attr`
 
 ```js
-{id: "irid-3", attr: "textContent", value: "Count: 42"}
+// target = "dom" — DOM property/attribute write
+{id: "irid-3", target: "dom",  attr: "value", value: "hello", sequence: 12}
+
+// target = "text" — text replacement in a comment-anchor range
+{id: "irid-5", target: "text", value: "Count: 42"}
 ```
 
-Sets a DOM property or attribute. Special-cased properties: `value`, `disabled`,
-`checked`, `textContent` are set as JS properties (not HTML attributes).
-Skips the update if the target element has focus and the attribute is
-`value` (optimistic update).
+Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
+attribute on `getElementById(msg.id)`. Special-cased properties:
+`value`, `disabled`, `checked`, `innerHTML` are set as JS properties
+(not HTML attributes); `textContent` is set via the `.textContent`
+property; other attributes use `setAttribute()`; `false` / `null`
+values call `removeAttribute()`. Skips the update if the element
+has focus and `msg.attr === "value"` (optimistic update — see below).
+For `"text"`: looks up the comment-anchor pair `msg.id`, removes
+everything between the start and end anchors (running
+`Shiny.unbindAll` on each removed element), and inserts a single
+text node when `value` is non-empty.
 
 ### `irid-swap`
 
