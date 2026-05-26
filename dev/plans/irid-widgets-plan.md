@@ -3,21 +3,62 @@
 Implementation plan for [`dev/irid-widget-design-v2.md`](../irid-widget-design-v2.md)
 and its downstream consumer [`dev/plotly-output-design.md`](../plotly-output-design.md).
 
-Three commits, in order:
+Four commits, in order:
 
-1. **Framework** — `IridWidget`, helpers, wire protocol, JS runtime, tests.
-2. **CodeMirror example** — first non-trivial consumer; vets the framework
-   end-to-end against a real library.
+0. **Binding-target refactor** — introduce the `target` field on
+   binding rows and on `irid-attr` messages with values `"dom"` and
+   `"text"`; fold the `irid-text` message type into `irid-attr` with
+   `target: "text"`. Specced in
+   [`dev/binding-target-design.md`](../binding-target-design.md).
+   Lands first so the widget commit just extends the taxonomy with
+   `"widget"` rather than introducing the field.
+1. **Framework** — `IridWidget`, helpers, wire protocol (extends the
+   existing `target` taxonomy with `"widget"`, and adds a `source`
+   field on `irid-events`), JS runtime, tests.
+2. **CodeMirror example** — first non-trivial consumer; vets the
+   framework end-to-end against a real library.
 3. **PlotlyOutput + plotly example** — second consumer; validates the
    substrate against a different shape of widget (data-driven render,
    multi-event fan-out, snap-back via `reactiveProxy`).
 
-The CodeMirror commit is a separate landing because nothing in the framework
-should be CodeMirror-specific — the split forces that contract. PlotlyOutput
-is its own commit because it adds an exported R wrapper (`PlotlyOutput()`),
-a new R-side file with a non-trivial translation table, and a `{plotly}`
-suggested dependency; bundling it with the framework would muddy the
-"framework knows nothing about specific libraries" boundary.
+The refactor is its own commit because it touches DOM and text bindings
+that have nothing to do with widgets — landing it first keeps the widget
+diff focused on what the widget framework actually adds (the `"widget"`
+value, the widget-init message, the JS runtime). The CodeMirror commit is
+separate because nothing in the framework should be CodeMirror-specific —
+the split forces that contract. PlotlyOutput is its own commit because it
+adds an exported R wrapper (`PlotlyOutput()`), a new R-side file with a
+non-trivial translation table, and a `{plotly}` suggested dependency;
+bundling it with the framework would muddy the "framework knows nothing
+about specific libraries" boundary.
+
+---
+
+## Commit 0 — Binding-target refactor
+
+See [`dev/binding-target-design.md`](../binding-target-design.md) for
+the full spec. In brief:
+
+- R-side binding rows gain `target ∈ {"dom", "text"}`, set explicitly
+  at every emission site in `process_tags`. The
+  reactive-text-child branch drops `attr = "irid:text"` in favor of
+  `target = "text"` with no `attr` field.
+- `mount.R`'s binding observer dispatches on `target` and sends one
+  message type (`irid-attr`) with a target-dependent payload shape.
+- `irid.js`'s `irid-text` custom-message handler is deleted; its
+  body moves into the `target === "text"` branch of the unified
+  `irid-attr` handler.
+
+This commit establishes `"dom"` and `"text"` as the initial values on
+the `target` taxonomy. Commit 1 (the widget framework) adds
+`"widget"`.
+
+Tests: existing tests that match on `attr = "irid:text"` are updated
+to match on `target = "text"`; existing tests asserting an
+`irid-text` message-type emission are updated to assert `irid-attr`
+with `target: "text"`. Otherwise the test surface is unchanged.
+
+Commit message: `Binding routing: introduce 'target' field, fold irid-text into irid-attr`
 
 ---
 
@@ -62,11 +103,10 @@ suggested dependency; bundling it with the framework would muddy the
      (matches the existing rule — `is.function(x) && (identical(class(x),
      "function") || inherits(x, "reactive"))`). Callable → `bindings`
      with `{id, attr = key, fn = prop, target = "widget"}`. Non-callable
-     → accumulated into `static_props`. The binding row gains a new
-     `target` field (semantics: where does this mutation land?) —
-     existing DOM-attr / `irid:text` bindings get `target = "dom"`
-     set explicitly at the existing extraction sites so every row in
-     `bindings_by_id` carries a known target.
+     → accumulated into `static_props`. The `target` field already
+     exists on the binding row (added in Commit 0 with values
+     `"dom"` and `"text"`); this commit extends the taxonomy with
+     `"widget"`.
   3. Iterates `node$events`: each entry produces an `events` row with
      `source = "widget"`, the handler verbatim, the event name verbatim
      (lowercase kebab — no `on*` stripping). Timing comes from `.event`
@@ -140,12 +180,11 @@ suggested dependency; bundling it with the framework would muddy the
   `%||%` default, every event row has it explicitly) and forwards
   it to the client so the client knows whether to call
   `addEventListener`.
-- `irid-attr` payload gains a required `target` field with values
-  `"widget"` or `"dom"` (semantics: where the mutation lands).
-  `irid-events` payload gains a required `source` field with the
-  same value vocabulary (semantics: where the event originates).
-  Different field names, intentionally — events have a source;
-  attrs have a target.
+- `irid-attr`'s existing `target` field (Commit 0) gains a third
+  value `"widget"`. `irid-events` payload gains a new required
+  `source` field with values `"widget"` or `"dom"` (semantics:
+  where the event originates). Different field names, intentionally
+  — events have a source; attrs have a target.
 - The force-send-on-no-op loop (`bindings_by_id[[source_id]]` echo
   in the event observer, [R/mount.R:86-94](../../R/mount.R#L86-L94)) is
   untouched and works for widget bindings out of the box — widget
@@ -229,14 +268,13 @@ suggested dependency; bundling it with the framework would muddy the
      payload) { sendWidgetEvent(msg.id, event, payload); }` (the
      private function — see above). Store the returned
      `{update, destroy}` in `widgets[id]`.
-- Update the `irid-attr` handler: dispatch on `msg.target`. For
-  `"widget"`: look up `widgets[msg.id]` and call
+- Extend the `irid-attr` handler (which after Commit 0 already
+  dispatches on `msg.target` with branches for `"dom"` and `"text"`)
+  with a `"widget"` branch: look up `widgets[msg.id]` and call
   `handle.update(msg.attr, msg.value, msg.sequence)`; skip if no
   widget is registered (timing-dependent reorder where the update
   arrives before the init — drop with no error, same posture as
-  `document.getElementById(msg.id)` returning null). For `"dom"`:
-  the existing logic (PROP_ATTRS dispatch, focused-element gating,
-  setAttribute / removeAttribute) runs unchanged.
+  `document.getElementById(msg.id)` returning null).
 - Update the `irid-events` handler: if `msg.source === "widget"`,
   initialize managed-state via the same `setupThrottle` / `setupDebounce` /
   `setupImmediate` paths but **skip the `el.addEventListener` step**.
@@ -251,11 +289,12 @@ suggested dependency; bundling it with the framework would muddy the
   are still intact.
 
 **No changes to existing message types beyond additive fields** —
-this is the entire wire-protocol delta. `irid-attr` gains a required
-`target` field; `irid-events` gains a required `source` field. Both
-use values `"widget"` or `"dom"`, always set explicitly on every
-message (no implicit defaults). The field-name asymmetry is
-intentional and semantic: events have a source, attrs have a target.
+this is the wire-protocol delta on top of Commit 0. `irid-attr`
+already has the `target` field from Commit 0 (`"dom"` / `"text"`);
+this commit adds `"widget"` as a third value. `irid-events` gains a
+new required `source` field with values `"widget"` or `"dom"` (no
+implicit defaults). The field-name asymmetry is intentional and
+semantic: events have a source, attrs have a target.
 `irid-widget-init` is the only new message. Shape:
 
 ```js
