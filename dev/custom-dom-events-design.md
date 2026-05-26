@@ -21,10 +21,10 @@ But the modern web increasingly uses **kebab-case** event names for
 - **Third-party JS libraries** (dialog libraries, drawer libraries,
   copy-to-clipboard libraries, modals, drag handles) often fire kebab
   events on their root element.
-- The widget design (`irid-widget-design-v2.md`) already sets a kebab
-  convention for *widget* events, which travel through a separate
-  `source: "widget"` channel. Standard DOM events on regular tags need
-  to follow suit so the two surfaces are aligned.
+- `IridWidget` already uses a kebab convention for *widget* events
+  (which travel through a separate `source: "widget"` channel — see
+  [ARCHITECTURE.md](../ARCHITECTURE.md#widgets)). Standard DOM events
+  on regular tags need to follow suit so the two surfaces are aligned.
 
 Without a kebab-aware transformation, a user wanting to listen to
 `<sl-select>` from irid has no clean way:
@@ -261,7 +261,7 @@ element is just an HTML element that happens to dispatch kebab events.
 | Need | Use |
 |---|---|
 | Just listen to events from a Web Component or third-party JS root element | `tags$*(on* = ...)` — this design |
-| Reactive props, init/update/destroy lifecycle, deps hoisting, focused-mount survival | `IridWidget` — `irid-widget-design-v2.md` |
+| Reactive props, init/update/destroy lifecycle, deps hoisting, focused-mount survival | `IridWidget` — see [ARCHITECTURE.md](../ARCHITECTURE.md#widgets) |
 
 The two paths compose: a Web Component used inside an `IridWidget`
 container's `container` slot is fine. Pick the lowest ceremony that

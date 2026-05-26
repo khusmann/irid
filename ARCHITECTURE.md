@@ -7,16 +7,21 @@ R/
   app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Match/Case/Default, Output
   event.R         event_immediate, event_throttle, event_debounce
-  process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows
+  process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
   mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
   scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
+  widget.R        IridWidget + write_back / event_defaults helpers + dep-registration
   irid-package.R Package-level imports
 
 inst/js/
   irid.js        Client-side message handlers (vanilla JS, no build step)
+
+inst/widgets/<name>/
+  <name>-irid.js   Per-widget factory registration (one dir per shipped widget;
+                   user widgets live in user packages, not here)
 
 examples/
   old_faithful.R        Old Faithful geyser histogram with PlotOutput
@@ -28,6 +33,7 @@ examples/
   cards.R               Dynamic column cards (Each, keyed by column name)
   each_nested.R         Nested Each + recursive mini-store fields
   each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
+  codemirror.R          CodeMirror editor widget via IridWidget + esm.sh CDN
 ```
 
 ## Design Principles
@@ -53,23 +59,37 @@ Walks the tag tree recursively and produces:
   nodes become a pair of HTML **comment anchors**
   (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
   should be inserted. Element-level config (`.event`, `.prevent_default`)
-  is stripped before HTML serialization.
-- **`bindings`** — List of binding rows for each reactive attribute or
-  reactive text child, each carrying a `target` field that drives
-  client-side dispatch. `target = "dom"` rows are `{id, target, attr, fn}`
-  — the binding mutates a DOM attribute/property on
-  `getElementById(id)`. `target = "text"` rows are `{id, target, fn}`
-  (no `attr`) — the binding replaces the content between the
-  comment-anchor pair `id` with a single text node. Reactive text
-  children use the anchor-pair form so they remain valid inside
-  restricted-content parents (`<option>`, `<textarea>`, ...) where a
-  `<span>` wrapper would be stripped by the HTML parser.
-- **`events`** — List of `{id, event, handler, mode, ms, leading, coalesce, prevent_default}`,
-  one entry per `(id, DOM event)`. Auto-bind synthetic and explicit `on*`
-  on the same DOM event are merged into one composed handler.
+  is stripped before HTML serialization. Widget nodes become their
+  container element with `id` and `data-irid-widget="<name>"` attributes
+  attached.
+- **`bindings`** — List of binding rows for each reactive attribute,
+  reactive text child, or reactive widget prop. Each row carries a
+  `target` field that drives client-side dispatch:
+  - `target = "dom"` rows are `{id, target, attr, fn}` — the binding
+    mutates a DOM attribute/property on `getElementById(id)`.
+  - `target = "text"` rows are `{id, target, fn}` (no `attr`) — the
+    binding replaces the content between the comment-anchor pair `id`
+    with a single text node. Reactive text children use the anchor-pair
+    form so they remain valid inside restricted-content parents
+    (`<option>`, `<textarea>`, ...) where a `<span>` wrapper would be
+    stripped by the HTML parser.
+  - `target = "widget"` rows are `{id, target, attr, fn}` — the binding
+    routes per-key updates to the widget instance's `update(key, value,
+    sequence)` hook.
+- **`events`** — List of `{id, event, handler, source, mode, ms, leading, coalesce, prevent_default}`,
+  one entry per `(id, event)`. `source = "dom"` for events attached to
+  a DOM element via `addEventListener`; `source = "widget"` for events
+  the widget JS pushes through `send()`. Auto-bind synthetic and
+  explicit `on*` on the same DOM event are merged into one composed
+  handler.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
+- **`widget_inits`** — List of `{id, name, prop_fns, static_props, deps}`
+  for each `IridWidget` node. `prop_fns` is the named list of callable
+  props (read with `isolate(fn())` at mount-time to seed the init
+  payload); `static_props` is the named list of non-callable values
+  shipped verbatim. See the *Widgets* section below.
 
 When a state-binding prop (`value`, `checked`) holds a callable, process_tags
 emits both a binding (server → client read) and a synthetic event entry
@@ -251,7 +271,8 @@ anchor references are preserved across moves.
 ## Client-Side Protocol
 
 `irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-swap`, `irid-mutate`, and `irid-events`.
+`irid-attr`, `irid-swap`, `irid-mutate`, `irid-events`, and
+`irid-widget-init`.
 
 ### `irid-attr`
 
@@ -261,6 +282,9 @@ anchor references are preserved across moves.
 
 // target = "text" — text replacement in a comment-anchor range
 {id: "irid-5", target: "text", value: "Count: 42"}
+
+// target = "widget" — route per-key update to a widget's update() hook
+{id: "irid-7", target: "widget", attr: "content", value: "...", sequence: 12}
 ```
 
 Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
@@ -273,7 +297,11 @@ has focus and `msg.attr === "value"` (optimistic update — see below).
 For `"text"`: looks up the comment-anchor pair `msg.id`, removes
 everything between the start and end anchors (running
 `Shiny.unbindAll` on each removed element), and inserts a single
-text node when `value` is non-empty.
+text node when `value` is non-empty. For `"widget"`: looks up the
+widget registered at `msg.id` and calls `handle.update(msg.attr,
+msg.value, msg.sequence)`; the widget's update hook owns the
+"compare against current state, skip on match" logic — irid stays
+generic because what counts as "current state" is library-specific.
 
 ### `irid-swap`
 
@@ -322,6 +350,7 @@ initialize any new Shiny outputs.
     id: "irid-2",
     event: "input",
     inputId: "irid_ev_irid-2_input",
+    source: "dom",
     mode: "throttle",
     ms: 100,
     leading: true,
@@ -330,14 +359,45 @@ initialize any new Shiny outputs.
 ];
 ```
 
-For each entry, attaches a DOM event listener on the element. The listener reads
-the element's `value` and sends it as a Shiny input via
-`Shiny.setInputValue(inputId, {value, id}, {priority: "event"})`.
+For each entry, initializes a managed-state record under `inputId`
+(throttle/debounce/coalesce/sequence gating). If `source = "dom"`, also
+attaches a DOM event listener on the element — the listener reads the
+element's `value` (and other event fields) and pushes the payload through
+the managed-state via `Shiny.setInputValue(inputId, payload, {priority:
+"event"})`. If `source = "widget"`, the listener-attach step is skipped;
+the widget JS pushes payloads through `irid.sendWidgetEvent(id, event,
+payload)`, which uses the same managed-state machinery. The DOM and
+widget paths share one sequence counter per element id, so cross-element
+echoes are gated uniformly.
 
-If `mode` is set, wraps the listener in a throttle or debounce. When `coalesce`
-is true, the rate limiter also gates on server idle state (via
-`Shiny.shinyapp.$idleTimeout`), so events never queue faster than the server can
-process them.
+When `coalesce` is true, the rate limiter also gates on server idle state
+(via `Shiny.shinyapp.$idleTimeout`), so events never queue faster than
+the server can process them.
+
+### `irid-widget-init`
+
+```js
+{
+  id:    "irid-7",
+  name:  "codemirror",
+  props: { content: "...", language: "r", theme: "dracula" },
+  deps:  [{ name: "cm6", version: "6.0.1", src: { href: "..." }, ... }]
+}
+```
+
+Sent after the swap/mutate that introduces the widget's container into
+the DOM. The client:
+
+1. Calls `Shiny.renderDependencies(msg.deps)` to inject `<script>` /
+   `<link>` tags. Deps are dedup'd by name across the session.
+2. Looks up the factory registered under `msg.name`. If none is
+   registered yet (script still loading), buffers `{id, props}` under
+   `pendingInits[name]` and drains it when `irid.defineWidget(name, ...)`
+   eventually lands.
+3. Once the factory is available, calls `factory(el, props, send)` and
+   stores the returned `{update, destroy}` handle in a per-id widget map.
+   The init message is idempotent — a duplicate for an already-mounted
+   id is dropped.
 
 ## Controlled Input: Optimistic Updates
 
@@ -445,7 +505,145 @@ paired with the optimistic-update protocol above, this makes a focused input
 snap back to the current server value, which is the read-only contract for
 controlled inputs.
 
-## Remaining Work
+## Widgets
+
+`IridWidget(name, props, events, deps, container, .event)` is the
+process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
+Plotly, Leaflet, ...). It expresses one R-side component on top of an
+init/update/destroy contract on the JS side, and reuses every existing
+irid channel — `irid-attr` for one-way prop updates, `irid-events` for
+event payloads, the optimistic-update sequence counter, the `.event`
+timing config, the stale indicator, the comment-anchor lifecycle. No
+widget-specific code lives in the transport.
+
+### Constructor
+
+```r
+IridWidget(
+  name,                # registry name; must match a JS defineWidget call
+  props     = list(),  # named list; per-key is.function() dispatch
+  events    = list(),  # named list of handler fns (lowercase kebab keys)
+  deps      = NULL,    # html_dependency or list of them
+  container = NULL,    # optional shiny.tag; defaults to tags$div()
+  .event    = NULL     # element-level event config, same shape as on tags$*
+)
+```
+
+`props` follows irid's "functions, not expressions" rule per-key. A
+callable value (`reactiveVal`, store leaf, `reactiveProxy`, 0-arg
+closure, ...) becomes a per-key binding (one observer firing `irid-attr
+target="widget"` on change); a non-callable value rides in the init
+message and is never re-sent. This is what makes init-only library
+options work without a separate API: pass a constant, no observer is
+registered.
+
+`events` keys are lowercase kebab-case (matching the web's `CustomEvent`
+convention — `change`, `cursor-changed`, `relayout`). No `on` prefix
+because there's no DOM event mediating — the widget JS chooses what to
+fire via `send()`. Handlers are 0/1/2-arg, dispatched the same way DOM
+event handlers are.
+
+### Round-trips live in the wrapper, not the framework
+
+irid hard-codes DOM autobind for `value`/`checked` because the DOM IDL
+gives every element a uniform (prop, event, event-field) triple. JS
+libraries have no such triple, so `IridWidget` only exposes one-way
+`props` (in) and `events` (out); the wrapper's R author composes a
+one-line `events` entry that writes through the caller's reactive.
+Three helpers make this idiomatic:
+
+- **`can_accept_write(callable)`** — the writability predicate. `TRUE`
+  for any callable that can take a positional arg (`reactiveVal`, store
+  leaf, `reactiveProxy` with a setter, 1+-arg closure, primitive);
+  `FALSE` for read-only callables (`reactive(...)`, `\() expr`,
+  setter-less `reactiveProxy`) and non-callables. Used to gate writes
+  so a read-only callable handed to a wrapper doesn't error.
+- **`write_back(callable, field, then = NULL)`** — the handler factory.
+  Returns a 1-arg function that writes `e[[field]]` to `callable` iff
+  writable, then calls the optional `then` handler (arity-dispatched).
+  One line per round-trip key in the wrapper's `events =` list.
+- **`event_defaults(user, ...)`** — three-tier resolution for `.event`:
+  caller's value (highest, scalar wins everywhere; named list wins per
+  event) > wrapper defaults (the `...` entries) > framework default.
+  Generic — plain-tag wrappers can use it too.
+
+Read-only snap-back is automatic: even when `write_back`'s writability
+gate blocks the call, the event listener has already fired, and the
+event observer's force-send-on-no-op loop echoes the canonical value
+back as a `target="widget"` `irid-attr`. The widget's `update` hook
+sees the mismatch and snaps the library state. The wrapper writes
+nothing extra to get this — registering the listener is sufficient.
+
+### JS-side API
+
+`window.irid` exposes one public method, `defineWidget(name, factory)`,
+where `factory` is `(el, props, send) -> { update, destroy }`. The
+factory runs once per mount:
+
+```js
+irid.defineWidget("codemirror", function (el, props, send) {
+  // el:    container DOM element (already attached)
+  // props: merged object — all props, callable and constant alike
+  // send:  send(event, payload) — push events through irid's pipeline
+  var view = new EditorView({ /* ... */ });
+  return {
+    update: function (key, value, sequence) {
+      if (key === "content" && value !== view.state.doc.toString()) {
+        view.dispatch({ /* ... */ });
+      }
+      // keys the widget can't or won't live-update have no branch —
+      // the message is silently dropped
+    },
+    destroy: function () { view.destroy(); }
+  };
+});
+```
+
+Contract notes:
+- `props` arrives as a single merged object; callable-vs-constant on
+  the R side is invisible here — the distinction shows up only in
+  whether subsequent `irid-attr target="widget"` messages arrive.
+- `update` fires only for keys that were callable on the R side; it
+  must be idempotent (most updates round-trip the value the widget
+  just sent via `send`).
+- `send(event, payload)` is a silent no-op for events with no R
+  subscriber — the widget can register listeners unconditionally.
+- `destroy` runs before the container is detached. The widget should
+  tear down anything that isn't pure DOM under `el` (timers,
+  ResizeObservers, web sockets, ...); DOM children of `el` will be
+  GC'd with detachment.
+
+### Lifecycle and dependencies
+
+The widget's R-side observers (one per callable prop, one per event)
+are owned by the enclosing mount; `destroy()` on the mount tears them
+down. Client-side, `detachRange` (used by `irid-swap` and
+`irid-mutate`) walks the removed fragment for `[data-irid-widget]`
+elements and calls each widget's `destroy()` before `Shiny.unbindAll`.
+No `irid-widget-destroy` message — the teardown is purely client-driven
+so it still happens if the server crashes between observer teardown
+and the swap.
+
+Widget identity is tied to the container's DOM element identity. **Survives:**
+`Each` keyed reorders (insertBefore preserves identity), in-place state
+updates, ancestor attr changes. **Does not survive:** `When` / `Match`
+branch flips, `Each` shape-change rebuilds, removes — those rebuild the
+widget fresh, matching how `<input>` focus/scroll/selection state
+behaves in the same situations.
+
+Widget deps ride a single channel — the `irid-widget-init` message —
+so both top-level mounts and dynamically-mounted widgets (inside
+`When` / `Each` / `Match`) follow one code path. UI-attached deps are
+auto-registered as Shiny static resources, but custom-message deps are
+not, so `register_widget_dep(dep)` runs before each init: it resolves
+`package`-relative `src$file` to an absolute path and routes file-backed
+deps through `shiny::createWebDependency()` (which calls
+`addResourcePath` and rewrites `src` to an href). href-only deps and
+head-only deps pass through unchanged. `Shiny.renderDependencies`
+dedups by name across the session, so re-firing `irid-widget-init` on
+a remount is a no-op for the deps step.
+
+
 
 ### `Portal` (planned)
 
