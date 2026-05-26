@@ -1,5 +1,5 @@
 (function() {
-  var defined = new Set();
+  var eventsRegistered = new Set();  // `${id}:${event}` keys — once-per-pair listener install
   var sequences = {};  // element id -> latest sent sequence number
   var PROP_ATTRS = { value: true, disabled: true, checked: true, innerHTML: true };
   var anchors = new Map();  // id -> { start: CommentNode, end: CommentNode }
@@ -8,6 +8,16 @@
   var staleShowTimerId = null;
   var staleClearTimerId = null;
   var STALE_CLEAR_DELAY = 100;  // ms to wait after idle before removing overlay
+
+  // --- Widget registry ---
+  // `defined` maps a widget registry name to its factory. Inits that
+  // arrive before the factory is registered (script load race) are
+  // buffered under `pendingInits[name]` and drained in arrival order
+  // when defineWidget(name, ...) lands. `widgets` is the live per-id
+  // table: `{id -> {handle, name}}` where `handle = {update, destroy}`.
+  var defined = new Map();
+  var pendingInits = {};
+  var widgets = {};
 
   function markStale() {
     if (staleClearTimerId !== null) {
@@ -113,7 +123,13 @@
     var n = startNode;
     while (n && n !== endNode) {
       var next = n.nextSibling;
-      if (n.nodeType === 1) Shiny.unbindAll(n);
+      if (n.nodeType === 1) {
+        // Destroy widget instances first, before unbindAll and before
+        // we move the node into a detached fragment — widget destroy()
+        // hooks may want intact DOM ancestors.
+        destroyWidgetsIn(n);
+        Shiny.unbindAll(n);
+      }
       frag.appendChild(n);
       n = next;
     }
@@ -161,6 +177,19 @@
   //            `getElementById(msg.id)`. Includes focused-element
   //            optimistic-update gating for `attr === "value"`.
   Shiny.addCustomMessageHandler('irid-attr', function(msg) {
+    if (msg.target === 'widget') {
+      // Route to the widget's update hook. Skip if no widget is
+      // registered for this id — covers the timing-dependent reorder
+      // where an attr message arrives before the matching init
+      // (defense in depth; mount sends init before any attr).
+      var w = widgets[msg.id];
+      if (!w) return;
+      if (typeof w.handle.update === 'function') {
+        w.handle.update(msg.attr, msg.value, msg.sequence);
+      }
+      return;
+    }
+
     if (msg.target === 'text') {
       var a = lookupAnchors(msg.id);
       if (!a) return;
@@ -215,7 +244,10 @@
     var n = a.start.nextSibling;
     while (n && n !== a.end) {
       var next = n.nextSibling;
-      if (n.nodeType === 1) Shiny.unbindAll(n);
+      if (n.nodeType === 1) {
+        destroyWidgetsIn(n);
+        Shiny.unbindAll(n);
+      }
       detached.appendChild(n);
       n = next;
     }
@@ -296,6 +328,19 @@
            !el.checked;
   }
 
+  // Attach the irid event envelope to a payload object: stable element
+  // id, a per-event nonce, and a per-element monotonic sequence number.
+  // Shared between DOM events (from `buildPayload`) and widget events
+  // (from `sendWidgetEvent`) so both paths produce identical wire shapes
+  // and share the same sequence counter.
+  function attachPayloadMeta(payload, id) {
+    payload.id = id;
+    payload.nonce = Math.random();
+    if (!sequences[id]) sequences[id] = 0;
+    payload.__irid_seq = ++sequences[id];
+    return payload;
+  }
+
   function buildPayload(e, el, id) {
     var payload = {};
     // Extract all primitive-valued properties from the event object
@@ -317,11 +362,19 @@
     if (typeof el.checked === 'boolean') {
       payload.checked = el.checked;
     }
-    payload.id = id;
-    payload.nonce = Math.random();
-    if (!sequences[id]) sequences[id] = 0;
-    payload.__irid_seq = ++sequences[id];
-    return payload;
+    return attachPayloadMeta(payload, id);
+  }
+
+  // Route a widget event through the managed-state pipeline for the
+  // `(id, event)` pair. Silent no-op if no R subscriber exists — widget
+  // JS can register events unconditionally and only the ones with an
+  // R-side handler actually round-trip.
+  function sendWidgetEvent(id, event, payload) {
+    var inputId = 'irid_ev_' + id + '_' + event;
+    var s = managed[inputId];
+    if (!s) return;
+    var p = attachPayloadMeta(Object.assign({}, payload || {}), id);
+    s.dispatch(p);
   }
 
   // --- Rate limiting (throttle / debounce with optional coalesce) ---
@@ -360,6 +413,18 @@
     }
   }
 
+  // Attach a DOM listener that dispatches the event payload through
+  // the managed state. Only invoked for `source !== "widget"` —
+  // widget events skip this and push through `sendWidgetEvent` (which
+  // calls `s.dispatch` directly).
+  function attachListener(el, msg, dispatch) {
+    el.addEventListener(msg.event, function(e) {
+      if (shouldSkip(el, msg.event)) return;
+      if (msg.preventDefault) e.preventDefault();
+      dispatch(buildPayload(e, el, msg.id));
+    });
+  }
+
   function setupThrottle(el, msg) {
     var s = {
       payload: null,
@@ -367,7 +432,8 @@
       serverBusy: false,
       coalesce: msg.coalesce,
       leading: msg.leading,
-      maybeSend: null
+      maybeSend: null,
+      dispatch: null
     };
 
     s.maybeSend = function() {
@@ -388,37 +454,35 @@
       if (s.coalesce) ensureIdleListener();
     };
 
-    managed[msg.inputId] = s;
-
-    el.addEventListener(msg.event, function(e) {
-      if (shouldSkip(el, msg.event)) return;
-      if (msg.preventDefault) e.preventDefault();
-      s.payload = buildPayload(e, el, msg.id);
-      if (!s.timerRunning) {
-        if (s.leading && !(s.coalesce && s.serverBusy)) {
-          // Fire immediately, start cooldown timer
-          var p = s.payload;
-          s.payload = null;
-          s.serverBusy = true;
-          sendPayload(msg.inputId, p);
-          s.timerRunning = true;
-          setTimeout(function() {
-            s.timerRunning = false;
-            s.timerReady = true;
-            s.maybeSend();
-          }, msg.ms);
-          if (s.coalesce) ensureIdleListener();
-        } else {
-          // Start timer, send when it fires
-          s.timerRunning = true;
-          setTimeout(function() {
-            s.timerRunning = false;
-            s.timerReady = true;
-            s.maybeSend();
-          }, msg.ms);
-        }
+    s.dispatch = function(payload) {
+      s.payload = payload;
+      if (s.timerRunning) return;
+      if (s.leading && !(s.coalesce && s.serverBusy)) {
+        // Fire immediately, start cooldown timer
+        var p = s.payload;
+        s.payload = null;
+        s.serverBusy = true;
+        sendPayload(msg.inputId, p);
+        s.timerRunning = true;
+        setTimeout(function() {
+          s.timerRunning = false;
+          s.timerReady = true;
+          s.maybeSend();
+        }, msg.ms);
+        if (s.coalesce) ensureIdleListener();
+      } else {
+        // Start timer, send when it fires
+        s.timerRunning = true;
+        setTimeout(function() {
+          s.timerRunning = false;
+          s.timerReady = true;
+          s.maybeSend();
+        }, msg.ms);
       }
-    });
+    };
+
+    managed[msg.inputId] = s;
+    if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
   }
 
   function setupDebounce(el, msg) {
@@ -427,7 +491,8 @@
       timerId: null, timerReady: false,
       serverBusy: false,
       coalesce: msg.coalesce,
-      maybeSend: null
+      maybeSend: null,
+      dispatch: null
     };
 
     s.maybeSend = function() {
@@ -442,12 +507,8 @@
       if (s.coalesce) ensureIdleListener();
     };
 
-    managed[msg.inputId] = s;
-
-    el.addEventListener(msg.event, function(e) {
-      if (shouldSkip(el, msg.event)) return;
-      if (msg.preventDefault) e.preventDefault();
-      s.payload = buildPayload(e, el, msg.id);
+    s.dispatch = function(payload) {
+      s.payload = payload;
       s.timerReady = false;
       if (s.timerId !== null) clearTimeout(s.timerId);
       s.timerId = setTimeout(function() {
@@ -455,36 +516,43 @@
         s.timerReady = true;
         s.maybeSend();
       }, msg.ms);
-    });
+    };
+
+    managed[msg.inputId] = s;
+    if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
   }
 
   function setupImmediate(el, msg) {
-    if (msg.coalesce) {
+    // Two paths: a managed-state path (coalesce, or widget — widget
+    // events always need managed state since they reach the pipeline
+    // through `sendWidgetEvent` rather than a DOM listener), and a
+    // direct-send path for plain DOM immediate-no-coalesce.
+    if (msg.coalesce || msg.source === 'widget') {
       var s = {
         payload: null,
         serverBusy: false,
-        coalesce: true,
-        maybeSend: null
+        coalesce: !!msg.coalesce,
+        maybeSend: null,
+        dispatch: null
       };
 
       s.maybeSend = function() {
-        if (s.serverBusy) return;
+        if (s.coalesce && s.serverBusy) return;
         if (s.payload === null) return;
         var p = s.payload;
         s.payload = null;
-        s.serverBusy = true;
+        if (s.coalesce) s.serverBusy = true;
         sendPayload(msg.inputId, p);
-        ensureIdleListener();
+        if (s.coalesce) ensureIdleListener();
+      };
+
+      s.dispatch = function(payload) {
+        s.payload = payload;
+        s.maybeSend();
       };
 
       managed[msg.inputId] = s;
-
-      el.addEventListener(msg.event, function(e) {
-        if (shouldSkip(el, msg.event)) return;
-        if (msg.preventDefault) e.preventDefault();
-        s.payload = buildPayload(e, el, msg.id);
-        s.maybeSend();
-      });
+      if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
     } else {
       el.addEventListener(msg.event, function(e) {
         if (shouldSkip(el, msg.event)) return;
@@ -496,11 +564,15 @@
 
   Shiny.addCustomMessageHandler('irid-events', function(msgs) {
     msgs.forEach(function(msg) {
-      var el = document.getElementById(msg.id);
-      if (!el) return;
       var key = msg.id + ':' + msg.event;
-      if (defined.has(key)) return;
-      defined.add(key);
+      if (eventsRegistered.has(key)) return;
+      // DOM events need the element to exist for `addEventListener`.
+      // Widget events bypass that step, so a missing element is fine
+      // (and shouldn't happen since the container is in the DOM by
+      // the time mount runs).
+      var el = document.getElementById(msg.id);
+      if (msg.source !== 'widget' && !el) return;
+      eventsRegistered.add(key);
       if (msg.mode === 'throttle') {
         setupThrottle(el, msg);
       } else if (msg.mode === 'debounce') {
@@ -508,6 +580,80 @@
       } else {
         setupImmediate(el, msg);
       }
+    });
+  });
+
+  // --- Widget registry & lifecycle ---
+
+  function mountWidget(id, name, props, factory) {
+    if (widgets[id]) return;  // idempotent — duplicate init is a no-op
+    var el = document.getElementById(id);
+    if (!el) {
+      // The init message is supposed to arrive after the swap/mutate
+      // that introduces the container, so this is rare. Drop quietly
+      // rather than throwing so a stray ordering bug doesn't crash
+      // the session.
+      console.warn('irid: widget container not found for id=' + id);
+      return;
+    }
+    var send = function(event, payload) {
+      sendWidgetEvent(id, event, payload);
+    };
+    var handle = factory(el, props, send) || {};
+    widgets[id] = { handle: handle, name: name };
+  }
+
+  // Destroy any widget instances inside `root` (an Element, fragment,
+  // or detached subtree). Called from `detachRange` / `irid-swap`'s
+  // inline detach BEFORE `Shiny.unbindAll` so widget `destroy()` runs
+  // while the subtree is still attached / intact.
+  function destroyWidgetsIn(root) {
+    if (root.nodeType === 1 && root.hasAttribute('data-irid-widget')) {
+      var w = widgets[root.id];
+      if (w && w.handle && typeof w.handle.destroy === 'function') {
+        try { w.handle.destroy(); } catch (e) { console.error(e); }
+      }
+      delete widgets[root.id];
+    }
+    if (typeof root.querySelectorAll === 'function') {
+      var els = root.querySelectorAll('[data-irid-widget]');
+      for (var i = 0; i < els.length; i++) {
+        var w2 = widgets[els[i].id];
+        if (w2 && w2.handle && typeof w2.handle.destroy === 'function') {
+          try { w2.handle.destroy(); } catch (e) { console.error(e); }
+        }
+        delete widgets[els[i].id];
+      }
+    }
+  }
+
+  window.irid = {
+    defineWidget: function(name, factory) {
+      defined.set(name, factory);
+      var queue = pendingInits[name];
+      if (queue) {
+        delete pendingInits[name];
+        queue.forEach(function(init) {
+          mountWidget(init.id, name, init.props, factory);
+        });
+      }
+    }
+  };
+
+  Shiny.addCustomMessageHandler('irid-widget-init', function(msg) {
+    if (widgets[msg.id]) return;  // idempotent
+    // Shiny.renderDependencies returns undefined synchronously in
+    // current Shiny versions; Promise.resolve normalizes both the
+    // sync and the documented Promise-returning shapes so the .then
+    // continuation runs once deps are loaded either way.
+    Promise.resolve(Shiny.renderDependencies(msg.deps || [])).then(function() {
+      var factory = defined.get(msg.name);
+      if (!factory) {
+        if (!pendingInits[msg.name]) pendingInits[msg.name] = [];
+        pendingInits[msg.name].push({ id: msg.id, props: msg.props });
+        return;
+      }
+      mountWidget(msg.id, msg.name, msg.props, factory);
     });
   });
 })();

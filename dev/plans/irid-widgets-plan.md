@@ -156,25 +156,23 @@ libraries" boundary.
   automatic per design §1 ("Read-only snap-back happens
   automatically").
 
-**Deps hoisting**:
+**Deps**:
 
-- `iridApp` and `renderIrid` already attach `irid_dependency()` to the
-  top-level fragment. Extend that step to also collect deps from
-  `widget_inits` discovered during `process_tags` and attach them
-  alongside. Add a small helper `collect_widget_deps(processed)` in
-  `R/widget.R` that flattens `processed$widget_inits[[i]]$deps`
-  into a single list, drops `NULL` entries, and returns the result
-  ready for `attachDependencies`. **Scope:** this only walks the
-  top-level pass — control-flow bodies (`When` / `Each` / `Match`)
-  aren't processed until their observer fires at mount time, so
-  widgets that *only* appear inside those bodies have their deps
-  shipped on the `irid-widget-init` message instead. That's by
-  design; the init message always carries the deps anyway, so
-  dynamic widgets are fully self-sufficient.
-- For dynamic mounts (`When` / `Each` / `Match`), the client renders
-  the message's deps via `Shiny.renderDependencies` (dedup is by
-  name alone — a same-name dep with a different version is also
-  skipped, which is harmless for the framework's use case).
+- Deps ride a single channel: the `irid-widget-init` message. Mount
+  bundles `widget_inits[i]$deps` into the init payload; the client
+  passes them to `Shiny.renderDependencies` before calling the
+  factory. This covers both initial-document widgets and dynamically-
+  mounted widgets (inside `When` / `Each` / `Match`) with one path.
+- No top-level `attachDependencies` for widget deps. `iridApp` and
+  `renderIrid` keep attaching only `irid_dependency()` — widget deps
+  load on the first `irid-widget-init` rather than with the initial
+  HTML response. The trade is one fewer code path against a small
+  perceived-perf cost on first paint (deps load after the first
+  custom message round-trip instead of with the page).
+- Dedup is by name alone in `Shiny.renderDependencies` — a same-name
+  dep with a different version is silently skipped, which is harmless
+  for the framework's use case (widgets shouldn't version-bump
+  mid-session).
 
 **`NAMESPACE` updates** (regenerated via `devtools::document()`):
 `IridWidget`, `write_back`, `event_defaults`, `can_accept_write`.
@@ -357,13 +355,11 @@ CodeMirror example in Commit 2 and the plotly example in Commit 3.
    "widget"` on `irid-attr`), widget events (emit `source: "widget"`
    on `irid-events`). No client work yet; tests inspect message
    shape via a session stub.
-4. R-side: deps hoisting into `iridApp` / `renderIrid`. Top-level
-   `attachDependencies` collects from `widget_inits`.
-5. JS-side: `defineWidget` / `sendWidgetEvent` / `irid-widget-init`
+4. JS-side: `defineWidget` / `sendWidgetEvent` / `irid-widget-init`
    handler / `target: "widget"` dispatch in `irid-attr` /
    `source: "widget"` dispatch in `irid-events` / detach walker for
    `data-irid-widget`.
-6. `devtools::document()` to regenerate `NAMESPACE` for the new
+5. `devtools::document()` to regenerate `NAMESPACE` for the new
    exports.
 
 Commit message: `Widget impl: IridWidget framework — R + JS runtime`
@@ -664,15 +660,14 @@ These are called out in the design docs and stay out of scope here:
   skipped. Widgets shouldn't version-bump mid-session, so this is
   fine.
 
-- **Top-level mount and dynamic mount take different deps paths.**
-  Top-level: deps attached to the HTML via `attachDependencies`,
-  loaded by the browser as part of the initial document.
-  Dynamic: deps ride the `irid-widget-init` message, loaded by
-  `Shiny.renderDependencies`. The init message *always* ships the
-  deps regardless of mount path — for top-level mounts this is a
-  no-op (dedup), and it removes a special case from the client
-  handler ("did this widget come from the initial HTML or a swap?
-  doesn't matter — the deps are always in the init message").
+- **Top-level mount and dynamic mount share the same deps path.**
+  All widget deps ride the `irid-widget-init` message and load via
+  `Shiny.renderDependencies` on the client. The cost is a small
+  perceived-perf hit on first paint: deps load after the first
+  custom-message round-trip rather than with the initial HTML. The
+  benefit is one code path and one source of truth for deps — the
+  init message handler doesn't need to know whether a widget came
+  from initial HTML or a swap.
 
 - **Async `<script>` load order vs init message.** The registry
   queue (design §2 "Race answers") handles this; the test plan

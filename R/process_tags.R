@@ -37,14 +37,6 @@ state_bind_event <- function(attr_name, tag_name) {
   "input"
 }
 
-# Can the callable accept a positional argument? Primitives have no
-# explicit formals but accept arguments at the C level; closures with at
-# least one formal (including `...`) can be called with the write value.
-# A 0-formal closure would error if called with an argument.
-can_accept_write <- function(fn) {
-  is.primitive(fn) || length(formals(fn)) >= 1L
-}
-
 # Build the synthetic write-back handler for a state-binding prop.
 # Writable callables (reactiveVal, reactiveProxy, reactiveStore node,
 # `\(v) ...`, `\(...) ...`, primitives) get a handler that calls
@@ -309,6 +301,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
   events <- list()
   control_flows <- list()
   shiny_outputs <- list()
+  widget_inits <- list()
 
   walk <- function(node) {
     if (is.null(node)) return(NULL)
@@ -320,6 +313,73 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         render_call = node$render_call
       )
       return(do.call(node$output_fn, c(list(id), node$output_fn_args)))
+    }
+
+    if (inherits(node, "irid_widget")) {
+      container <- node$container
+      if (is.null(container)) container <- htmltools::tags$div()
+
+      # Honor user-supplied id on the container, otherwise allocate.
+      user_id <- container$attribs$id
+      id <- if (!is.null(user_id)) user_id else next_id()
+
+      # Per-key dispatch on `is_irid_reactive()`. Callables become
+      # `target = "widget"` bindings (one observer per key); non-callables
+      # ride in the init message as constants.
+      prop_fns <- list()
+      static_props <- list()
+      for (key in names(node$props)) {
+        val <- node$props[[key]]
+        if (is_irid_reactive(val)) {
+          prop_fns[[key]] <- val
+          bindings[[length(bindings) + 1L]] <<- list(
+            id = id, target = "widget", attr = key, fn = val
+          )
+        } else {
+          static_props[[key]] <- val
+        }
+      }
+
+      # Widget event timing — three-tier resolution. Caller `.event` is
+      # validated/normalized the same way DOM `.event` is. The framework
+      # default for widget events is `event_immediate()` for every event
+      # (no `input → debounce(200)` special case — that's DOM-tuned).
+      widget_event_lookup <- normalize_element_event(node$event_config)
+      for (event_name in names(node$events)) {
+        handler <- node$events[[event_name]]
+        cfg <- widget_event_lookup(event_name)
+        if (is.null(cfg)) cfg <- widget_default_for_event(event_name)
+        events[[length(events) + 1L]] <<- list(
+          id = id, event = event_name, handler = handler,
+          mode = cfg$mode, ms = cfg$ms,
+          leading = cfg$leading, coalesce = cfg$coalesce,
+          prevent_default = FALSE,
+          source = "widget"
+        )
+      }
+
+      widget_inits[[length(widget_inits) + 1L]] <<- list(
+        id = id, name = node$name,
+        prop_fns = prop_fns, static_props = static_props,
+        deps = node$deps
+      )
+
+      # Forward the widget's `.event` onto the container so any DOM
+      # events on the container share the same timing lookup. Honor a
+      # container-set `.event` if present (specific wins over inherited).
+      if (is.null(container$attribs[[".event"]]) &&
+          !is.null(node$event_config)) {
+        container$attribs[[".event"]] <- node$event_config
+      }
+
+      # Set the id (so the walker reuses it for any container DOM events)
+      # and the `data-irid-widget` marker the client's detach walker
+      # looks for. irid owns this attribute — if the user set it on the
+      # container, irid overwrites.
+      container$attribs$id <- id
+      container$attribs[["data-irid-widget"]] <- node$name
+
+      return(walk(container))
     }
 
     if (inherits(node, "irid_each")) {
@@ -501,6 +561,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       }
       for (e in pending_events) {
         e$id <- id
+        e$source <- "dom"
         events[[length(events) + 1L]] <<- e
       }
     }
@@ -515,6 +576,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
   cleaned_tag <- walk(tag)
   list(tag = cleaned_tag, bindings = bindings, events = events,
        control_flows = control_flows, shiny_outputs = shiny_outputs,
+       widget_inits = widget_inits,
        counter = counter)
 }
 

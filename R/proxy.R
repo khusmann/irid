@@ -57,3 +57,29 @@ print.reactiveProxy <- function(x, ...) {
   }
   invisible(x)
 }
+
+#' Test whether a callable can accept a write value
+#'
+#' Returns `TRUE` for any callable that can accept a positional argument
+#' (`reactiveVal`, store leaf, [reactiveProxy()] with a setter, a primitive,
+#' or a closure with at least one formal). Returns `FALSE` for read-only
+#' callables (`reactive(...)`, a `\() expr` closure, a `reactiveProxy`
+#' built with no `set`), and for non-callables.
+#'
+#' Gate a write through this when you don't control whether the callable
+#' the caller handed you is writable — a typical pattern in widget
+#' wrappers (see [write_back()]), where a read-only `content` argument
+#' should silently skip the write rather than error.
+#'
+#' @param fn A value to test.
+#' @return A length-1 logical.
+#' @export
+can_accept_write <- function(fn) {
+  if (!is.function(fn)) return(FALSE)
+  if (inherits(fn, "reactiveProxy")) {
+    # A reactiveProxy's writability is whatever the `set` arg was at
+    # construction — its outer signature is `function(...)` either way.
+    return(!is.null(environment(fn)$set))
+  }
+  is.primitive(fn) || length(formals(fn)) >= 1L
+}
