@@ -32,6 +32,13 @@ suggested dependency; bundling it with the framework would muddy the
   container = NULL, .event = NULL)` — returns an object with class
   `irid_widget` carrying everything the constructor needs to surrender to
   `process_tags`. The class tag is what `process_tags` dispatches on.
+  **Validations** (errors at construction): `name` is a non-empty
+  character scalar; `props` and `events` are lists (possibly empty);
+  every entry in `props` and `events` has a non-empty name; `events`
+  values are functions; `deps` is `NULL`, an `html_dependency`, or a
+  list of them; `container` is `NULL` or a `shiny.tag`. `.event` is
+  validated downstream by the existing `normalize_element_event`
+  path so its error messages match plain-tag `.event` errors.
 - `write_back(callable, field, then = NULL)` — handler factory exactly as
   specified in design §1 ("The two helpers"). Errors at construction if
   `callable` is not a function.
@@ -95,11 +102,11 @@ suggested dependency; bundling it with the framework would muddy the
   between widget events and DOM events on the same container are
   author error.
 
-- The "irid construct as attribute value" guard already errors on
-  `irid_*` classes (line 414). `irid_widget` is a control-flow-class
-  construct (lives as a child), so reaching that guard means the
-  caller passed a widget as an attribute value — the existing error
-  message handles it without modification.
+- The existing "irid construct as attribute value" guard errors on
+  any `irid_*` class. `irid_widget` is a control-flow-class construct
+  (lives as a child), so reaching that guard means the caller passed
+  a widget as an attribute value — the existing error message handles
+  it without modification.
 
 **Update `R/mount.R`**:
 
@@ -107,13 +114,15 @@ suggested dependency; bundling it with the framework would muddy the
   1. Construct the init message by `isolate(fn())`-evaluating each
      entry in `prop_fns` and merging with `static_props` into one
      `props` object.
-  2. Send `irid-widget-init` **after** the swap that introduced
-     the container. For the top-level mount path (initial document)
-     this is "right after the binding/event setup". For nested mounts
-     inside `When` / `Each` / `Match`, the existing control-flow
-     observer already sends `irid-swap` before recursing into
-     `irid_mount_processed`, so the init message — sent from inside
-     that recursive call — naturally arrives after the swap.
+  2. Send `irid-widget-init` **after** the swap/mutate that
+     introduced the container. For the top-level mount path (initial
+     document) the container is in the static HTML so order is
+     trivial. For nested mounts inside `When` / `Match` the
+     control-flow observer sends `irid-swap` before recursing into
+     `irid_mount_processed`; for `Each` it sends `irid-mutate` (with
+     `inserts` / `order`) before recursing. Either way, the init
+     message — sent from inside that recursive call — naturally
+     arrives after the DOM change that introduced the element.
 - The per-key `widget:<key>` observers fall out of the existing
   bindings path: a binding with `attr = "widget:content"` is
   observable identically to one with `attr = "value"`; the only
@@ -173,8 +182,15 @@ suggested dependency; bundling it with the framework would muddy the
     Factor `buildPayload`'s tail (id/nonce/seq attach) into a helper
     so widget and DOM paths share it without duplicating the
     sequence-counter logic.
-- Add per-widget state map: `widgets = {}` — `id → {handle, name}`.
-  `handle` is the `{update, destroy}` returned by the factory.
+- Add module-scoped state at the top of the IIFE:
+  - `var defined = new Map();` — `name → factory`. Replaces the
+    existing `defined` Set (which today only tracks event-listener
+    registrations — those move to a different name to avoid the
+    collision; e.g. `eventsRegistered`).
+  - `var pendingInits = {};` — `name → [{id, props, send}, ...]`.
+    Queue of inits buffered while their widget JS is still loading.
+  - `var widgets = {};` — `id → {handle, name}`. `handle` is the
+    `{update, destroy}` returned by the factory.
 - Add `Shiny.addCustomMessageHandler('irid-widget-init', ...)`:
   1. If `widgets[id]` already exists, drop (idempotence — design §2
      "The init message is idempotent on the client").
@@ -186,7 +202,10 @@ suggested dependency; bundling it with the framework would muddy the
      so the `.then` continuation works either way.
   3. After deps ready, look up `defined.get(msg.name)`. If absent,
      push `{id, props}` onto `pendingInits[msg.name]` keyed queue.
-  4. If present, look up `document.getElementById(msg.id)`, call
+  4. If present, look up `document.getElementById(msg.id)`. If
+     `null` (rare — design §2 promises the swap/mutate lands before
+     the init, but the two are separate custom messages so be
+     defensive), drop with a `console.warn`. Otherwise, call
      `factory(el, msg.props, send)` where `send = function (event,
      payload) { irid.sendWidgetEvent(msg.id, event, payload); }`.
      Store the returned `{update, destroy}` in `widgets[id]`.
@@ -243,6 +262,9 @@ Add to `tests/testthat/`:
 - Deps lifted off the widget node into `widget_inits` (and stripped
   from any `htmltools::attachDependencies` carrier on the node so
   they don't double-ship)
+- Empty `props = list()` and empty `events = list()` work — no
+  bindings, no event rows, just the init message with an empty
+  `props` object
 
 **`test-widget-helpers.R`** (new file, covers `can_accept_write`,
 `write_back`, `event_defaults`):
