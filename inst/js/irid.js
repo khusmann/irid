@@ -151,7 +151,35 @@
     }
   });
 
+  // Dispatch by msg.target:
+  //   "text" — replace the content between the comment-anchor pair
+  //            `msg.id` with a single text node. Used for reactive text
+  //            children, which sit in restricted-content parents
+  //            (`<option>`, `<textarea>`, ...) where a `<span>` wrapper
+  //            would be stripped by the HTML parser.
+  //   "dom"  — set a DOM attribute or property on
+  //            `getElementById(msg.id)`. Includes focused-element
+  //            optimistic-update gating for `attr === "value"`.
   Shiny.addCustomMessageHandler('irid-attr', function(msg) {
+    if (msg.target === 'text') {
+      var a = lookupAnchors(msg.id);
+      if (!a) return;
+      var parent = a.start.parentNode;
+      var n = a.start.nextSibling;
+      while (n && n !== a.end) {
+        var next = n.nextSibling;
+        if (n.nodeType === 1) Shiny.unbindAll(n);
+        parent.removeChild(n);
+        n = next;
+      }
+      var val = msg.value;
+      if (val !== null && val !== undefined && val !== '') {
+        parent.insertBefore(document.createTextNode(String(val)), a.end);
+      }
+      return;
+    }
+
+    // target === 'dom'
     var el = document.getElementById(msg.id);
     if (!el) return;
     if (msg.attr === 'value' && document.activeElement === el) {
@@ -173,27 +201,6 @@
       } else {
         el.setAttribute(msg.attr, msg.value);
       }
-    }
-  });
-
-  // Replace the content between an anchor pair with a single text node.
-  // Used for reactive text children: process_tags emits a comment-anchor
-  // pair (valid inside `<option>`, `<textarea>`, and other restricted
-  // parents where a `<span>` wrapper would be stripped by the parser).
-  Shiny.addCustomMessageHandler('irid-text', function(msg) {
-    var a = lookupAnchors(msg.id);
-    if (!a) return;
-    var parent = a.start.parentNode;
-    var n = a.start.nextSibling;
-    while (n && n !== a.end) {
-      var next = n.nextSibling;
-      if (n.nodeType === 1) Shiny.unbindAll(n);
-      parent.removeChild(n);
-      n = next;
-    }
-    var val = msg.value;
-    if (val !== null && val !== undefined && val !== '') {
-      parent.insertBefore(document.createTextNode(String(val)), a.end);
     }
   });
 
