@@ -134,7 +134,9 @@ suggested dependency; bundling it with the framework would muddy the
 - For dynamic mounts (`When` / `Each` / `Match`), no top-level
   attachment is possible; the deps still ride on `irid-widget-init`
   and the client renders them via `Shiny.renderDependencies` (dedup
-  by name+version is a no-op for already-loaded deps).
+  by name is a no-op for already-loaded deps — Shiny dedups by name
+  alone, so a same-name dep with a different version is also
+  skipped, which is harmless for the framework's use case).
 
 **`NAMESPACE` updates** (regenerated via `devtools::document()`):
 `IridWidget`, `write_back`, `event_defaults`, `can_accept_write`.
@@ -565,14 +567,16 @@ These are called out in the design docs and stay out of scope here:
 
 ## Risk notes
 
-- **`Shiny.renderDependencies` availability.** The JS path relies on
-  this function being callable from a custom message handler. It is
-  documented public Shiny API but historically has had quirks under
-  rapid re-injection. The dedup-by-name+version guarantee is what
-  makes "re-fire on every re-mount" safe. If this turns out to be
-  unreliable in some Shiny versions, the fallback is a small
-  client-side dedup wrapper that tracks loaded `{name, version}`
-  pairs and only forwards new ones.
+- **`Shiny.renderDependencies` availability.** Verified empirically:
+  the JS function is callable from a custom message handler, accepts
+  the JSON shape `htmltools::htmlDependency()` produces directly (no
+  server-side preprocessing needed), and dedups by name so re-firing
+  `irid-widget-init` on every remount is safe. The inline
+  `<script type="module">` head-arg trick (CodeMirror example) also
+  works through it. One quirk: dedup is by name alone, not
+  name+version — a bumped version on the same name will be silently
+  skipped. Widgets shouldn't version-bump mid-session, so this is
+  fine.
 
 - **Top-level mount and dynamic mount take different deps paths.**
   Top-level: deps attached to the HTML via `attachDependencies`,
