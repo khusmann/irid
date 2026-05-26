@@ -643,7 +643,7 @@ head-only deps pass through unchanged. `Shiny.renderDependencies`
 dedups by name across the session, so re-firing `irid-widget-init` on
 a remount is a no-op for the deps step.
 
-
+## Remaining Work
 
 ### `Portal` (planned)
 
