@@ -170,19 +170,27 @@ suggested dependency; bundling it with the framework would muddy the
 
 **Update `inst/js/irid.js`**:
 
-- Expose a small `window.irid` object with two methods:
+- Expose `window.irid` with **one** public method:
   - `defineWidget(name, factory)` — set `defined.set(name, factory)`,
     then drain `pendingInits[name]` (if any) **in arrival order**
     before returning, calling the factory on each buffered init.
-  - `sendWidgetEvent(id, event, payload)` — look up `managed[inputId]`
-    (where `inputId = "irid_ev_<id>_<event>"`); if absent, no-op
-    (silent — design §3). If present, build a payload via the same
-    path as DOM events (attach `id`, `nonce`, `__irid_seq` from
-    `sequences[id]`) and call `s.maybeSend()` so throttle / debounce /
-    coalesce / sequence / stale-indicator gating all apply uniformly.
-    Factor `buildPayload`'s tail (id/nonce/seq attach) into a helper
-    so widget and DOM paths share it without duplicating the
-    sequence-counter logic.
+
+  Note design v2 §3 lists `sendWidgetEvent` on `window.irid` too, but
+  it's an implementation detail: widget code only ever calls it
+  through the `send` closure handed to the factory, and the design's
+  "no cross-widget broadcast" rule (§7) means there's no reason to
+  let widget code reach a different widget's id. Keep it as a
+  private function inside the IIFE.
+
+- `sendWidgetEvent(id, event, payload)` (private to `irid.js`) —
+  look up `managed[inputId]` (where `inputId = "irid_ev_<id>_<event>"`);
+  if absent, no-op (silent — design §3). If present, build a payload
+  via the same path as DOM events (attach `id`, `nonce`, `__irid_seq`
+  from `sequences[id]`) and call `s.maybeSend()` so throttle /
+  debounce / coalesce / sequence / stale-indicator gating all apply
+  uniformly. Factor `buildPayload`'s tail (id/nonce/seq attach) into
+  a helper so widget and DOM paths share it without duplicating the
+  sequence-counter logic.
 - Add module-scoped state at the top of the IIFE:
   - `var defined = new Map();` — `name → factory`. Replaces the
     existing `defined` Set (which today only tracks event-listener
@@ -208,8 +216,9 @@ suggested dependency; bundling it with the framework would muddy the
      the init, but the two are separate custom messages so be
      defensive), drop with a `console.warn`. Otherwise, call
      `factory(el, msg.props, send)` where `send = function (event,
-     payload) { irid.sendWidgetEvent(msg.id, event, payload); }`.
-     Store the returned `{update, destroy}` in `widgets[id]`.
+     payload) { sendWidgetEvent(msg.id, event, payload); }` (the
+     private function — see above). Store the returned
+     `{update, destroy}` in `widgets[id]`.
 - Update the `irid-attr` handler: if `msg.attr` starts with `widget:`,
   look up `widgets[msg.id]`, call `handle.update(key, msg.value,
   msg.sequence)` where `key = msg.attr.slice(7)`. Skip if no widget
@@ -307,8 +316,8 @@ captured here):
 - `irid-attr widget:<key>` routes to the widget's `update` hook
 - `irid-events` with `source: "widget"` initializes managed state
   but skips `addEventListener`
-- `irid.sendWidgetEvent` builds payload via the shared helper and
-  pushes through `managed[inputId]`
+- The `send` closure passed to factories builds payload via the
+  shared helper and pushes through `managed[inputId]`
 - `detachRange` walks for `data-irid-widget` and invokes `destroy()`
   hooks before unbind
 - `defineWidget` drains queued inits in arrival order
