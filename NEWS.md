@@ -1,5 +1,22 @@
 # irid (development version)
 
+## New features
+
+* `IridWidget()` — wrap arbitrary JavaScript libraries (CodeMirror,
+  Plotly, Leaflet, ...) as reactive irid components. Reactive props
+  flow into the widget; events flow back out. Composes inside `When`,
+  `Each`, and `Match` like any other irid construct. The helpers
+  `write_back()`, `event_defaults()`, and `can_accept_write()`
+  collapse the canonical wrapper round-trip to one line per state key.
+  See `examples/codemirror.R`.
+
+## Bug fixes
+
+* Reactive bindings no longer flicker when the server is slow to echo
+  a fast stream of input events. The optimistic-update protocol's
+  stale-echo skip used to apply only to focused text inputs; it now
+  covers all reactive bindings.
+
 # irid 0.2.0
 
 ## Breaking changes
