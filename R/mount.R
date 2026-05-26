@@ -49,11 +49,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     for (key in names(wi$prop_fns)) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
+    deps <- lapply(wi$deps, register_widget_dep)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
       name = wi$name,
       props = props,
-      deps = wi$deps
+      deps = deps
     ))
   }
 
