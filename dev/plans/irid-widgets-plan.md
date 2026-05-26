@@ -171,8 +171,9 @@ suggested dependency; bundling it with the framework would muddy the
 **Update `inst/js/irid.js`**:
 
 - Expose a small `window.irid` object with two methods:
-  - `defineWidget(name, factory)` — register, drain queue for `name`
-    if any inits buffered.
+  - `defineWidget(name, factory)` — set `defined.set(name, factory)`,
+    then drain `pendingInits[name]` (if any) **in arrival order**
+    before returning, calling the factory on each buffered init.
   - `sendWidgetEvent(id, event, payload)` — look up `managed[inputId]`
     (where `inputId = "irid_ev_<id>_<event>"`); if absent, no-op
     (silent — design §3). If present, build a payload via the same
@@ -232,7 +233,21 @@ suggested dependency; bundling it with the framework would muddy the
 this is the entire wire-protocol delta. `irid-attr` gains the
 `widget:*` attr shape (already structurally allowed); `irid-events`
 gains an optional `source` field defaulting to `"dom"`; `irid-widget-init`
-is the only new message.
+is the only new message. Shape:
+
+```js
+{
+  id:    "irid-7",
+  name:  "codemirror",       // widget registry name
+  props: { content: "...", language: "r", ... },
+  deps:  [{ name: "cm6", version: "6.0.1", head: "...", ... }, ...]
+}
+```
+
+`props` is one merged object (callable-on-R-side keys and constant-on-
+R-side keys arrive identically — the distinction shows up only in
+whether subsequent `irid-attr widget:<key>` messages arrive for that
+key). `deps` is the list lifted from `widget_inits` server-side.
 
 ### Tests
 
