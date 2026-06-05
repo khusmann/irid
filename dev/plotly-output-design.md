@@ -476,7 +476,7 @@ The original design specced an explicit JS-side "diff server-authoritative vs la
 1. User zooms → plotly fires `plotly_relayout` → JS calls `send("relayout", payload)`.
 2. R relayout handler fires. The `reactiveProxy` (or read-only callable) rejects the write — the bound callable's canonical value is *unchanged*.
 3. The framework's force-send-on-no-op loop reads every binding on the widget's id, `isolate`-evaluates each, and emits `irid-attr target="widget"` with the **old** canonical value, tagged with the source event's sequence. (This is what makes read-only snap-back automatic for every widget — the wrapper writes nothing extra to get it.)
-4. The widget's `update("xaxis_range", oldValue, seq)` hook compares against plotly's current state, sees a mismatch, and calls `Plotly.relayout(el, {"xaxis.range": oldValue})` — the snap.
+4. The widget's `update("xaxis_range", oldValue)` hook compares against plotly's current state, sees a mismatch, and calls `Plotly.relayout(el, {"xaxis.range": oldValue})` — the snap. (The stale-echo gate upstream guarantees the hook never sees out-of-order values, so it needs no sequence argument.)
 
 Targeted `Plotly.relayout()` bypasses `uirevision` preservation because it's a direct state update, not a reconciliation — same observation as the original design, now flowing through the generic substrate. **The wrapper writes nothing extra to get snap-back; registering the listener is sufficient** — a framework guarantee for every widget.
 
@@ -520,7 +520,7 @@ irid.defineWidget("plotly", function (el, props, send) {
   // ... one listener per event in the wrapper's events list ...
 
   return {
-    update: function (key, value, sequence) {
+    update: function (key, value) {
       if (key === "spec") {
         lastSpec = value;
         render(lastSpec, stateCache);
@@ -558,7 +558,7 @@ Notes on what's load-bearing on the substrate:
 No new messages. The traffic is exactly the widget-substrate messages:
 
 - **`irid-widget-init`** — `{ id, name: "plotly", props: { spec, xaxis_range, ... }, deps: [plotlyDep] }`. Sent after the swap that introduces the placeholder div.
-- **`irid-attr widget:<key>`** — fired by the per-key prop observers on the R side. The widget routes these to its `update(key, value, sequence)` hook.
+- **`irid-attr widget:<key>`** — fired by the per-key prop observers on the R side. The widget routes these to its `update(key, value)` hook.
 - **`irid-events`** with `source: "widget"` — set up at mount for each registered event in the wrapper's `events` list, with the wrapper's `.event` timing applied.
 
 ### Dependencies
@@ -674,7 +674,7 @@ New fields are added to the translation table as usage patterns clarify which pl
 
 - **Force-send-on-no-op echoes every binding on the widget's id after every event.** PlotlyOutput's snap-back path *requires* this — when a `reactiveProxy` rejects a write, the framework must still emit `irid-attr widget:<key>` carrying the unchanged canonical value, so the widget's `update` hook can snap plotly back. Narrowing the echo (e.g., "only echo bindings the event handler conceptually writes to") would silently break PlotlyOutput's rejection semantics.
 
-- **`update(key, value, sequence)` arity is stable.** PlotlyOutput's idempotence path compares `value` against plotly's current state at the corresponding path; it ignores `sequence`. The widget framework leaves idempotence and sequence handling to the widget author. Stable as long as the hook's signature doesn't change.
+- **`update(key, value)` arity is stable.** PlotlyOutput's idempotence path compares `value` against plotly's current state at the corresponding path. The widget framework leaves idempotence to the widget author and handles sequence/stale-echo gating upstream of the hook (so no sequence argument reaches it). Stable as long as the hook's signature doesn't change.
 
 - **The init message ships a single merged `props` object** containing both the spec and the named state args. The factory destructures `props.spec` and the named keys from one object. If the substrate ever split init into "constant" and "binding-driven" channels, the factory would need to adapt.
 
