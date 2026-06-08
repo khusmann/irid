@@ -17,19 +17,14 @@ IridWidget(
 \code{irid.defineWidget("<name>", ...)} call. Required, non-empty
 character scalar.}
 
-\item{props}{Named list of inputs (server → client). Per-key dispatch
-on \code{\link[=is.function]{is.function()}}: callable values become observers; non-callable
-values ride in the init message as constants. \code{NULL} entries are
-forwarded to JS as \code{null} (not dropped), so wrappers can declare
-their full prop shape with optional slots
-(\code{props = list(content = ..., cursor = cursor)} where \code{cursor} may
-be \code{NULL}) and the JS factory sees a predictable, complete object.}
+\item{props}{Named list of props. Callable values are two-way-capable
+bindings; non-callable values are init-only constants. \code{NULL} entries
+are forwarded to JS as \code{null} (not dropped). Wrap a value in
+\code{\link[=irid_wire]{irid_wire()}} to tune its write-back timing.}
 
-\item{events}{List of \code{\link[=widget_event]{widget_event()}} records (client → server). Each
-record bundles wire-name, timing config, and handler for one event
-the widget JS can dispatch. \code{NULL} entries (from \code{widget_event()}
-calls whose handler was \code{NULL}) are dropped, so wrappers can forward
-optional handlers declaratively.}
+\item{events}{Named list of notifications (client → server), keyed by wire
+event name. Each value is a handler, an \code{\link[=irid_wire]{irid_wire()}}, or \code{NULL}
+(dropped). \code{dom_opts} is not allowed.}
 
 \item{deps}{Optional \code{html_dependency} or list of them. Required for
 any widget whose JS isn't already loaded by some other means.}
@@ -50,13 +45,26 @@ The client's \code{irid.defineWidget("<name>", factory)} registration is
 looked up by \code{name} and called once per mount.
 }
 \details{
-Reactive \code{props} open a one-way observer (server → client), routed
-client-side to the widget's \code{update(key, value)} hook. Event
-handlers in \code{events} go in the other direction: the widget JS calls
-\code{send(event, payload)}, the payload arrives R-side through the
-standard \code{irid-events} machinery (timing, sequence, stale-indicator
-gating all work uniformly).
+\strong{Props are two-way-capable by default}, exactly like DOM \code{value} /
+\code{checked}. A callable prop (\code{reactiveVal}, store leaf, \code{reactiveProxy},
+...) reads inbound to the widget (server → client, routed to the
+factory's \code{update(key, value)} hook) \emph{and} accepts write-back: when the
+widget JS calls \code{setProp(key, value)}, irid writes the value through the
+bound reactive (gated by writability — a read-only reactive's write is
+dropped and the canonical value is snapped back). Whether a prop is
+\emph{actually} two-way depends on whether the widget JS pushes through
+\code{setProp}; the snap-back machinery is latent until it does. A non-callable
+prop rides in the init message as a constant and is never re-sent.
 
-Per-widget round-trip wiring lives in the widget's R wrapper — see
-\code{\link[=write_back]{write_back()}} for the canonical pattern.
+Wrap a prop in \code{\link[=irid_wire]{irid_wire()}} only to \strong{tune} its round-trip timing
+(\code{content = irid_wire(content, irid_debounce(200))}) — never to enable or
+disable two-way. To react to a prop's change, observe the bound reactive
+or pass a \code{reactiveProxy}; a bound prop is not \emph{also} handled.
+
+\code{events} carries genuine notifications the widget emits that correspond to
+no prop (e.g. \code{cursor-changed}). Keys are the wire event names the widget
+JS passes to \code{sendEvent()} (lowercase kebab-case by web \code{CustomEvent}
+convention). Each value is a handler or an \code{\link[=irid_wire]{irid_wire()}} (to tune timing);
+\code{NULL} entries are dropped so optional handlers forward declaratively.
+\code{dom_opts} is illegal on a widget event.
 }

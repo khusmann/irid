@@ -52,6 +52,24 @@ make_autobind_handler <- function(fn, attr_name) {
   h
 }
 
+# Build the synthesized write-back handler for a two-way-capable widget
+# prop. `setProp(key, value)` on the client delivers the value under the
+# `value` payload field (uniform across props since each rides its own
+# `irid_prop_{id}_{key}` input). Writable subjects get `fn(e$value)`;
+# read-only subjects get a no-op whose force-send snaps the canonical value
+# back through the prop's `target = "widget"` binding.
+make_widget_writeback <- function(fn, key) {
+  force(fn)
+  force(key)
+  h <- if (can_accept_write(fn)) {
+    function(e) fn(e$value)
+  } else {
+    function(e) NULL
+  }
+  attr(h, "irid_write_targets") <- key
+  h
+}
+
 # Per-event default timing. Typing produces a flood of `input` events so
 # the bare default is debounce; everything else fires once per user action
 # and goes immediate.
@@ -67,8 +85,8 @@ derive_coalesce <- function(mode) !identical(mode, "immediate")
 # the event message carries. Carrier `timing` wins, else the per-event
 # default; carrier `coalesce` wins, else derive from the mode; `dom_opts`
 # flags default FALSE when absent.
-resolve_wire_config <- function(wire, event_name) {
-  timing <- wire$timing %||% default_for_event(event_name)
+resolve_wire_config <- function(wire, event_name, default_timing = NULL) {
+  timing <- wire$timing %||% default_timing %||% default_for_event(event_name)
   dom <- wire$dom_opts
   list(
     mode = timing$mode, ms = timing$ms, leading = timing$leading,
@@ -177,41 +195,61 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       user_id <- container$attribs$id
       id <- if (!is.null(user_id)) user_id else next_id()
 
-      # Per-key dispatch on `is_irid_reactive()`. Callables become
-      # `target = "widget"` bindings (one observer per key); non-callables
-      # ride in the init message as constants. `static_props[key] <- list(val)`
-      # (single-bracket) preserves NULL entries — `[[<-` would drop them
-      # via R's NULL-removes-key quirk. Shiny's `null = "null"` JSON option
-      # then serializes them to JS `null`, giving the widget factory a
-      # complete, predictable props object.
+      # Per-key prop dispatch. A callable (bare, or the subject of an
+      # `irid_wire` used to tune timing) becomes a **two-way-capable** prop:
+      # a `target = "widget"` binding (server → client, one observer per
+      # key) PLUS a synthesized write-back event row (`kind = "prop"`,
+      # client → server via `setProp`). A non-callable rides in the init
+      # message as a constant. `static_props[key] <- list(val)`
+      # (single-bracket) preserves NULL entries — `[[<-` would drop them via
+      # R's NULL-removes-key quirk; Shiny's `null = "null"` JSON option then
+      # serializes them to JS `null`, giving the factory a complete props
+      # object.
       prop_fns <- list()
       static_props <- list()
       for (key in names(node$props)) {
         val <- node$props[[key]]
-        if (is_irid_reactive(val)) {
-          prop_fns[[key]] <- val
+        w <- if (inherits(val, "irid_wire")) val else NULL
+        subj <- if (!is.null(w)) w$subject else if (is_irid_reactive(val)) val else NULL
+        if (!is.null(subj) && is_irid_reactive(subj)) {
+          prop_fns[[key]] <- subj
           bindings[[length(bindings) + 1L]] <<- list(
-            id = id, target = "widget", attr = key, fn = val
+            id = id, target = "widget", attr = key, fn = subj
+          )
+          cfg <- resolve_wire_config(w %||% irid_wire(), key,
+                                     default_timing = irid_immediate())
+          events[[length(events) + 1L]] <<- list(
+            id = id, event = key, handler = make_widget_writeback(subj, key),
+            write_targets = key,
+            mode = cfg$mode, ms = cfg$ms, leading = cfg$leading,
+            coalesce = cfg$coalesce,
+            prevent_default = FALSE, stop_propagation = FALSE,
+            capture = FALSE, passive = FALSE,
+            source = "widget", kind = "prop"
           )
         } else {
-          static_props[key] <- list(val)
+          # A wire with a NULL subject (optional prop the caller omitted)
+          # collapses to a NULL constant; otherwise the bare value rides.
+          static_props[key] <- list(if (!is.null(w)) NULL else val)
         }
       }
 
-      # Widget event timing comes from each `widget_event` record's
-      # `timing` slot (an `irid_timing` shape). `coalesce` is derived from
-      # the mode here — the Stage-0 seam that keeps `widget_event` working
-      # before the §7 widget rework moves widget events onto `irid_wire`.
-      for (ev in node$events) {
-        cfg <- ev$timing
+      # Widget events are genuine notifications, configured with `irid_wire`
+      # (already normalized + subject-guaranteed by `IridWidget`). Timing /
+      # coalesce come from the carrier, defaulting per the event-name rule
+      # (which is `irid_immediate()` for any non-`input` widget event name).
+      for (key in names(node$events)) {
+        w <- node$events[[key]]
+        handler <- w$subject
+        cfg <- resolve_wire_config(w, key, default_timing = irid_immediate())
         events[[length(events) + 1L]] <<- list(
-          id = id, event = ev$name, handler = ev$handler,
-          write_targets = attr(ev$handler, "irid_write_targets"),
+          id = id, event = key, handler = handler,
+          write_targets = attr(handler, "irid_write_targets"),
           mode = cfg$mode, ms = cfg$ms, leading = cfg$leading,
-          coalesce = derive_coalesce(cfg$mode),
+          coalesce = cfg$coalesce,
           prevent_default = FALSE, stop_propagation = FALSE,
           capture = FALSE, passive = FALSE,
-          source = "widget"
+          source = "widget", kind = "event"
         )
       }
 
@@ -318,7 +356,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
           hint <- if ("irid_timing" %in% irid_class) {
             if (is_event || is_state) {
               paste0(
-                "Timing shapes pair with a subject inside `irid_wire()` — ",
+                "Timing shapes pair with a subject inside `irid_wire()`: ",
                 "e.g. `", name, " = irid_wire(subject, ", irid_class[[1]],
                 "())`."
               )

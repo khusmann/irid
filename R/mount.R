@@ -61,7 +61,14 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # Set up event listeners
   if (length(result$events) > 0L) {
     event_msgs <- lapply(result$events, function(ev) {
-      input_id <- paste0("irid_ev_", ev$id, "_", ev$event)
+      # Two-way widget props ride a distinct input namespace
+      # (`irid_prop_{id}_{key}`, written by the client's `setProp`); DOM and
+      # widget events use `irid_ev_{id}_{event}`.
+      input_id <- if (identical(ev$kind, "prop")) {
+        paste0("irid_prop_", ev$id, "_", ev$event)
+      } else {
+        paste0("irid_ev_", ev$id, "_", ev$event)
+      }
       handler <- ev$handler
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
@@ -110,9 +117,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # it can apply server transforms even on no-op updates.
         #
         # Scoped per-binding via `write_targets` — only echo the bindings
-        # this event's handler is registered to write through (via
-        # `write_back` or autobind). Hand-rolled handlers declare no
-        # targets and get no force-send: their bindings either fire
+        # this event's handler is registered to write through (the DOM
+        # autobind or the widget two-way-prop write-back). Hand-rolled
+        # handlers declare no targets and get no force-send: their bindings
+        # either fire
         # naturally on change or the wrapper handles the echo itself.
         # Without this filtering, an event whose handler doesn't write a
         # particular binding's reactiveVal would still force-send that

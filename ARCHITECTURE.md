@@ -14,7 +14,7 @@ R/
   mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
   scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
-  widget.R        IridWidget + widget_event / write_back helpers + dep-registration
+  widget.R        IridWidget (two-way props) + dep-registration
   irid-package.R Package-level imports
 
 inst/js/
@@ -80,12 +80,15 @@ Walks the tag tree recursively and produces:
 - **`events`** — List of `{id, event, handler, source, mode, ms, leading,
   coalesce, prevent_default, stop_propagation, capture, passive}`, one entry
   per `(id, event)`. `source = "dom"` for events attached to a DOM element
-  via `addEventListener`; `source = "widget"` for events the widget JS pushes
-  through `send()`. A given DOM event is claimed by **at most one** of
-  {value-binding autobind, explicit `on*`} — there is no merge (see the
-  one-channel rule below). `handler` is `NULL` for a config-only event (an
-  `irid_wire` with `dom_opts` but no subject) — the client attaches a
-  listener for the DOM flags but never round-trips.
+  via `addEventListener`; `source = "widget"` for widget events (pushed via
+  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). A
+  `kind` field distinguishes a `"prop"` write-back (input
+  `irid_prop_{id}_{key}`) from a regular `"event"` (input
+  `irid_ev_{id}_{event}`); DOM-event rows omit `kind`. A given DOM event is
+  claimed by **at most one** of {value-binding autobind, explicit `on*`} —
+  there is no merge (see the one-channel rule below). `handler` is `NULL` for
+  a config-only event (an `irid_wire` with `dom_opts` but no subject) — the
+  client attaches a listener for the DOM flags but never round-trips.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
@@ -412,8 +415,9 @@ the DOM. The client:
    registered yet (script still loading), buffers `{id, props}` under
    `pendingInits[name]` and drains it when `irid.defineWidget(name, ...)`
    eventually lands.
-3. Once the factory is available, calls `factory(el, props, send)` and
-   stores the returned `{update, destroy}` handle in a per-id widget map.
+3. Once the factory is available, calls
+   `factory(el, props, sendEvent, setProp)` and stores the returned
+   `{update, destroy}` handle in a per-id widget map.
    The init message is idempotent — a duplicate for an already-mounted
    id is dropped.
 
@@ -546,70 +550,66 @@ IridWidget(
 )
 ```
 
-`props` follows irid's "functions, not expressions" rule per-key. A
-callable value (`reactiveVal`, store leaf, `reactiveProxy`, 0-arg
-closure, ...) becomes a per-key binding (one observer firing `irid-attr
-target="widget"` on change); a non-callable value rides in the init
-message and is never re-sent. This is what makes init-only library
-options work without a separate API: pass a constant, no observer is
-registered.
+`props` follows irid's "functions, not expressions" rule per-key, and
+props are **two-way-capable by default**, exactly like DOM `value` /
+`checked`. A callable value (`reactiveVal`, store leaf, `reactiveProxy`,
+...) gets *both* directions wired: a server → client binding (one observer
+firing `irid-attr target="widget"` → the factory's `update` hook on change)
+**and** a synthesized client → server write-back, accepted when the widget
+JS calls `setProp(key, value)`. A non-callable value rides in the init
+message and is never re-sent (init-only library options need no separate
+API — pass a constant, no observer). Wrapping a prop in `irid_wire` only
+*tunes* its write-back timing; it never enables or disables two-way.
 
-`events` keys are lowercase kebab-case (matching the web's `CustomEvent`
-convention — `change`, `cursor-changed`, `relayout`). No `on` prefix
-because there's no DOM event mediating — the widget JS chooses what to
-fire via `send()`. Handlers are 0/1/2-arg, dispatched the same way DOM
-event handlers are.
+`events` carries genuine notifications that correspond to *no* prop. Keys
+are lowercase kebab-case (web `CustomEvent` convention — `cursor-changed`,
+`relayout`). No `on` prefix because there's no DOM event mediating — the
+widget JS chooses what to fire via `sendEvent()`. Each value is a handler
+or an `irid_wire` (to tune timing); `NULL` (or a `merge()` resolving to a
+subject-less wire) is dropped, so optional handlers forward declaratively.
 
-### Round-trips live in the wrapper, not the framework
+### Two-way props: `setProp` + `irid_prop_*`
 
 irid hard-codes DOM autobind for `value`/`checked` because the DOM IDL
-gives every element a uniform (prop, event, event-field) triple. JS
-libraries have no such triple, so `IridWidget` only exposes one-way
-`props` (in) and `events` (out); the wrapper's R author composes a
-one-line `events` entry that writes through the caller's reactive.
-Three helpers make this idiomatic:
+gives every element a uniform (prop, event, event-field) triple. Widget
+props get the same treatment by construction: R always sets up the
+inbound-accept + snap-back for a callable prop, and whether it's *actually*
+two-way is decided by whether the widget JS pushes through the prop channel.
 
-- **`can_accept_write(callable)`** — the writability predicate. `TRUE`
-  for any callable that can take a positional arg (`reactiveVal`, store
-  leaf, `reactiveProxy` with a setter, 1+-arg closure, primitive);
-  `FALSE` for read-only callables (`reactive(...)`, `\() expr`,
-  setter-less `reactiveProxy`) and non-callables. Used to gate writes
-  so a read-only callable handed to a wrapper doesn't error.
-- **`write_back(callable, field, then = NULL)`** — the handler factory.
-  Returns a 1-arg function that writes `e[[field]]` to `callable` iff
-  writable, then calls the optional `then` handler (arity-dispatched).
-  One line per round-trip key in the wrapper's `widget_event()` calls.
-- **`widget_event(name, handler, timing)`** — per-event record bundling
-  wire-name, handler, and timing shape (defaults to `irid_immediate()`).
-  Wrappers build a list of these as the `events =` arg to `IridWidget()`.
-  Returns `NULL` when handler is `NULL` so optional handlers can be
-  forwarded declaratively (`IridWidget` drops `NULL` entries). Wrappers
-  that want to surface caller timing overrides typically define a local
-  picker to compose inline; see `examples/codemirror.R`. (This
-  `widget_event` / `write_back` round-trip wiring is retired by the §7
-  widget rework in `dev/events.md`, replaced by two-way-capable props.)
+The new primitive is **`setProp` + a per-prop `irid_prop_{id}_{key}`
+input** — the client → server partner of the existing server → client
+`irid-attr target="widget"` → `update` hook. `setProp("content", value)`
+pushes through the **same managed-state / sequence transport as
+`sendEvent`** (so optimistic-update gating and echo-sequencing apply), but
+to `irid_prop_{id}_{key}` instead of `irid_ev_{id}_{event}`. process_tags
+emits, per callable prop, a `kind = "prop"` event row whose synthesized
+handler writes the bound reactive (gated by the internal `can_accept_write`
+predicate); mount wires an `observeEvent` on that input. A read-only
+reactive's write is dropped, and the force-send-on-no-op loop (scoped
+per-binding via `write_targets = key`) echoes the canonical value back as a
+`target="widget"` `irid-attr`, snapping the library state. A bound prop is
+not *also* handled — to react to its change, observe the reactive or pass a
+`reactiveProxy`.
 
-Read-only snap-back is automatic: even when `write_back`'s writability
-gate blocks the call, the event listener has already fired, and the
-event observer's force-send-on-no-op loop echoes the canonical value
-back as a `target="widget"` `irid-attr`. The widget's `update` hook
-sees the mismatch and snaps the library state. The wrapper writes
-nothing extra to get this — registering the listener is sufficient.
+**Cost:** latent snap-back machinery on every callable prop even if the JS
+never pushes it. It never fires unless `setProp` is called — cheap, and it
+buys full DOM↔widget symmetry with no per-prop two-way marker.
 
 ### JS-side API
 
 `window.irid` exposes one public method, `defineWidget(name, factory)`,
-where `factory` is `(el, props, send) -> { update, destroy }`. The
-factory runs once per mount:
+where `factory` is `(el, props, sendEvent, setProp) -> { update, destroy }`.
+The factory runs once per mount:
 
 ```js
-irid.defineWidget("codemirror", function (el, props, send) {
-  // el:    container DOM element (already attached)
-  // props: merged object — all props, callable and constant alike
-  // send:  send(event, payload) — push events through irid's pipeline
+irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
+  // el:        container DOM element (already attached)
+  // props:     merged object — all props, callable and constant alike
+  // sendEvent: sendEvent(event, payload) — push a notification
+  // setProp:   setProp(key, value)       — push a two-way prop's new value
   var view = new EditorView({ /* ... */ });
   return {
-    update: function (key, value) {
+    update: function (key, value) {           // prop in (server -> client)
       if (key === "content" && value !== view.state.doc.toString()) {
         view.dispatch({ /* ... */ });
       }
@@ -627,9 +627,11 @@ Contract notes:
   whether subsequent `irid-attr target="widget"` messages arrive.
 - `update` fires only for keys that were callable on the R side; it
   must be idempotent (most updates round-trip the value the widget
-  just sent via `send`).
-- `send(event, payload)` is a silent no-op for events with no R
-  subscriber — the widget can register listeners unconditionally.
+  just pushed via `setProp`).
+- `setProp(key, value)` is the client → server half of a two-way prop;
+  `sendEvent(event, payload)` pushes a notification. Both are silent
+  no-ops when no R subscriber exists, so the widget can wire them
+  unconditionally.
 - `destroy` runs before the container is detached. The widget should
   tear down anything that isn't pure DOM under `el` (timers,
   ResizeObservers, web sockets, ...); DOM children of `el` will be
@@ -637,9 +639,9 @@ Contract notes:
 
 ### Lifecycle and dependencies
 
-The widget's R-side observers (one per callable prop, one per event)
-are owned by the enclosing mount; `destroy()` on the mount tears them
-down. Client-side, `detachRange` (used by `irid-swap` and
+The widget's R-side observers (per callable prop: one server→client
+binding plus one client→server write-back; one per event) are owned by
+the enclosing mount; `destroy()` on the mount tears them down. Client-side, `detachRange` (used by `irid-swap` and
 `irid-mutate`) walks the removed fragment for `[data-irid-widget]`
 elements and calls each widget's `destroy()` before `Shiny.unbindAll`.
 No `irid-widget-destroy` message — the teardown is purely client-driven
@@ -669,16 +671,14 @@ a remount is a no-op for the deps step.
 
 The event observer's force-send-on-no-op loop in `mount.R` only echoes
 bindings whose `attr` is in the firing event's declared write targets
-(`ev$write_targets`). `write_back(callable, field)` and the autobind
-synthetic-event factory (`make_autobind_handler`) both attach the
-target attr to the returned handler as an `irid_write_targets`
-attribute; `compose_handlers` unions across constituents;
-`process_tags` lifts the attribute onto each event row. **Hand-rolled
-handlers** (the wrapper author writes their own `function(e) {…}`
-without going through `write_back`) declare no targets and skip
-force-send entirely — they're responsible for echo correctness
-themselves, and the natural binding observer fires when the
-reactiveVal changes.
+(`ev$write_targets`). The two synthesized write-backs — the DOM autobind
+factory (`make_autobind_handler`) and the widget two-way-prop factory
+(`make_widget_writeback`) — attach the target attr to the returned handler
+as an `irid_write_targets` attribute, which `process_tags` lifts onto the
+event row. **Hand-rolled handlers** (a wrapper's own `function(e) {…}`, or
+any explicit `on*`) declare no targets and skip force-send entirely —
+they're responsible for echo correctness themselves, and the natural
+binding observer fires when the reactiveVal changes.
 
 Without this scoping, an event whose handler doesn't write a particular
 binding's reactiveVal would still cause that binding's current value to
