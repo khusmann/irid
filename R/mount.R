@@ -63,6 +63,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     event_msgs <- lapply(result$events, function(ev) {
       input_id <- paste0("irid_ev_", ev$id, "_", ev$event)
       handler <- ev$handler
+
+      # A config-only event (e.g. `dom_opts` with no handler) attaches a
+      # client-side listener for its DOM flags but never round-trips, so
+      # there is no server observer to register.
+      if (!is.null(handler)) {
       nformals <- length(formals(handler))
 
       obs <- observeEvent(session$input[[input_id]], {
@@ -135,6 +140,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         }
       }, ignoreInit = TRUE)
       observers[[length(observers) + 1L]] <<- obs
+      }
 
       list(
         id = ev$id,
@@ -145,6 +151,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         leading = ev$leading,
         coalesce = ev$coalesce,
         preventDefault = ev$prevent_default,
+        stopPropagation = ev$stop_propagation,
+        capture = ev$capture,
+        passive = ev$passive,
+        clientOnly = is.null(ev$handler),
         source = ev$source
       )
     })

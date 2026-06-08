@@ -134,12 +134,12 @@ CodeMirror <- function(
       widget_event(
         name    = "change",
         handler = write_back(content, "content", then = onChange),
-        timing  = event_pick(.event, "change", event_debounce(200, coalesce = TRUE))
+        timing  = event_pick(.event, "change", irid_debounce(200))
       ),
       widget_event(
         name    = "cursor-changed",
         handler = onCursorChanged,
-        timing  = event_pick(.event, "cursor-changed", event_throttle(100, coalesce = TRUE))
+        timing  = event_pick(.event, "cursor-changed", irid_throttle(100))
       )
     ),
     deps   = CodeMirrorDeps(),

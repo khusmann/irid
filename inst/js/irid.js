@@ -438,8 +438,19 @@
     el.addEventListener(msg.event, function(e) {
       if (shouldSkip(el, msg.event)) return;
       if (msg.preventDefault) e.preventDefault();
+      if (msg.stopPropagation) e.stopPropagation();
       dispatch(buildPayload(e, el, msg.id));
-    });
+    }, { capture: !!msg.capture, passive: !!msg.passive });
+  }
+
+  // A config-only event (irid_wire with dom_opts but no handler): apply the
+  // DOM listener flags client-side and never round-trip to the server.
+  function attachClientOnlyListener(el, msg) {
+    el.addEventListener(msg.event, function(e) {
+      if (shouldSkip(el, msg.event)) return;
+      if (msg.preventDefault) e.preventDefault();
+      if (msg.stopPropagation) e.stopPropagation();
+    }, { capture: !!msg.capture, passive: !!msg.passive });
   }
 
   function setupThrottle(el, msg) {
@@ -574,8 +585,9 @@
       el.addEventListener(msg.event, function(e) {
         if (shouldSkip(el, msg.event)) return;
         if (msg.preventDefault) e.preventDefault();
+        if (msg.stopPropagation) e.stopPropagation();
         sendPayload(msg.inputId, buildPayload(e, el, msg.id));
-      });
+      }, { capture: !!msg.capture, passive: !!msg.passive });
     }
   }
 
@@ -590,6 +602,11 @@
       var el = document.getElementById(msg.id);
       if (msg.source !== 'widget' && !el) return;
       eventsRegistered.add(key);
+      if (msg.clientOnly) {
+        // No server handler — just apply DOM flags, no managed state.
+        attachClientOnlyListener(el, msg);
+        return;
+      }
       if (msg.mode === 'throttle') {
         setupThrottle(el, msg);
       } else if (msg.mode === 'debounce') {

@@ -195,7 +195,7 @@ test_that("widget event rows have NULL write_targets for hand-rolled handlers", 
   expect_null(out$events[[1]]$write_targets)
 })
 
-test_that("widget event default timing is event_immediate() when widget_event timing is omitted", {
+test_that("widget event default timing is irid_immediate() when widget_event timing is omitted", {
   h <- function(e) NULL
   w <- IridWidget("w", events = list(
     widget_event(name = "change",         handler = h),
@@ -274,8 +274,8 @@ test_that("container with DOM-event on* emits a source='dom' event on the same i
 test_that("widget_event timing lands on the emitted event row", {
   h <- function(e) NULL
   w <- IridWidget("w", events = list(
-    widget_event(name = "change", handler = h, timing = event_debounce(200)),
-    widget_event(name = "blur",   handler = h, timing = event_throttle(100))
+    widget_event(name = "change", handler = h, timing = irid_debounce(200)),
+    widget_event(name = "blur",   handler = h, timing = irid_throttle(100))
   ))
   out <- process_tags(w)
   by_event <- setNames(out$events, vapply(out$events, function(e) e$event, character(1L)))

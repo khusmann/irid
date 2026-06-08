@@ -4,7 +4,7 @@
 \alias{widget_event}
 \title{Declare one widget event}
 \usage{
-widget_event(name, handler = NULL, timing = event_immediate())
+widget_event(name, handler = NULL, timing = irid_immediate())
 }
 \arguments{
 \item{name}{Wire-name of the event the widget JS dispatches (e.g.
@@ -13,12 +13,12 @@ widget_event(name, handler = NULL, timing = event_immediate())
 \item{handler}{0/1/2-arg handler function for the event, or \code{NULL} to
 skip registration (typically when the caller didn't pass a handler).}
 
-\item{timing}{An \code{irid_event_config} (\code{event_immediate()} /
-\code{event_throttle()} / \code{event_debounce()}). Defaults to
-\code{event_immediate()} — every widget event fires per-dispatch unless
+\item{timing}{An \code{irid_timing} shape (\code{irid_immediate()} /
+\code{irid_throttle()} / \code{irid_debounce()}). Defaults to
+\code{irid_immediate()} — every widget event fires per-dispatch unless
 the wrapper overrides. Widget event names are library-specific so
 the framework has no per-name intuition to encode (unlike DOM
-\code{input} → \code{event_debounce(200)}).}
+\code{input} → \code{irid_debounce(200)}).}
 }
 \value{
 A \code{widget_event} record, or \code{NULL} when \code{handler} is \code{NULL}.
@@ -35,12 +35,12 @@ The handler argument may be \code{NULL} — \code{widget_event()} returns \code{
 in that case so the wrapper can pass an optional caller-provided
 handler through declaratively, and \code{IridWidget()} drops the entry.
 
-Wrappers that want to surface caller-side \code{.event} overrides typically
+Wrappers that want to surface caller-side timing overrides typically
 define a local picker inline (see \code{examples/codemirror.R}):
 
 \if{html}{\out{<div class="sourceCode r">}}\preformatted{widget_event(
   name    = "cursor-changed",
-  timing  = event_pick(.event, "cursor-changed", event_throttle(100)),
+  timing  = irid_throttle(100),
   handler = onCursorChanged
 )
 }\if{html}{\out{</div>}}

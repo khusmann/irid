@@ -71,13 +71,13 @@ write_back <- function(callable, field, then = NULL) {
 #' in that case so the wrapper can pass an optional caller-provided
 #' handler through declaratively, and `IridWidget()` drops the entry.
 #'
-#' Wrappers that want to surface caller-side `.event` overrides typically
+#' Wrappers that want to surface caller-side timing overrides typically
 #' define a local picker inline (see `examples/codemirror.R`):
 #'
 #' ```r
 #' widget_event(
 #'   name    = "cursor-changed",
-#'   timing  = event_pick(.event, "cursor-changed", event_throttle(100)),
+#'   timing  = irid_throttle(100),
 #'   handler = onCursorChanged
 #' )
 #' ```
@@ -86,15 +86,15 @@ write_back <- function(callable, field, then = NULL) {
 #'   `"change"`, `"cursor-changed"`). Required, non-empty character scalar.
 #' @param handler 0/1/2-arg handler function for the event, or `NULL` to
 #'   skip registration (typically when the caller didn't pass a handler).
-#' @param timing An `irid_event_config` (`event_immediate()` /
-#'   `event_throttle()` / `event_debounce()`). Defaults to
-#'   `event_immediate()` — every widget event fires per-dispatch unless
+#' @param timing An `irid_timing` shape (`irid_immediate()` /
+#'   `irid_throttle()` / `irid_debounce()`). Defaults to
+#'   `irid_immediate()` — every widget event fires per-dispatch unless
 #'   the wrapper overrides. Widget event names are library-specific so
 #'   the framework has no per-name intuition to encode (unlike DOM
-#'   `input` → `event_debounce(200)`).
+#'   `input` → `irid_debounce(200)`).
 #' @return A `widget_event` record, or `NULL` when `handler` is `NULL`.
 #' @export
-widget_event <- function(name, handler = NULL, timing = event_immediate()) {
+widget_event <- function(name, handler = NULL, timing = irid_immediate()) {
   if (is.null(handler)) return(NULL)
   if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
     stop("`name` must be a non-empty character scalar", call. = FALSE)
@@ -103,8 +103,8 @@ widget_event <- function(name, handler = NULL, timing = event_immediate()) {
     stop("`handler` must be a function or NULL; got ",
          paste(class(handler), collapse = "/"), call. = FALSE)
   }
-  if (!inherits(timing, "irid_event_config")) {
-    stop("`timing` must be an `irid_event_config`; got ",
+  if (!inherits(timing, "irid_timing")) {
+    stop("`timing` must be an `irid_timing`; got ",
          paste(class(timing), collapse = "/"), call. = FALSE)
   }
   structure(
@@ -150,8 +150,8 @@ widget_event <- function(name, handler = NULL, timing = event_immediate()) {
 #'   any widget whose JS isn't already loaded by some other means.
 #' @param container Optional `shiny.tag` for the wrapper element.
 #'   Defaults to `tags$div()`. irid sets `id` and `data-irid-widget`
-#'   automatically. Set `.event` on the container directly to control
-#'   timing for any DOM events on the container.
+#'   automatically. Configure any DOM events on the container by wrapping
+#'   their handlers in [irid_wire()] on the container directly.
 #' @return A irid widget construct with class `irid_widget`.
 #' @export
 IridWidget <- function(

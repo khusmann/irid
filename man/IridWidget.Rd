@@ -36,8 +36,8 @@ any widget whose JS isn't already loaded by some other means.}
 
 \item{container}{Optional \code{shiny.tag} for the wrapper element.
 Defaults to \code{tags$div()}. irid sets \code{id} and \code{data-irid-widget}
-automatically. Set \code{.event} on the container directly to control
-timing for any DOM events on the container.}
+automatically. Configure any DOM events on the container by wrapping
+their handlers in \code{\link[=irid_wire]{irid_wire()}} on the container directly.}
 }
 \value{
 A irid widget construct with class \code{irid_widget}.

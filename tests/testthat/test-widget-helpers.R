@@ -180,12 +180,12 @@ test_that("write_back errors at construction if `then` isn't a function or NULL"
 
 test_that("widget_event returns NULL when handler is NULL", {
   expect_null(widget_event(name = "change", handler = NULL))
-  expect_null(widget_event(name = "change", handler = NULL, timing = event_debounce(200)))
+  expect_null(widget_event(name = "change", handler = NULL, timing = irid_debounce(200)))
 })
 
 test_that("widget_event builds a record with name, handler, timing", {
   h <- function(e) NULL
-  t <- event_throttle(100)
+  t <- irid_throttle(100)
   w <- widget_event(name = "cursor-changed", handler = h, timing = t)
   expect_s3_class(w, "widget_event")
   expect_equal(w$name, "cursor-changed")
@@ -193,10 +193,10 @@ test_that("widget_event builds a record with name, handler, timing", {
   expect_identical(w$timing, t)
 })
 
-test_that("widget_event timing defaults to event_immediate()", {
+test_that("widget_event timing defaults to irid_immediate()", {
   h <- function(e) NULL
   w <- widget_event(name = "change", handler = h)
-  expect_s3_class(w$timing, "irid_event_config")
+  expect_s3_class(w$timing, "irid_timing")
   expect_equal(w$timing$mode, "immediate")
 })
 
@@ -216,15 +216,15 @@ test_that("widget_event errors on bad timing (including NULL)", {
   h <- function(e) NULL
   expect_error(
     widget_event(name = "change", handler = h, timing = "not a config"),
-    "must be an `irid_event_config`"
+    "must be an `irid_timing`"
   )
   expect_error(
     widget_event(name = "change", handler = h, timing = list()),
-    "must be an `irid_event_config`"
+    "must be an `irid_timing`"
   )
   expect_error(
     widget_event(name = "change", handler = h, timing = NULL),
-    "must be an `irid_event_config`"
+    "must be an `irid_timing`"
   )
 })
 
