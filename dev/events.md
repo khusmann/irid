@@ -15,6 +15,11 @@ widget round-trip rework in §7 is the same model carried to widgets; it's
 directionally settled but has only been reasoned against CodeMirror — see
 §8.2.
 
+Extending the vocabulary *beyond* standard HTML — the `on:` verbatim-event
+escape and `custom_tag()` for Web Components — is a downstream follow-on,
+specified separately in
+[custom-elements-design.md](custom-elements-design.md).
+
 ---
 
 ## 1. The problem: parallel keyed lists per event
@@ -72,7 +77,7 @@ irid_dom_opts(
   stop_propagation = FALSE,
   capture          = FALSE,
   passive          = FALSE,
-  filter           = NULL      # key_filter("Enter") or a JS expression
+  filter           = NULL      # irid_key_filter("Enter") or a JS expression
 )
 ```
 
@@ -84,7 +89,7 @@ tags$input(value    = irid_wire(query, irid_debounce(300))) # reactive subject, 
 tags$form(onSubmit  = irid_wire(submit, dom_opts = irid_dom_opts(prevent_default = TRUE)))
 tags$input(
   value     = field,
-  onKeyDown = irid_wire(\() add_todo(), dom_opts = irid_dom_opts(filter = key_filter("Enter")))
+  onKeyDown = irid_wire(\() add_todo(), dom_opts = irid_dom_opts(filter = irid_key_filter("Enter")))
 )
 ```
 
@@ -325,15 +330,15 @@ config carrier to mean "direction").
 - **Two-way is a prop property, not an event/`write_back`** (§7).
 - **`merge`, extending the base generic** (§5) — over `irid_wire_merge`
   (stutter) and `combine`/`overlay` (not base generics).
+- **`irid_key_filter`, not `key_filter`** — the `filter`-expression
+  generator joins the `irid_` config family; `key_filter` is a generic
+  word, so the prefix is earned.
 
 ### Open
 
-1. **`key_filter` → `irid_key_filter`?** Consistency with the `irid_`
-   config family argues yes; it's the lone holdout (`filter` value
-   generator). Loose end, not yet decided.
-2. **Two-way-prop cost** — latent snap-back on every prop (§7). Confirm
+1. **Two-way-prop cost** — latent snap-back on every prop (§7). Confirm
    acceptable vs. an explicit opt-in, ideally measured.
-3. **Scope / validation.** The §7 widget rework has only been reasoned
+2. **Scope / validation.** The §7 widget rework has only been reasoned
    against CodeMirror. Validate against a second widget — ideally an
    atomic-render one (Plotly-class) — before locking, since its
    update/echo semantics differ.
@@ -392,7 +397,7 @@ Greenfield — single breaking migration, one CHANGELOG entry.
 - `value = reactiveProxy(get, set)` runs `set` on each write (the
   both-case bridge), with timing/`dom_opts` honored.
 - `dom_opts` on a widget `send()` event errors at the container.
-- `filter = key_filter("Enter")` drops non-Enter keydowns client-side.
+- `filter = irid_key_filter("Enter")` drops non-Enter keydowns client-side.
 - `merge`: override-wins per field; `merge(default, NULL)` identity;
   `merge(default, \() …)` fills in the handler.
 
