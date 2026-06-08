@@ -221,7 +221,7 @@ wrapper that wants to *hardcode* timing can skip it and write
 
 DOM-only-ness is a property of the **placement**, not the record: the same
 `irid_wire(dom_opts = …)` is legal on a `<form>`, legal on a custom
-element emitting cancelable events, and illegal on a widget `send()`
+element emitting cancelable events, and illegal on a widget `sendEvent()`
 event — and whether `preventDefault` even works depends on the event
 being cancelable, a runtime fact. The constructor can't know which, so a
 second type couldn't soundly move the check earlier.
@@ -231,7 +231,7 @@ DOM-backed-ness is known.
 
 - `process_tags` allows the full surface on tags, and enforces §4
   (one channel per event).
-- `IridWidget()` errors if a `send()`-backed event carries `dom_opts`
+- `IridWidget()` errors if a `sendEvent()`-backed event carries `dom_opts`
   ("`prevent_default` needs a DOM listener").
 
 `timing`/`coalesce` are universal (valid on widget-emitted events too), so
@@ -280,6 +280,42 @@ CodeMirror <- function(content, language = "javascript", theme = "dracula",
   )
 }
 ```
+
+### Client side
+
+The factory contract grows a `setProp` callback, and `send` is renamed
+`sendEvent` for symmetry — events are *sent*, props are *set*:
+
+```js
+irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
+  const view = new EditorView({ /* … */
+    extensions: [ /* … */
+      EditorView.updateListener.of(function (u) {
+        if (u.docChanged)   setProp("content", u.state.doc.toString());  // two-way prop out
+        if (u.selectionSet) sendEvent("cursor-changed", { line, ch });    // notification out
+      })
+    ]
+  });
+  return {
+    update: function (key, value) {                           // prop in
+      if (key === "content" && value !== view.state.doc.toString()) view.dispatch(/* … */);
+    },
+    destroy: function () { view.destroy(); }
+  };
+});
+```
+
+`setProp("content", …)` replaces the old `send("change", { content: … })`
+— the round-trip is a prop now, not a fake event. `setProp` pushes through
+the **same managed-state / sequence transport as `sendEvent`** (so
+optimistic-update gating and echo-sequencing still apply), but to a
+per-prop input `irid_prop_{id}_{key}`; irid auto-synthesizes the write-back
+observer for each two-way-capable prop (gated by `can_accept_write`). This
+`setProp` + `irid_prop_*` path is the **one genuinely new primitive** the
+model adds — the symmetric partner of the existing server→client
+`irid-attr target="widget"` → `update` hook. The old model avoided it by
+routing round-trips through `send` + a wrapper-authored `write_back`; this
+trades that per-widget boilerplate for one framework primitive.
 
 This retires `write_back`, `widget_event`, `event_pick`, the `then`
 argument, and the widget `onChange` callback. `can_accept_write` stays
@@ -333,6 +369,10 @@ config carrier to mean "direction").
 - **`irid_key_filter`, not `key_filter`** — the `filter`-expression
   generator joins the `irid_` config family; `key_filter` is a generic
   word, so the prefix is earned.
+- **Widget JS: `sendEvent` + `setProp` (was `send`)** — two client→server
+  callbacks named for what they push (events are *sent*, props are *set*).
+  `setProp` + the per-prop `irid_prop_*` input is the one new framework
+  primitive the two-way-prop model adds (§7).
 
 ### Open
 
@@ -365,14 +405,19 @@ Greenfield — single breaking migration, one CHANGELOG entry.
 - `inst/js/irid.js` — apply `stopPropagation`/`capture`/`passive`
   alongside `preventDefault`; evaluate `filter`, drop on falsy.
 
-**Widget side (per §7, wants §8 open-item 3 validation first):**
+**Widget side (per §7, wants §8 open-item 2 validation first):**
 
 - [R/widget.R](../R/widget.R) — retire `widget_event`; make props
-  two-way-capable; add the client→server prop-update channel; `IridWidget`
-  validates `dom_opts` on `send()` events; keep `can_accept_write`
-  internal; remove `write_back`/`then`.
+  two-way-capable; auto-synthesize the per-prop write-back observer on the
+  new `irid_prop_{id}_{key}` input; `IridWidget` validates `dom_opts` on
+  `sendEvent()` events; keep `can_accept_write` internal; remove
+  `write_back`/`then`.
+- `inst/js/irid.js` — rename the factory's `send` → `sendEvent`; add a
+  `setProp(key, value)` callback (4th factory arg) that pushes through the
+  existing managed-state transport to the `irid_prop_*` input.
 - [examples/codemirror.R](../examples/codemirror.R) — drop `event_pick`,
-  `write_back`, `onChange`.
+  `write_back`, `onChange`; the inline JS factory switches
+  `send("change", …)` → `setProp("content", …)` and `send` → `sendEvent`.
 
 **Docs:**
 
@@ -396,7 +441,7 @@ Greenfield — single breaking migration, one CHANGELOG entry.
   `value = rv` + `onKeyDown` is fine** (§4, per-event).
 - `value = reactiveProxy(get, set)` runs `set` on each write (the
   both-case bridge), with timing/`dom_opts` honored.
-- `dom_opts` on a widget `send()` event errors at the container.
+- `dom_opts` on a widget `sendEvent()` event errors at the container.
 - `filter = irid_key_filter("Enter")` drops non-Enter keydowns client-side.
 - `merge`: override-wins per field; `merge(default, NULL)` identity;
   `merge(default, \() …)` fills in the handler.
@@ -405,6 +450,9 @@ Greenfield — single breaking migration, one CHANGELOG entry.
 
 - Prop two-way-capable by default; snap-back echoes via force-send when
   the JS pushes a server-rejected value; no echo cost when never pushed.
+- `setProp(key, value)` writes the bound reactive via the `irid_prop_*`
+  input (`can_accept_write`-gated); `sendEvent(event, payload)` routes to
+  the event handler — both sequenced by the shared managed-state transport.
 - `irid_wire(content, irid_debounce(200))` tunes the round-trip timing
   without enabling/disabling two-way.
 - Read-only reactive on a two-way prop: write dropped, canonical value
