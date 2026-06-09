@@ -71,10 +71,27 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       }
       handler <- ev$handler
 
+      msg <- list(
+        id = ev$id,
+        event = ev$event,
+        inputId = session$ns(input_id),
+        mode = ev$mode,
+        ms = ev$ms,
+        leading = ev$leading,
+        coalesce = ev$coalesce,
+        preventDefault = ev$prevent_default,
+        stopPropagation = ev$stop_propagation,
+        capture = ev$capture,
+        passive = ev$passive,
+        clientOnly = is.null(handler),
+        source = ev$source
+      )
+
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
       # there is no server observer to register.
-      if (!is.null(handler)) {
+      if (is.null(handler)) return(msg)
+
       nformals <- length(formals(handler))
 
       obs <- observeEvent(session$input[[input_id]], {
@@ -120,8 +137,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # this event's handler is registered to write through (the DOM
         # autobind or the widget two-way-prop write-back). Hand-rolled
         # handlers declare no targets and get no force-send: their bindings
-        # either fire
-        # naturally on change or the wrapper handles the echo itself.
+        # either fire naturally on change or the wrapper handles the echo
+        # itself.
         # Without this filtering, an event whose handler doesn't write a
         # particular binding's reactiveVal would still force-send that
         # binding's current value — and if the binding's write is
@@ -148,23 +165,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         }
       }, ignoreInit = TRUE)
       observers[[length(observers) + 1L]] <<- obs
-      }
 
-      list(
-        id = ev$id,
-        event = ev$event,
-        inputId = session$ns(input_id),
-        mode = ev$mode,
-        ms = ev$ms,
-        leading = ev$leading,
-        coalesce = ev$coalesce,
-        preventDefault = ev$prevent_default,
-        stopPropagation = ev$stop_propagation,
-        capture = ev$capture,
-        passive = ev$passive,
-        clientOnly = is.null(ev$handler),
-        source = ev$source
-      )
+      msg
     })
     session$sendCustomMessage("irid-events", event_msgs)
   }

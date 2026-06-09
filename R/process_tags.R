@@ -210,6 +210,13 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       for (key in names(node$props)) {
         val <- node$props[[key]]
         w <- if (inherits(val, "irid_wire")) val else NULL
+        if (!is.null(w) && !is.null(w$dom_opts)) {
+          stop(
+            "`dom_opts` is not allowed on the widget prop `", key,
+            "`: a prop is delivered through `setProp()`, not a DOM listener.",
+            call. = FALSE
+          )
+        }
         subj <- if (!is.null(w)) w$subject else if (is_irid_reactive(val)) val else NULL
         if (!is.null(subj) && is_irid_reactive(subj)) {
           prop_fns[[key]] <- subj

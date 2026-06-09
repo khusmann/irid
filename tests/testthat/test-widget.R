@@ -177,6 +177,16 @@ test_that("irid_wire tunes a prop's write-back timing (no enable/disable)", {
   expect_equal(pe$ms, 200)
 })
 
+test_that("dom_opts on a widget prop errors (prop is not DOM-backed)", {
+  rv <- shiny::reactiveVal("")
+  expect_error(
+    process_tags(IridWidget("w", props = list(
+      content = irid_wire(rv, dom_opts = irid_dom_opts(prevent_default = TRUE))
+    ))),
+    "`dom_opts` is not allowed on the widget prop"
+  )
+})
+
 test_that("non-callable prop produces no binding; rides in static_props", {
   w <- IridWidget("w", props = list(theme = "dracula", lineNumbers = TRUE))
   out <- process_tags(w)
