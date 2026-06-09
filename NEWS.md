@@ -17,22 +17,15 @@
   `value = reactiveProxy(get, set)` for a synchronous write side-effect, or
   observe the bound reactive for an async reaction. Two explicit handlers on
   the same event also error (no composition).
-* Widget props are now **two-way-capable by default**, symmetric with DOM
-  `value`/`checked`. A callable prop both reads inbound and accepts
-  write-back when the widget JS calls the new `setProp(key, value)` factory
-  callback. The widget JS factory signature is now
-  `(el, props, sendEvent, setProp)` (`send` → `sendEvent`). The
-  `write_back()` and `widget_event()` helpers are removed and
-  `can_accept_write()` is now internal — round-trips are expressed by
-  passing a reactive prop, not by composing a write-back event. `dom_opts`
-  is not allowed on a widget event.
 
 ## New features
 
 * `IridWidget()` — wrap arbitrary JavaScript libraries (CodeMirror,
-  Plotly, Leaflet, ...) as reactive irid components. Two-way-capable
-  reactive props flow in and out; genuine notifications flow back via
-  `events`. Composes inside `When`, `Each`, and `Match` like any other
+  Plotly, Leaflet, ...) as reactive irid components. Props are
+  two-way-capable by default (symmetric with DOM `value`/`checked`): a
+  callable prop reads inbound and accepts write-back when the widget JS
+  calls `setProp(key, value)`. Genuine notifications flow back via `events`
+  (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
   irid construct. See `examples/codemirror.R`.
 
 ## Bug fixes
