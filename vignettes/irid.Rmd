@@ -169,40 +169,42 @@ onClick = \(event, id) handle_click(id)             # event + element id
 onClick = \() count(count() + 1)                    # neither
 ```
 
-Event timing and `event.preventDefault()` live on the **element**, not the
-handler. Use `.event` to set the timing for every event on the element, and
-`.prevent_default = TRUE` to call `preventDefault` before dispatch:
+Event timing, backpressure, and `event.preventDefault()` ride the **slot**
+they configure. Wrap a handler (or a bound reactive) in `irid_wire()` to
+attach a timing shape — `irid_immediate()`, `irid_debounce(ms)`, or
+`irid_throttle(ms)` — and DOM listener options via `irid_dom_opts()`:
 
 ```r
-tags$input(value = field, .event = event_debounce(500))
-tags$button("Save", onClick = \() save(), .event = event_throttle(1000))
-tags$form(onSubmit = \(e) handle(e), .prevent_default = TRUE)
+tags$input(value = irid_wire(field, irid_debounce(500)))
+tags$button("Save", onClick = irid_wire(\() save(), irid_throttle(1000)))
+tags$form(onSubmit = irid_wire(\(e) handle(e),
+                               dom_opts = irid_dom_opts(prevent_default = TRUE)))
 ```
 
-`.event` and `.prevent_default` both accept a named list keyed by
-lowercase DOM event name to override per event. Unmapped events fall
-back to the per-event timing default and `FALSE` respectively:
+Each event is configured exactly once, on its own slot — there are no
+element-level lists to keep in sync:
 
 ```r
 tags$input(
-  value = field,
-  onKeyDown = \(e) if (e$key == "Enter") submit(),
-  .event = list(input = event_debounce(500))
+  value = irid_wire(field, irid_debounce(500)),
+  onKeyDown = \(e) if (e$key == "Enter") submit()
 )
 
 tags$form(
-  onSubmit = \() submit(),
-  onClick = \(e) handle_click(e),
-  .prevent_default = list(submit = TRUE)
+  onSubmit = irid_wire(\() submit(),
+                       dom_opts = irid_dom_opts(prevent_default = TRUE)),
+  onClick = \(e) handle_click(e)
 )
 ```
 
-When `.event` is omitted, irid applies a per-event default keyed on the
-DOM event name: `input` events default to `event_debounce(200)` (typing
-floods the wire with intermediate values), every other event to
-`event_immediate()`. The rule is the same for auto-bind synthetic events
-and explicit `on*` handlers — adding `value = rv` to an existing
-`onInput` doesn't change its timing.
+A bare handler (`onClick = \() …`) is sugar for `irid_wire(\() …)` with the
+default config. When a wire carries no `timing`, irid applies a per-event
+default keyed on the DOM event name: `input` events default to
+`irid_debounce(200)` (typing floods the wire with intermediate values),
+every other event to `irid_immediate()`. `coalesce` (gate on server idle)
+is universal, so it lives on the carrier — `irid_wire(field,
+irid_debounce(500), coalesce = FALSE)` — and defaults to `TRUE` for
+rate-limited shapes, `FALSE` for `irid_immediate()`.
 
 ## Controlled inputs
 
@@ -241,10 +243,14 @@ reactiveProxy(get = name)
 A 0-arg function (e.g. `\() toupper(name())`) behaves the same as
 `reactiveProxy(get = name)` (read-only with snap-back).
 
-If you combine an auto-bound state-binding prop with an explicit `on*`
-handler for the same DOM event (e.g. `value = rv, onInput = \(e) ...`),
-the auto-bind write always runs first. Your handler observes the updated
-state regardless of attribute order.
+A DOM event is **bound *or* handled, never both.** Combining an auto-bound
+state-binding prop with an explicit `on*` handler for the *same* event
+(e.g. `value = rv, onInput = \(e) ...`) is an error — the binding already
+claims that event. This is per-event: `value = rv` with `onKeyDown` is
+fine, since they're different events. To run a synchronous side-effect or
+validation on write, put it in the proxy's `set`
+(`value = reactiveProxy(get, set)`); to react asynchronously, observe the
+bound reactive.
 
 *See the [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 

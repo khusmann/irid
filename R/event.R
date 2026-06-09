@@ -1,37 +1,44 @@
-#' Event timing and transport config
+# NULL-coalescing helper. base R gained `%||%` in 4.4.0, but irid targets
+# R >= 4.1.0, so define our own (package-internal; shadows base within the
+# namespace where present).
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+#' Event & binding dispatch config
 #'
-#' Configure how event callbacks are dispatched from the browser to the
-#' server. Pass the result to an element's `.event` prop to control timing
-#' for **all** events on that element (auto-bind synthetic write-back plus
-#' any explicit `on*` handlers).
+#' Configure how an event handler or value binding is dispatched between the
+#' browser and the server. A single per-slot carrier, [irid_wire()], rides
+#' the slot it configures — an `on*` handler slot or a `value`/`checked`
+#' binding slot — so an event's timing, backpressure, and DOM-listener
+#' options live next to the handler/reactive they govern rather than in
+#' separate element-level lists.
 #'
-#' - `event_immediate()`: Fires on every event with no rate limiting.
-#' - `event_throttle()`: Fires at most every `ms` milliseconds while the
-#'   event is active.
-#' - `event_debounce()`: Waits until the user pauses for `ms` milliseconds
+#' @section Timing shapes:
+#' The timing constructors are pure shapes — they describe *when* an event
+#' fires and carry no other config:
+#'
+#' - `irid_immediate()`: Fires on every event with no rate limiting.
+#' - `irid_throttle(ms, leading)`: Fires at most every `ms` milliseconds
+#'   while the event is active.
+#' - `irid_debounce(ms)`: Waits until the user pauses for `ms` milliseconds
 #'   before firing.
 #'
-#' When `.event` is omitted, irid applies a per-event default keyed on the
-#' DOM event name: `input` → `event_debounce(200)` (typing produces a flood
-#' of intermediate values), every other event → `event_immediate()`. The
-#' rule is the same whether the event entry came from an auto-bind synthetic
-#' or an explicit `on*` handler, so adding `value = rv` to an existing
-#' `onInput` doesn't silently shift its timing.
+#' When a wire carries no `timing`, irid applies a per-event default keyed on
+#' the DOM event name: `input` → `irid_debounce(200)` (typing produces a
+#' flood of intermediate values), every other event → `irid_immediate()`.
 #'
-#' `.event` accepts either a single config struct (applies to every event
-#' on the element) or a named list for per-event overrides. List keys may
-#' use either the lowercase DOM event name (`input`, `change`, `keydown`)
-#' or the matching `on`-prop name (`onInput`, `onChange`, `onKeyDown`);
-#' both forms normalize to the lowercase DOM event. Events not covered by
-#' the list fall back to the per-event default. Malformed `.event` values
-#' (a non-config, an unnamed list, or a list whose entries are not all
-#' configs) raise an error during tag processing.
+#' @section Backpressure (`coalesce`):
+#' `coalesce` is universal across timing modes, so it lives on the carrier,
+#' not in the shapes. When `TRUE`, dispatch gates on server-idle state so
+#' events never queue faster than the server can process them. When `NULL`
+#' (the default), it derives from the timing mode: `FALSE` for
+#' `irid_immediate()`, `TRUE` for `irid_throttle()` / `irid_debounce()`.
 #'
-#' Use the element-level `.prevent_default` prop to call
-#' `event.preventDefault()` in the browser before dispatch. Like `.event`,
-#' it accepts either a logical scalar (broadcasts to every event on the
-#' element) or a named list keyed by DOM event for per-event overrides;
-#' unmapped events default to `FALSE`.
+#' @section DOM listener options:
+#' [irid_dom_opts()] bundles the DOM-only listener flags. It is legal only
+#' where the event is backed by a real DOM listener (a plain tag, a custom
+#' element emitting cancelable events); placing it on a widget-emitted event
+#' errors. Whether `prevent_default` has any effect further depends on the
+#' event being cancelable — a runtime fact.
 #'
 #' @section The event object:
 #' The `event` argument passed to handlers is a list containing all
@@ -47,41 +54,140 @@
 #' Keyboard events additionally include `key`, `code`, `ctrlKey`,
 #' `shiftKey`, `altKey`, and `metaKey`.
 #'
-#' @param coalesce If `TRUE`, gate on server idle so events never queue
-#'   faster than the server can process them. Defaults to `FALSE` for
-#'   `event_immediate()` and `TRUE` for `event_throttle()`/`event_debounce()`.
+#' @param subject The handler or reactive the wire configures. The slot
+#'   decides which: a bare callable means "bind" in `value =` / `checked =`
+#'   and "handle" in an `on*` slot. `NULL` (the default) carries config
+#'   only — used by widget wrappers that supply a default shape for the
+#'   caller to override via [merge()].
+#' @param timing An `irid_timing` shape (`irid_immediate()`,
+#'   `irid_throttle()`, `irid_debounce()`), or `NULL` for the per-event
+#'   default.
+#' @param coalesce Logical scalar, or `NULL` to derive from the timing mode.
+#' @param dom_opts An [irid_dom_opts()] record, or `NULL`.
 #' @param ms Minimum interval (throttle) or quiet period (debounce) in
 #'   milliseconds.
-#' @param leading If `TRUE` (default), fire immediately on the first
-#'   event. If `FALSE`, wait for the timer before firing.
-#' @return An `irid_event_config` struct.
+#' @param leading If `TRUE` (default), fire immediately on the first event.
+#'   If `FALSE`, wait for the timer before firing.
+#' @param prevent_default Call `event.preventDefault()` before dispatch.
+#' @param stop_propagation Call `event.stopPropagation()` before dispatch.
+#' @param capture Register the listener in the capture phase.
+#' @param passive Register the listener as passive.
 #'
-#' @name event-config
+#' @return `irid_wire()` returns an `irid_wire`; the timing constructors
+#'   return an `irid_timing`; `irid_dom_opts()` returns an `irid_dom_opts`.
+#'
+#' @name irid_wire
 NULL
 
-#' @rdname event-config
+#' @rdname irid_wire
 #' @export
-event_immediate <- function(coalesce = FALSE) {
+irid_immediate <- function() {
+  structure(list(mode = "immediate"), class = "irid_timing")
+}
+
+#' @rdname irid_wire
+#' @export
+irid_throttle <- function(ms, leading = TRUE) {
+  if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
+    stop("`ms` must be a numeric scalar", call. = FALSE)
+  }
+  if (!is.logical(leading) || length(leading) != 1L || is.na(leading)) {
+    stop("`leading` must be `TRUE` or `FALSE`", call. = FALSE)
+  }
   structure(
-    list(mode = "immediate", coalesce = coalesce),
-    class = "irid_event_config"
+    list(mode = "throttle", ms = ms, leading = leading),
+    class = "irid_timing"
   )
 }
 
-#' @rdname event-config
+#' @rdname irid_wire
 #' @export
-event_throttle <- function(ms, leading = TRUE, coalesce = TRUE) {
+irid_debounce <- function(ms) {
+  if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
+    stop("`ms` must be a numeric scalar", call. = FALSE)
+  }
+  structure(list(mode = "debounce", ms = ms), class = "irid_timing")
+}
+
+#' @rdname irid_wire
+#' @export
+irid_dom_opts <- function(prevent_default = FALSE, stop_propagation = FALSE,
+                          capture = FALSE, passive = FALSE) {
+  flags <- list(
+    prevent_default = prevent_default, stop_propagation = stop_propagation,
+    capture = capture, passive = passive
+  )
+  for (nm in names(flags)) {
+    v <- flags[[nm]]
+    if (!is.logical(v) || length(v) != 1L || is.na(v)) {
+      stop("`", nm, "` must be `TRUE` or `FALSE`", call. = FALSE)
+    }
+  }
+  structure(flags, class = "irid_dom_opts")
+}
+
+#' @rdname irid_wire
+#' @export
+irid_wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
+                      dom_opts = NULL) {
+  if (!is.null(subject) && !is.function(subject)) {
+    stop("`subject` must be a function (handler or reactive) or NULL; got ",
+         paste(class(subject), collapse = "/"), call. = FALSE)
+  }
+  if (!is.null(timing) && !inherits(timing, "irid_timing")) {
+    stop("`timing` must be an `irid_timing` (from `irid_immediate()`, ",
+         "`irid_throttle()`, or `irid_debounce()`) or NULL; got ",
+         paste(class(timing), collapse = "/"), call. = FALSE)
+  }
+  if (!is.null(coalesce) &&
+      (!is.logical(coalesce) || length(coalesce) != 1L || is.na(coalesce))) {
+    stop("`coalesce` must be `TRUE`, `FALSE`, or NULL", call. = FALSE)
+  }
+  if (!is.null(dom_opts) && !inherits(dom_opts, "irid_dom_opts")) {
+    stop("`dom_opts` must be an `irid_dom_opts` (from `irid_dom_opts()`) ",
+         "or NULL; got ", paste(class(dom_opts), collapse = "/"),
+         call. = FALSE)
+  }
   structure(
-    list(mode = "throttle", ms = ms, leading = leading, coalesce = coalesce),
-    class = "irid_event_config"
+    list(subject = subject, timing = timing, coalesce = coalesce,
+         dom_opts = dom_opts),
+    class = "irid_wire"
   )
 }
 
-#' @rdname event-config
-#' @export
-event_debounce <- function(ms, coalesce = TRUE) {
-  structure(
-    list(mode = "debounce", ms = ms, coalesce = coalesce),
-    class = "irid_event_config"
+# Normalize a slot value into an `irid_wire`. A bare callable becomes a
+# subject-only wire; an existing `irid_wire` passes through; `NULL` becomes
+# an empty wire (config-only identity). Anything else errors — callers use
+# this to accept "bare handler/reactive OR irid_wire" uniformly.
+as_irid_wire <- function(x) {
+  if (is.null(x)) return(irid_wire())
+  if (inherits(x, "irid_wire")) return(x)
+  if (is.function(x)) return(irid_wire(subject = x))
+  stop("expected a function or an `irid_wire`; got ",
+       paste(class(x), collapse = "/"), call. = FALSE)
+}
+
+#' Overlay one `irid_wire` over another
+#'
+#' Override-wins overlay used where a widget wrapper layers a caller's input
+#' over its own default config. Each field of `y` (`subject`, `timing`,
+#' `coalesce`, `dom_opts`) wins when non-`NULL`; otherwise `x`'s field
+#' carries through. `y` may be `NULL` (identity) or a bare callable (fills in
+#' only the subject), both normalized first.
+#'
+#' Extends the base [merge()] generic rather than introducing a new one.
+#'
+#' @param x The default `irid_wire`.
+#' @param y The override: an `irid_wire`, a bare callable, or `NULL`.
+#' @param ... Unused.
+#' @return An `irid_wire`.
+#' @exportS3Method base::merge
+merge.irid_wire <- function(x, y, ...) {
+  y <- as_irid_wire(y)
+  irid_wire(
+    subject  = y$subject  %||% x$subject,
+    timing   = y$timing   %||% x$timing,
+    coalesce = y$coalesce %||% x$coalesce,
+    dom_opts = y$dom_opts %||% x$dom_opts
   )
 }

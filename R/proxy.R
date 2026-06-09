@@ -67,13 +67,13 @@ print.reactiveProxy <- function(x, ...) {
 #' built with no `set`), and for non-callables.
 #'
 #' Gate a write through this when you don't control whether the callable
-#' the caller handed you is writable — a typical pattern in widget
-#' wrappers (see [write_back()]), where a read-only `content` argument
-#' should silently skip the write rather than error.
+#' the caller handed you is writable — used by the DOM autobind path and
+#' the synthesized widget two-way-prop write-back to silently skip writes
+#' to a read-only reactive rather than error.
 #'
 #' @param fn A value to test.
 #' @return A length-1 logical.
-#' @export
+#' @keywords internal
 can_accept_write <- function(fn) {
   if (!is.function(fn)) return(FALSE)
   if (inherits(fn, "reactiveProxy")) {

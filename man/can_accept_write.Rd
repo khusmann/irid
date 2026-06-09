@@ -21,7 +21,8 @@ built with no \code{set}), and for non-callables.
 }
 \details{
 Gate a write through this when you don't control whether the callable
-the caller handed you is writable — a typical pattern in widget
-wrappers (see \code{\link[=write_back]{write_back()}}), where a read-only \code{content} argument
-should silently skip the write rather than error.
+the caller handed you is writable — used by the DOM autobind path and
+the synthesized widget two-way-prop write-back to silently skip writes
+to a read-only reactive rather than error.
 }
+\keyword{internal}

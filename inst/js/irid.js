@@ -382,16 +382,27 @@
     return attachPayloadMeta(payload, id);
   }
 
-  // Route a widget event through the managed-state pipeline for the
-  // `(id, event)` pair. Silent no-op if no R subscriber exists — widget
-  // JS can register events unconditionally and only the ones with an
-  // R-side handler actually round-trip.
-  function sendWidgetEvent(id, event, payload) {
-    var inputId = 'irid_ev_' + id + '_' + event;
+  // Push a payload through the managed-state pipeline for `inputId`. Silent
+  // no-op if no R subscriber exists — widget JS can register events/props
+  // unconditionally and only the ones with an R-side handler round-trip.
+  function pushManaged(inputId, id, payload) {
     var s = managed[inputId];
     if (!s) return;
     var p = attachPayloadMeta(Object.assign({}, payload || {}), id);
     s.dispatch(p);
+  }
+
+  // `sendEvent(event, payload)` — a widget notification.
+  function sendWidgetEvent(id, event, payload) {
+    pushManaged('irid_ev_' + id + '_' + event, id, payload || {});
+  }
+
+  // `setProp(key, value)` — the client → server half of a two-way prop. The
+  // value rides under the `value` field (uniform across props, since each
+  // has its own `irid_prop_{id}_{key}` input), the symmetric partner of the
+  // server → client `irid-attr target="widget"` → `update` hook.
+  function setWidgetProp(id, key, value) {
+    pushManaged('irid_prop_' + id + '_' + key, id, { value: value });
   }
 
   // --- Rate limiting (throttle / debounce with optional coalesce) ---
@@ -438,8 +449,19 @@
     el.addEventListener(msg.event, function(e) {
       if (shouldSkip(el, msg.event)) return;
       if (msg.preventDefault) e.preventDefault();
+      if (msg.stopPropagation) e.stopPropagation();
       dispatch(buildPayload(e, el, msg.id));
-    });
+    }, { capture: !!msg.capture, passive: !!msg.passive });
+  }
+
+  // A config-only event (irid_wire with dom_opts but no handler): apply the
+  // DOM listener flags client-side and never round-trip to the server.
+  function attachClientOnlyListener(el, msg) {
+    el.addEventListener(msg.event, function(e) {
+      if (shouldSkip(el, msg.event)) return;
+      if (msg.preventDefault) e.preventDefault();
+      if (msg.stopPropagation) e.stopPropagation();
+    }, { capture: !!msg.capture, passive: !!msg.passive });
   }
 
   function setupThrottle(el, msg) {
@@ -574,14 +596,17 @@
       el.addEventListener(msg.event, function(e) {
         if (shouldSkip(el, msg.event)) return;
         if (msg.preventDefault) e.preventDefault();
+        if (msg.stopPropagation) e.stopPropagation();
         sendPayload(msg.inputId, buildPayload(e, el, msg.id));
-      });
+      }, { capture: !!msg.capture, passive: !!msg.passive });
     }
   }
 
   Shiny.addCustomMessageHandler('irid-events', function(msgs) {
     msgs.forEach(function(msg) {
-      var key = msg.id + ':' + msg.event;
+      // Key on the (namespaced) inputId — unique per id/event/kind, so a
+      // widget prop and a same-named event can't collide.
+      var key = msg.inputId;
       if (eventsRegistered.has(key)) return;
       // DOM events need the element to exist for `addEventListener`.
       // Widget events bypass that step, so a missing element is fine
@@ -590,6 +615,11 @@
       var el = document.getElementById(msg.id);
       if (msg.source !== 'widget' && !el) return;
       eventsRegistered.add(key);
+      if (msg.clientOnly) {
+        // No server handler — just apply DOM flags, no managed state.
+        attachClientOnlyListener(el, msg);
+        return;
+      }
       if (msg.mode === 'throttle') {
         setupThrottle(el, msg);
       } else if (msg.mode === 'debounce') {
@@ -613,10 +643,13 @@
       console.warn('irid: widget container not found for id=' + id);
       return;
     }
-    var send = function(event, payload) {
+    var sendEvent = function(event, payload) {
       sendWidgetEvent(id, event, payload);
     };
-    var handle = factory(el, props, send) || {};
+    var setProp = function(key, value) {
+      setWidgetProp(id, key, value);
+    };
+    var handle = factory(el, props, sendEvent, setProp) || {};
     widgets[id] = { handle: handle, name: name };
   }
 

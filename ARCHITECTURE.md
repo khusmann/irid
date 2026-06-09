@@ -6,14 +6,15 @@
 R/
   app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Match/Case/Default, Output
-  event.R         event_immediate, event_throttle, event_debounce
+  event.R         irid_wire carrier; irid_immediate/throttle/debounce timing
+                  shapes; irid_dom_opts; merge.irid_wire
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
   mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
   scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
-  widget.R        IridWidget + widget_event / write_back helpers + dep-registration
+  widget.R        IridWidget (two-way props) + dep-registration
   irid-package.R Package-level imports
 
 inst/js/
@@ -58,10 +59,10 @@ Walks the tag tree recursively and produces:
   attributes are replaced by stable auto-generated element IDs. Control-flow
   nodes become a pair of HTML **comment anchors**
   (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
-  should be inserted. Element-level config (`.event`, `.prevent_default`)
-  is stripped before HTML serialization. Widget nodes become their
-  container element with `id` and `data-irid-widget="<name>"` attributes
-  attached.
+  should be inserted. Per-slot config carried by `irid_wire` (timing,
+  coalesce, DOM listener options) is consumed during the walk and never
+  reaches HTML serialization. Widget nodes become their container element
+  with `id` and `data-irid-widget="<name>"` attributes attached.
 - **`bindings`** — List of binding rows for each reactive attribute,
   reactive text child, or reactive widget prop. Each row carries a
   `target` field that drives client-side dispatch:
@@ -76,12 +77,18 @@ Walks the tag tree recursively and produces:
   - `target = "widget"` rows are `{id, target, attr, fn}` — the binding
     routes per-key updates to the widget instance's `update(key, value)`
     hook.
-- **`events`** — List of `{id, event, handler, source, mode, ms, leading, coalesce, prevent_default}`,
-  one entry per `(id, event)`. `source = "dom"` for events attached to
-  a DOM element via `addEventListener`; `source = "widget"` for events
-  the widget JS pushes through `send()`. Auto-bind synthetic and
-  explicit `on*` on the same DOM event are merged into one composed
-  handler.
+- **`events`** — List of `{id, event, handler, source, mode, ms, leading,
+  coalesce, prevent_default, stop_propagation, capture, passive}`, one entry
+  per `(id, event)`. `source = "dom"` for events attached to a DOM element
+  via `addEventListener`; `source = "widget"` for widget events (pushed via
+  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). A
+  `kind` field distinguishes a `"prop"` write-back (input
+  `irid_prop_{id}_{key}`) from a regular `"event"` (input
+  `irid_ev_{id}_{event}`); DOM-event rows omit `kind`. A given DOM event is
+  claimed by **at most one** of {value-binding autobind, explicit `on*`} —
+  there is no merge (see the one-channel rule below). `handler` is `NULL` for
+  a config-only event (an `irid_wire` with `dom_opts` but no subject) — the
+  client attaches a listener for the DOM flags but never round-trips.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   or `Match` node.
 - **`shiny_outputs`** — List of `{id, render_call}` for each `Output` node.
@@ -100,27 +107,29 @@ receive the event field of the same name as the prop (`e$value` for `value`,
 `e$checked` for `checked`) — irid stays close to the DOM IDL, so the prop
 name and the event field name always match.
 
-When the auto-bind synthetic event collides with an explicit `on*` handler
-on the same DOM event (e.g. `value = rv` and `onInput = ...` on the same
-`<input>`), process_tags merges the two into a single event entry whose
-handler composes both source handlers. One DOM listener, one observer,
-one force-send echo per event. **Auto-bind synthetic handlers always run
-before explicit `on*` handlers**, so an explicit handler observes the
-updated state and cosmetic attribute reordering can't change behavior;
-within each tier, source-attribute order is preserved.
+**One channel per event.** A given DOM event is driven by a value binding
+*or* an explicit `on*` handler, never both. `value = rv` and `onInput = ...`
+on the same `<input>` is an error, not a merge — the binding already claims
+the `input` event. The check is per-event: `value = rv` coexists with
+`onKeyDown` (different events) freely. Likewise, two explicit handlers on the
+same event error (no composition). The sync-write-on-bound-value case uses
+`value = reactiveProxy(get, set)` — the proxy's `set` *is* the handler that
+runs on write; async reactions observe the bound reactive. This deletes the
+old autobind↔explicit merge, its ordering rule, and the two-timings
+collision.
 
-Event timing comes from the element-level `.event` prop. A single
-`irid_event_config` applies to every event on the element; a named list
-keyed by lowercase DOM event name overrides per event. With no covering
-`.event`, the per-event default rule applies, keyed only on the DOM event
-name: `input` → `event_debounce(200)`, everything else →
-`event_immediate()`. The rule is the same whether the entry is an
-auto-bind synthetic or an explicit `on*` handler, so adding `value = rv`
-to an existing `onInput` doesn't silently shift its timing.
-`.prevent_default` follows the same shape as `.event`: a logical scalar
-broadcasts to every event entry; a named list keyed by lowercase DOM
-event name overrides per event, with unmapped events defaulting to
-`FALSE`.
+**Per-slot config (`irid_wire`).** Timing, backpressure, and DOM listener
+options ride the slot they configure. A bare callable (`onClick = \() …`,
+`value = rv`) is sugar for `irid_wire(callable)` with default config;
+`irid_wire(subject, timing, coalesce, dom_opts)` tunes it. The timing shapes
+(`irid_immediate()`, `irid_throttle(ms, leading)`, `irid_debounce(ms)`) are
+pure — they carry only mode-specific fields. `coalesce` is universal so it
+lives on the carrier; when `NULL` it derives from the mode (`immediate →
+FALSE`, rate-limited → `TRUE`). When a wire carries no `timing`, the
+per-event default applies, keyed on the DOM event name: `input` →
+`irid_debounce(200)`, everything else → `irid_immediate()`. DOM listener
+flags (`prevent_default`, `stop_propagation`, `capture`, `passive`) bundle
+into `irid_dom_opts()` inside the wire; each defaults to `FALSE`.
 
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.
@@ -357,16 +366,26 @@ initialize any new Shiny outputs.
     ms: 100,
     leading: true,
     coalesce: true,
+    preventDefault: false,
+    stopPropagation: false,
+    capture: false,
+    passive: false,
+    clientOnly: false,
   },
 ];
 ```
 
 For each entry, initializes a managed-state record under `inputId`
 (throttle/debounce/coalesce/sequence gating). If `source = "dom"`, also
-attaches a DOM event listener on the element — the listener reads the
-element's `value` (and other event fields) and pushes the payload through
-the managed-state via `Shiny.setInputValue(inputId, payload, {priority:
-"event"})`. If `source = "widget"`, the listener-attach step is skipped;
+attaches a DOM event listener on the element — the listener applies the
+`preventDefault` / `stopPropagation` flags (and registers with the
+`capture` / `passive` options), reads the element's `value` (and other
+event fields), and pushes the payload through the managed-state via
+`Shiny.setInputValue(inputId, payload, {priority: "event"})`. A
+`clientOnly` entry (a config-only `irid_wire` with `dom_opts` but no
+handler) attaches a bare listener that applies the DOM flags and never
+sends — no managed state, no round-trip. If `source = "widget"`, the
+listener-attach step is skipped;
 the widget JS pushes payloads through `irid.sendWidgetEvent(id, event,
 payload)`, which uses the same managed-state machinery. The DOM and
 widget paths share one sequence counter per element id, so cross-element
@@ -396,8 +415,9 @@ the DOM. The client:
    registered yet (script still loading), buffers `{id, props}` under
    `pendingInits[name]` and drains it when `irid.defineWidget(name, ...)`
    eventually lands.
-3. Once the factory is available, calls `factory(el, props, send)` and
-   stores the returned `{update, destroy}` handle in a per-id widget map.
+3. Once the factory is available, calls
+   `factory(el, props, sendEvent, setProp)` and stores the returned
+   `{update, destroy}` handle in a per-id widget map.
    The init message is idempotent — a duplicate for an already-mounted
    id is dropped.
 
@@ -509,12 +529,12 @@ controlled inputs.
 
 ## Widgets
 
-`IridWidget(name, props, events, deps, container, .event)` is the
+`IridWidget(name, props, events, deps, container)` is the
 process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
 Plotly, Leaflet, ...). It expresses one R-side component on top of an
 init/update/destroy contract on the JS side, and reuses every existing
 irid channel — `irid-attr` for one-way prop updates, `irid-events` for
-event payloads, the optimistic-update sequence counter, the `.event`
+event payloads, the optimistic-update sequence counter, the `irid_wire`
 timing config, the stale indicator, the comment-anchor lifecycle. No
 widget-specific code lives in the transport.
 
@@ -526,74 +546,70 @@ IridWidget(
   props     = list(),  # named list; per-key is.function() dispatch
   events    = list(),  # named list of handler fns (lowercase kebab keys)
   deps      = NULL,    # html_dependency or list of them
-  container = NULL,    # optional shiny.tag; defaults to tags$div()
-  .event    = NULL     # element-level event config, same shape as on tags$*
+  container = NULL     # optional shiny.tag; defaults to tags$div()
 )
 ```
 
-`props` follows irid's "functions, not expressions" rule per-key. A
-callable value (`reactiveVal`, store leaf, `reactiveProxy`, 0-arg
-closure, ...) becomes a per-key binding (one observer firing `irid-attr
-target="widget"` on change); a non-callable value rides in the init
-message and is never re-sent. This is what makes init-only library
-options work without a separate API: pass a constant, no observer is
-registered.
+`props` follows irid's "functions, not expressions" rule per-key, and
+props are **two-way-capable by default**, exactly like DOM `value` /
+`checked`. A callable value (`reactiveVal`, store leaf, `reactiveProxy`,
+...) gets *both* directions wired: a server → client binding (one observer
+firing `irid-attr target="widget"` → the factory's `update` hook on change)
+**and** a synthesized client → server write-back, accepted when the widget
+JS calls `setProp(key, value)`. A non-callable value rides in the init
+message and is never re-sent (init-only library options need no separate
+API — pass a constant, no observer). Wrapping a prop in `irid_wire` only
+*tunes* its write-back timing; it never enables or disables two-way.
 
-`events` keys are lowercase kebab-case (matching the web's `CustomEvent`
-convention — `change`, `cursor-changed`, `relayout`). No `on` prefix
-because there's no DOM event mediating — the widget JS chooses what to
-fire via `send()`. Handlers are 0/1/2-arg, dispatched the same way DOM
-event handlers are.
+`events` carries genuine notifications that correspond to *no* prop. Keys
+are lowercase kebab-case (web `CustomEvent` convention — `cursor-changed`,
+`relayout`). No `on` prefix because there's no DOM event mediating — the
+widget JS chooses what to fire via `sendEvent()`. Each value is a handler
+or an `irid_wire` (to tune timing); `NULL` (or a `merge()` resolving to a
+subject-less wire) is dropped, so optional handlers forward declaratively.
 
-### Round-trips live in the wrapper, not the framework
+### Two-way props: `setProp` + `irid_prop_*`
 
 irid hard-codes DOM autobind for `value`/`checked` because the DOM IDL
-gives every element a uniform (prop, event, event-field) triple. JS
-libraries have no such triple, so `IridWidget` only exposes one-way
-`props` (in) and `events` (out); the wrapper's R author composes a
-one-line `events` entry that writes through the caller's reactive.
-Three helpers make this idiomatic:
+gives every element a uniform (prop, event, event-field) triple. Widget
+props get the same treatment by construction: R always sets up the
+inbound-accept + snap-back for a callable prop, and whether it's *actually*
+two-way is decided by whether the widget JS pushes through the prop channel.
 
-- **`can_accept_write(callable)`** — the writability predicate. `TRUE`
-  for any callable that can take a positional arg (`reactiveVal`, store
-  leaf, `reactiveProxy` with a setter, 1+-arg closure, primitive);
-  `FALSE` for read-only callables (`reactive(...)`, `\() expr`,
-  setter-less `reactiveProxy`) and non-callables. Used to gate writes
-  so a read-only callable handed to a wrapper doesn't error.
-- **`write_back(callable, field, then = NULL)`** — the handler factory.
-  Returns a 1-arg function that writes `e[[field]]` to `callable` iff
-  writable, then calls the optional `then` handler (arity-dispatched).
-  One line per round-trip key in the wrapper's `widget_event()` calls.
-- **`widget_event(name, handler, timing)`** — per-event record bundling
-  wire-name, handler, and timing config (defaults to `event_immediate()`).
-  Wrappers build a list of these as the `events =` arg to `IridWidget()`.
-  Returns `NULL` when handler is `NULL` so optional handlers can be
-  forwarded declaratively (`IridWidget` drops `NULL` entries). Wrappers
-  that want to surface caller `.event` overrides typically define a
-  local `event_pick(user, key, default)` helper to compose inline; see
-  `examples/codemirror.R`.
+The new primitive is **`setProp` + a per-prop `irid_prop_{id}_{key}`
+input** — the client → server partner of the existing server → client
+`irid-attr target="widget"` → `update` hook. `setProp("content", value)`
+pushes through the **same managed-state / sequence transport as
+`sendEvent`** (so optimistic-update gating and echo-sequencing apply), but
+to `irid_prop_{id}_{key}` instead of `irid_ev_{id}_{event}`. process_tags
+emits, per callable prop, a `kind = "prop"` event row whose synthesized
+handler writes the bound reactive (gated by the internal `can_accept_write`
+predicate); mount wires an `observeEvent` on that input. A read-only
+reactive's write is dropped, and the force-send-on-no-op loop (scoped
+per-binding via `write_targets = key`) echoes the canonical value back as a
+`target="widget"` `irid-attr`, snapping the library state. A bound prop is
+not *also* handled — to react to its change, observe the reactive or pass a
+`reactiveProxy`.
 
-Read-only snap-back is automatic: even when `write_back`'s writability
-gate blocks the call, the event listener has already fired, and the
-event observer's force-send-on-no-op loop echoes the canonical value
-back as a `target="widget"` `irid-attr`. The widget's `update` hook
-sees the mismatch and snaps the library state. The wrapper writes
-nothing extra to get this — registering the listener is sufficient.
+**Cost:** latent snap-back machinery on every callable prop even if the JS
+never pushes it. It never fires unless `setProp` is called — cheap, and it
+buys full DOM↔widget symmetry with no per-prop two-way marker.
 
 ### JS-side API
 
 `window.irid` exposes one public method, `defineWidget(name, factory)`,
-where `factory` is `(el, props, send) -> { update, destroy }`. The
-factory runs once per mount:
+where `factory` is `(el, props, sendEvent, setProp) -> { update, destroy }`.
+The factory runs once per mount:
 
 ```js
-irid.defineWidget("codemirror", function (el, props, send) {
-  // el:    container DOM element (already attached)
-  // props: merged object — all props, callable and constant alike
-  // send:  send(event, payload) — push events through irid's pipeline
+irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
+  // el:        container DOM element (already attached)
+  // props:     merged object — all props, callable and constant alike
+  // sendEvent: sendEvent(event, payload) — push a notification
+  // setProp:   setProp(key, value)       — push a two-way prop's new value
   var view = new EditorView({ /* ... */ });
   return {
-    update: function (key, value) {
+    update: function (key, value) {           // prop in (server -> client)
       if (key === "content" && value !== view.state.doc.toString()) {
         view.dispatch({ /* ... */ });
       }
@@ -611,9 +627,11 @@ Contract notes:
   whether subsequent `irid-attr target="widget"` messages arrive.
 - `update` fires only for keys that were callable on the R side; it
   must be idempotent (most updates round-trip the value the widget
-  just sent via `send`).
-- `send(event, payload)` is a silent no-op for events with no R
-  subscriber — the widget can register listeners unconditionally.
+  just pushed via `setProp`).
+- `setProp(key, value)` is the client → server half of a two-way prop;
+  `sendEvent(event, payload)` pushes a notification. Both are silent
+  no-ops when no R subscriber exists, so the widget can wire them
+  unconditionally.
 - `destroy` runs before the container is detached. The widget should
   tear down anything that isn't pure DOM under `el` (timers,
   ResizeObservers, web sockets, ...); DOM children of `el` will be
@@ -621,9 +639,9 @@ Contract notes:
 
 ### Lifecycle and dependencies
 
-The widget's R-side observers (one per callable prop, one per event)
-are owned by the enclosing mount; `destroy()` on the mount tears them
-down. Client-side, `detachRange` (used by `irid-swap` and
+The widget's R-side observers (per callable prop: one server→client
+binding plus one client→server write-back; one per event) are owned by
+the enclosing mount; `destroy()` on the mount tears them down. Client-side, `detachRange` (used by `irid-swap` and
 `irid-mutate`) walks the removed fragment for `[data-irid-widget]`
 elements and calls each widget's `destroy()` before `Shiny.unbindAll`.
 No `irid-widget-destroy` message — the teardown is purely client-driven
@@ -653,16 +671,14 @@ a remount is a no-op for the deps step.
 
 The event observer's force-send-on-no-op loop in `mount.R` only echoes
 bindings whose `attr` is in the firing event's declared write targets
-(`ev$write_targets`). `write_back(callable, field)` and the autobind
-synthetic-event factory (`make_autobind_handler`) both attach the
-target attr to the returned handler as an `irid_write_targets`
-attribute; `compose_handlers` unions across constituents;
-`process_tags` lifts the attribute onto each event row. **Hand-rolled
-handlers** (the wrapper author writes their own `function(e) {…}`
-without going through `write_back`) declare no targets and skip
-force-send entirely — they're responsible for echo correctness
-themselves, and the natural binding observer fires when the
-reactiveVal changes.
+(`ev$write_targets`). The two synthesized write-backs — the DOM autobind
+factory (`make_autobind_handler`) and the widget two-way-prop factory
+(`make_widget_writeback`) — attach the target attr to the returned handler
+as an `irid_write_targets` attribute, which `process_tags` lifts onto the
+event row. **Hand-rolled handlers** (a wrapper's own `function(e) {…}`, or
+any explicit `on*`) declare no targets and skip force-send entirely —
+they're responsible for echo correctness themselves, and the natural
+binding observer fires when the reactiveVal changes.
 
 Without this scoping, an event whose handler doesn't write a particular
 binding's reactiveVal would still cause that binding's current value to
@@ -715,20 +731,24 @@ returns silently produce unexpected output.
 
 ### Client-side event filtering (planned)
 
-Add a `filter` argument to the event-config constructors that accepts a JS
-expression string. The expression is evaluated client-side with the DOM
-event object as `e` — if falsy, the event is never sent to the server
-(zero round-trips). This avoids flooding the server with events the
-handler doesn't care about (e.g. `onKeyDown` that only handles Enter).
+Add a `filter` field to `irid_dom_opts()` that accepts a JS expression
+string. The expression is evaluated client-side with the DOM event object
+as `e` — if falsy, the event is never sent to the server (zero
+round-trips). This avoids flooding the server with events the handler
+doesn't care about (e.g. `onKeyDown` that only handles Enter). Deferred to
+a follow-up; `irid_dom_opts` is built extensible so adding `filter` is
+additive.
 
-A `key_filter()` helper would generate the JS expression for common key
-matching:
+An `irid_key_filter()` helper would generate the JS expression for common
+key matching:
 
 ```r
 tags$input(
   value = field,
-  onKeyDown = \(e) submit(),
-  .event = list(keydown = event_immediate(filter = key_filter("Enter")))
+  onKeyDown = irid_wire(
+    \(e) submit(),
+    dom_opts = irid_dom_opts(filter = irid_key_filter("Enter"))
+  )
 )
 ```
 

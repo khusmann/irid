@@ -1,14 +1,32 @@
 # irid (development version)
 
+## Breaking changes
+
+* Event and binding dispatch config now rides the slot it configures via a
+  single carrier, `irid_wire(subject, timing, coalesce, dom_opts)`. The
+  element-level `.event` and `.prevent_default` props are removed, along
+  with `event_immediate()` / `event_throttle()` / `event_debounce()` —
+  replaced by the pure timing shapes `irid_immediate()` /
+  `irid_throttle(ms, leading)` / `irid_debounce(ms)` (with `coalesce`
+  hoisted onto `irid_wire`) and `irid_dom_opts(prevent_default,
+  stop_propagation, capture, passive)`. A bare handler/reactive in a slot
+  still works as sugar for `irid_wire(callable)`.
+* A DOM event is now bound *or* handled, never both. Combining a
+  `value`/`checked` binding with an explicit `on*` handler for the same
+  event (e.g. `value = rv, onInput = ...`) is an error; use
+  `value = reactiveProxy(get, set)` for a synchronous write side-effect, or
+  observe the bound reactive for an async reaction. Two explicit handlers on
+  the same event also error (no composition).
+
 ## New features
 
 * `IridWidget()` — wrap arbitrary JavaScript libraries (CodeMirror,
-  Plotly, Leaflet, ...) as reactive irid components. Reactive props
-  flow into the widget; events flow back out. Composes inside `When`,
-  `Each`, and `Match` like any other irid construct. The helpers
-  `widget_event()`, `write_back()`, and `can_accept_write()` collapse
-  the canonical wrapper round-trip to one line per state key. See
-  `examples/codemirror.R`.
+  Plotly, Leaflet, ...) as reactive irid components. Props are
+  two-way-capable by default (symmetric with DOM `value`/`checked`): a
+  callable prop reads inbound and accepts write-back when the widget JS
+  calls `setProp(key, value)`. Genuine notifications flow back via `events`
+  (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
+  irid construct. See `examples/codemirror.R`.
 
 ## Bug fixes
 

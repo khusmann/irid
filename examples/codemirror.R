@@ -42,7 +42,7 @@ CodeMirrorDeps <- function() {
   const LANGS = { javascript, python };
   const langExt = (name) => (LANGS[name] || LANGS.javascript)();
 
-  window.irid.defineWidget("codemirror", function (el, props, send) {
+  window.irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
     // Compartment wraps the language extension so it can be swapped at
     // runtime via `compartment.reconfigure(...)`. Without this, the
     // extension is committed at EditorState.create time and there is no
@@ -59,20 +59,21 @@ CodeMirrorDeps <- function() {
           props.theme === "dracula" ? dracula : [],
           EditorView.updateListener.of(function (u) {
             if (u.docChanged) {
-              send("change", { content: u.state.doc.toString() });
+              // `content` is a two-way prop — push the new value back
+              // through the prop channel, not a fake event.
+              setProp("content", u.state.doc.toString());
             }
             if (u.selectionSet) {
               // Fires on every selection move — clicks, arrow keys,
               // and typing (typing advances the cursor). Independent
               // of the docChanged branch so the cursor display stays
-              // accurate during typing. Safe to fire alongside change
-              // because the framework\'s force-send-on-no-op is now
-              // scoped per-binding: this event\'s handler (the
-              // wrapper\'s `onCursorChanged`) declares no write target,
-              // so it doesn\'t fan out to the `content` binding.
+              // accurate during typing. Safe to fire alongside the
+              // content prop because the framework\'s force-send-on-no-op
+              // is scoped per-binding: this event\'s handler declares no
+              // write target, so it doesn\'t fan out to `content`.
               const head = u.state.selection.main.head;
               const line = u.state.doc.lineAt(head);
-              send("cursor-changed", {
+              sendEvent("cursor-changed", {
                 line: line.number,
                 ch: head - line.from
               });
@@ -104,43 +105,28 @@ CodeMirrorDeps <- function() {
   )
 }
 
-# Local helper: resolve per-event timing from caller's `.event` —
-# scalar broadcasts, list lookup, fallback to default. Local because
-# scalar-broadcast `.event` and this helper are slated for removal in
-# 0.3.0 (the `.event` floor will accept `on*` keys, and the per-event
-# `event_pick(...)` call collapses to `.event$onName %||% default`).
-event_pick <- function(user, key, default) {
-  if (is.null(user)) return(default)
-  if (inherits(user, "irid_event_config")) return(user)
-  if (is.list(user)) {
-    val <- user[[key]]
-    if (!is.null(val)) return(val)
-  }
-  default
-}
-
 CodeMirror <- function(
   content,
   language        = "javascript",
   theme           = "dracula",
-  onChange        = NULL,
-  onCursorChanged = NULL,
-  .event          = NULL
+  onCursorChanged = NULL
 ) {
   IridWidget(
     name   = "codemirror",
-    props  = list(content = content, language = language, theme = theme),
+    props  = list(
+      # `content` is two-way: the editor pushes edits via setProp("content").
+      # `merge` layers the caller's reactive over a wrapper default timing,
+      # so a caller can still override the debounce.
+      content  = merge(irid_wire(timing = irid_debounce(200)), content),
+      language = language,   # two-way-capable, but one-way in practice
+      theme    = theme
+    ),
     events = list(
-      widget_event(
-        name    = "change",
-        handler = write_back(content, "content", then = onChange),
-        timing  = event_pick(.event, "change", event_debounce(200, coalesce = TRUE))
-      ),
-      widget_event(
-        name    = "cursor-changed",
-        handler = onCursorChanged,
-        timing  = event_pick(.event, "cursor-changed", event_throttle(100, coalesce = TRUE))
-      )
+      # A genuine notification (no corresponding prop). Optional — when
+      # `onCursorChanged` is NULL the merge resolves to a subject-less wire
+      # and IridWidget drops the entry.
+      `cursor-changed` = merge(irid_wire(timing = irid_throttle(100)),
+                               onCursorChanged)
     ),
     deps   = CodeMirrorDeps(),
     container = tags$div(
