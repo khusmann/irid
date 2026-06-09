@@ -72,6 +72,19 @@ test_that("separate widgets drain to separate messages", {
   for (m in ms) expect_length(m$message$values, 1L)
 })
 
+test_that("widgets drain in first-seen order, not alphabetical", {
+  # Regression: `ls()` would sort "w-10" before "w-2"; the drain must keep
+  # the order the widgets were first queued in (≈ observer fire order).
+  s <- new_batch_session()
+  irid:::irid_queue_widget_attr(s, "w-2", "a", 1)
+  irid:::irid_queue_widget_attr(s, "w-10", "b", 2)
+  irid:::irid_queue_widget_attr(s, "w-2", "c", 3)  # re-touch, no reorder
+  s$flushReact()
+
+  ids <- vapply(attr_msgs(s), function(m) m$message$id, character(1))
+  expect_equal(ids, c("w-2", "w-10"))
+})
+
 test_that("batch sequence is the max contributed by any binding", {
   s <- new_batch_session()
   irid:::irid_queue_widget_attr(s, "w1", "a", 1, sequence = 3)

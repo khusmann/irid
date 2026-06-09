@@ -21,9 +21,14 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
   pending <- session$userData$irid_widget_pending
   if (is.null(pending)) {
     pending <- new.env(parent = emptyenv())
+    # `.order` tracks first-seen widget order so the drain preserves the
+    # order observers fired in (rather than `ls()`'s alphabetical sort,
+    # which puts "irid-10" before "irid-2"). The dot prefix hides it from
+    # `ls()`. Widget ids never start with a dot.
+    pending$.order <- character(0)
     session$userData$irid_widget_pending <- pending
     session$onFlushed(function() {
-      ids <- ls(pending)
+      ids <- pending$.order
       session$userData$irid_widget_pending <- NULL
       for (wid in ids) {
         entry <- pending[[wid]]
@@ -34,7 +39,10 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
     }, once = TRUE)
   }
   entry <- pending[[id]]
-  if (is.null(entry)) entry <- list(values = list(), sequence = NULL)
+  if (is.null(entry)) {
+    entry <- list(values = list(), sequence = NULL)
+    pending$.order <- c(pending$.order, id)
+  }
   # Single-bracket assignment so a legitimate NULL value keeps its key in
   # the map rather than being dropped (`[[<-` with NULL removes the entry).
   entry$values[attr] <- list(value)
