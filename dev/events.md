@@ -1,6 +1,8 @@
 # Events & bindings — `irid_wire`
 
-**Status:** Proposed (supersedes `dom-events-design.md` and `listener-opts-design.md`)
+**Status:** Implemented — tag side (§1–6) and the widget rework (§7) have
+landed; see §8 *Open* for the deferred follow-ups. (Supersedes
+`dom-events-design.md` and `listener-opts-design.md`.)
 **Date:** June 2026
 
 A single per-slot config carrier, `irid_wire`, replaces the family of
@@ -11,9 +13,9 @@ rule keeps it simple: **a given event is bound *or* handled, never both**
 (§4).
 
 The DOM-event side (`irid_wire` on tags) is the firm, low-risk core. The
-widget round-trip rework in §7 is the same model carried to widgets; it's
-directionally settled but has only been reasoned against CodeMirror — see
-§8.2.
+widget round-trip rework in §7 is the same model carried to widgets; it
+shipped vetted against CodeMirror only — the second-widget validation is
+still outstanding (§8 *Open*).
 
 Extending the vocabulary *beyond* standard HTML — the `on:` verbatim-event
 escape and `custom_tag()` for Web Components — is a downstream follow-on,
@@ -373,15 +375,24 @@ config carrier to mean "direction").
   callbacks named for what they push (events are *sent*, props are *set*).
   `setProp` + the per-prop `irid_prop_*` input is the one new framework
   primitive the two-way-prop model adds (§7).
+- **Two-way props are default-on, not opt-in** (§7) — shipped with the
+  latent snap-back on every callable prop. The cost was judged acceptable
+  ("never fires unless pushed"); not yet measured, but not gated on a
+  measurement either.
 
-### Open
+### Open (deferred follow-ups)
 
-1. **Two-way-prop cost** — latent snap-back on every prop (§7). Confirm
-   acceptable vs. an explicit opt-in, ideally measured.
-2. **Scope / validation.** The §7 widget rework has only been reasoned
-   against CodeMirror. Validate against a second widget — ideally an
-   atomic-render one (Plotly-class) — before locking, since its
-   update/echo semantics differ.
+1. **Second-widget validation.** The §7 widget rework shipped vetted
+   against CodeMirror only. Validate against a second widget — ideally an
+   atomic-render one (Plotly-class) — since its update/echo semantics
+   differ. (Note: per-widget batching of same-flush `irid-attr` updates is
+   specified separately in
+   [widget-batched-updates-design.md](widget-batched-updates-design.md).)
+2. **Client-side `filter` / `irid_key_filter`** — *not yet implemented.*
+   The `filter` field of `irid_dom_opts` and the `irid_key_filter()`
+   generator (shown in §2, §9, §10) were deferred to a separate follow-up;
+   `irid_dom_opts` shipped without `filter` but built so adding it is
+   additive. Until then, those examples are aspirational.
 
 ---
 
