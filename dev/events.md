@@ -416,7 +416,7 @@ Greenfield — single breaking migration, one CHANGELOG entry.
 - `inst/js/irid.js` — apply `stopPropagation`/`capture`/`passive`
   alongside `preventDefault`; evaluate `filter`, drop on falsy.
 
-**Widget side (per §7, wants §8 open-item 2 validation first):**
+**Widget side (per §7; second-widget validation still outstanding — §8 *Open* 1):**
 
 - [R/widget.R](../R/widget.R) — retire `widget_event`; make props
   two-way-capable; auto-synthesize the per-prop write-back observer on the
