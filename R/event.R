@@ -181,6 +181,7 @@ as_irid_wire <- function(x) {
 #' @param y The override: an `irid_wire`, a bare callable, or `NULL`.
 #' @param ... Unused.
 #' @return An `irid_wire`.
+#' @keywords internal
 #' @exportS3Method base::merge
 merge.irid_wire <- function(x, y, ...) {
   y <- as_irid_wire(y)

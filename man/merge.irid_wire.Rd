@@ -26,3 +26,4 @@ only the subject), both normalized first.
 \details{
 Extends the base \code{\link[=merge]{merge()}} generic rather than introducing a new one.
 }
+\keyword{internal}
