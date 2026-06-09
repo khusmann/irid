@@ -1,6 +1,8 @@
 # Widget batched updates — design
 
-**Status:** Proposed
+**Status:** Implemented — `irid_queue_widget_attr` in `R/mount.R`, the
+`update(values)` client dispatch in `inst/js/irid.js`, and the CodeMirror
+example migration. Tests in `tests/testthat/test-widget-batching.R`.
 **Date:** May 2026
 
 ---
@@ -43,7 +45,7 @@ in the current PR — this doc covers the remaining one (wire batching):
 |---|---|---|
 | Server-initiated dispatches fire the library's change listener, generating spurious echo events | Library-specific transaction marker (CM6 `Annotation`, Plotly's `Plotly.react()` tracking, …) — wrapper-author responsibility | Wrapper / JS |
 | `force-send-on-no-op` sent *every* binding on the source element after *every* event, even bindings the handler didn't touch — debounced bindings' stale server reactiveVals were echoed back, overwriting in-flight client state | **Per-binding force-send** — `write_back` and `make_autobind_handler` attach an `irid_write_targets` attribute to their returned handler; `compose_handlers` unions; `mount.R` filters source bindings to only those whose `attr` is in the firing event's declared targets; hand-rolled handlers declare nothing → no force-send | **Landed in this PR** |
-| Multiple bound props ride independent `irid-attr` messages — they race on the wire, exposing partial state mid-transition | **Per-widget batching** — coalesce all `irid-attr` messages targeting the same widget id in the same Shiny flush into one wire message with a `values: {…}` map | **This doc / follow-up PR** |
+| Multiple bound props ride independent `irid-attr` messages — they race on the wire, exposing partial state mid-transition | **Per-widget batching** — coalesce all `irid-attr` messages targeting the same widget id in the same Shiny flush into one wire message with a `values: {…}` map | **Landed (this doc)** |
 
 ### Why batching is still worth doing (after the force-send fix)
 

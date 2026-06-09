@@ -1,3 +1,54 @@
+#' Coalesce per-widget `irid-attr` updates within a Shiny flush
+#'
+#' A widget can expose several bound props whose binding observers fire in
+#' the same flush. Sending one `irid-attr` per binding races them on the
+#' wire — for atomic-render libraries (Plotly, Mapbox) each message triggers
+#' a full re-render, so two messages mean two redraws and a visible flash.
+#'
+#' Instead of sending immediately, each `(attr, value)` is accumulated into a
+#' per-widget pending map on `session$userData$irid_widget_pending`, and a
+#' one-shot `session$onFlushed` handler drains every widget's map at flush
+#' end into a single `irid-attr target="widget"` carrying a
+#' `values: {attr -> value}` object. The batch sequence is the highest
+#' contributed by any binding (or `NULL` for a purely programmatic update).
+#'
+#' Batching is intra-flush only: a prop updating in one flush and another in
+#' a later flush still produces two messages.
+#'
+#' @keywords internal
+#' @noRd
+irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
+  pending <- session$userData$irid_widget_pending
+  if (is.null(pending)) {
+    pending <- new.env(parent = emptyenv())
+    session$userData$irid_widget_pending <- pending
+    session$onFlushed(function() {
+      ids <- ls(pending)
+      session$userData$irid_widget_pending <- NULL
+      for (wid in ids) {
+        entry <- pending[[wid]]
+        msg <- list(id = wid, target = "widget", values = entry$values)
+        if (!is.null(entry$sequence)) msg$sequence <- entry$sequence
+        session$sendCustomMessage("irid-attr", msg)
+      }
+    }, once = TRUE)
+  }
+  entry <- pending[[id]]
+  if (is.null(entry)) entry <- list(values = list(), sequence = NULL)
+  # Single-bracket assignment so a legitimate NULL value keeps its key in
+  # the map rather than being dropped (`[[<-` with NULL removes the entry).
+  entry$values[attr] <- list(value)
+  if (!is.null(sequence)) {
+    entry$sequence <- if (is.null(entry$sequence)) {
+      sequence
+    } else {
+      max(entry$sequence, sequence)
+    }
+  }
+  pending[[id]] <- entry
+  invisible()
+}
+
 #' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
@@ -152,15 +203,19 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           for (sb in source_bindings) {
             if (!(sb$attr %in% write_targets)) next
             val <- isolate(sb$fn())
-            msg <- switch(sb$target,
-              dom    = list(id = sb$id, target = "dom",    attr = sb$attr,
+            if (sb$target == "widget") {
+              # Same per-widget batch as the binding observers — the
+              # force-send echo coalesces with them in this flush.
+              irid_queue_widget_attr(session, sb$id, sb$attr, val, seq)
+            } else {
+              msg <- switch(sb$target,
+                dom  = list(id = sb$id, target = "dom",  attr = sb$attr,
                             value = val, sequence = seq),
-              text   = list(id = sb$id, target = "text",
-                            value = val, sequence = seq),
-              widget = list(id = sb$id, target = "widget", attr = sb$attr,
+                text = list(id = sb$id, target = "text",
                             value = val, sequence = seq)
-            )
-            session$sendCustomMessage("irid-attr", msg)
+              )
+              session$sendCustomMessage("irid-attr", msg)
+            }
           }
         }
       }, ignoreInit = TRUE)
@@ -183,16 +238,23 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      msg <- switch(b$target,
-        dom    = list(id = b$id, target = "dom",    attr = b$attr, value = val),
-        text   = list(id = b$id, target = "text",                  value = val),
-        widget = list(id = b$id, target = "widget", attr = b$attr, value = val)
-      )
       seq_info <- session$userData$irid_current_sequence
-      if (!is.null(seq_info) && seq_info$source == b$id) {
-        msg$sequence <- seq_info$seq
+      seq <- if (!is.null(seq_info) && seq_info$source == b$id) {
+        seq_info$seq
+      } else {
+        NULL
       }
-      session$sendCustomMessage("irid-attr", msg)
+      if (b$target == "widget") {
+        # Coalesced per-widget; drained as one `values` map at flush end.
+        irid_queue_widget_attr(session, b$id, b$attr, val, seq)
+      } else {
+        msg <- switch(b$target,
+          dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
+          text = list(id = b$id, target = "text",                value = val)
+        )
+        if (!is.null(seq)) msg$sequence <- seq
+        session$sendCustomMessage("irid-attr", msg)
+      }
     }, priority = binding_priority)
     observers[[length(observers) + 1L]] <<- obs
   })

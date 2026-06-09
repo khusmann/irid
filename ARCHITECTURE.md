@@ -292,8 +292,11 @@ anchor references are preserved across moves.
 // target = "text" — text replacement in a comment-anchor range
 {id: "irid-5", target: "text", value: "Count: 42"}
 
-// target = "widget" — route per-key update to a widget's update() hook
-{id: "irid-7", target: "widget", attr: "content", value: "...", sequence: 12}
+// target = "widget" — route a coalesced batch to a widget's update() hook.
+// `values` is always a {attr -> value} map (one or more keys), built by
+// coalescing every widget binding that fired in the same server flush.
+{id: "irid-7", target: "widget",
+ values: {content: "...", cursor: {line: 1, ch: 1}}, sequence: 12}
 ```
 
 Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
@@ -307,12 +310,14 @@ For `"text"`: looks up the comment-anchor pair `msg.id`, removes
 everything between the start and end anchors (running
 `Shiny.unbindAll` on each removed element), and inserts a single
 text node when `value` is non-empty. For `"widget"`: looks up the
-widget registered at `msg.id` and calls `handle.update(msg.attr,
-msg.value)`; the widget's update hook owns the "compare against
-current state, skip on match" logic — irid stays generic because
-what counts as "current state" is library-specific. The universal
-stale-echo gate above ensures the widget never sees out-of-order
-values, so the hook doesn't need a sequence argument.
+widget registered at `msg.id` and calls `handle.update(msg.values)`
+with the coalesced `{attr -> value}` map; the widget's update hook
+owns the "compare against current state, skip on match" logic — irid
+stays generic because what counts as "current state" is
+library-specific. The universal stale-echo gate above ensures the
+widget never sees out-of-order batches, so the hook doesn't need a
+sequence argument. See [Widgets](#widgets) for the per-flush
+batching that builds `values`.
 
 ### `irid-swap`
 
@@ -609,12 +614,15 @@ irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
   // setProp:   setProp(key, value)       — push a two-way prop's new value
   var view = new EditorView({ /* ... */ });
   return {
-    update: function (key, value) {           // prop in (server -> client)
-      if (key === "content" && value !== view.state.doc.toString()) {
+    update: function (values) {               // batch in (server -> client)
+      // `values` is a {attr -> value} map carrying every prop that
+      // changed in one flush (one or more keys). Apply each present key;
+      // fold them into one library transaction where possible.
+      if ("content" in values && values.content !== view.state.doc.toString()) {
         view.dispatch({ /* ... */ });
       }
       // keys the widget can't or won't live-update have no branch —
-      // the message is silently dropped
+      // they're silently ignored
     },
     destroy: function () { view.destroy(); }
   };
@@ -625,9 +633,15 @@ Contract notes:
 - `props` arrives as a single merged object; callable-vs-constant on
   the R side is invisible here — the distinction shows up only in
   whether subsequent `irid-attr target="widget"` messages arrive.
-- `update` fires only for keys that were callable on the R side; it
-  must be idempotent (most updates round-trip the value the widget
-  just pushed via `setProp`).
+- `update(values)` receives a `{attr -> value}` map, never a single
+  `(key, value)` pair — even a one-prop change arrives as a one-entry
+  map. Multiple props that changed in the same server flush arrive
+  coalesced in one call (see [Per-flush batching](#per-flush-update-batching)),
+  so the hook handles `Object.keys(values)` uniformly (independent
+  `if ("k" in values)` checks, not an `else if` chain). It fires only
+  for keys that were callable on the R side, and must be idempotent
+  (most updates round-trip the value the widget just pushed via
+  `setProp`).
 - `setProp(key, value)` is the client → server half of a two-way prop;
   `sendEvent(event, payload)` pushes a notification. Both are silent
   no-ops when no R subscriber exists, so the widget can wire them
@@ -690,27 +704,36 @@ overwriting the user's typed characters with the server's pre-typing
 value. Per-binding scoping eliminates this entire class of cross-binding
 clobber.
 
-### Known limitation — multi-binding wire-level visual atomicity
+### Per-flush update batching
 
-A widget gets one `irid-attr` message per binding observer fire.
-Multiple bound props updating in the same flush ride independent
-messages on the wire. For libraries with incremental update primitives
-(CodeMirror handles separate `view.dispatch()` calls fine), the gap
-between messages is invisible. For libraries with atomic-render
-primitives (Plotly, Mapbox), each `irid-attr` triggers a full
-re-render — two messages = two redraws = visible flash.
+Multiple bound props on one widget updating in the same Shiny flush are
+coalesced into a **single** `irid-attr target="widget"` message carrying a
+`values: {attr -> value}` map, delivered as one `update(values)` call.
+Without this, each binding observer would send its own `irid-attr`; the
+messages race on the wire and, for atomic-render libraries (Plotly,
+Mapbox) where every message triggers a full redraw, two messages mean
+two redraws and a visible flash.
 
-Specified in
-[dev/widget-batched-updates-design.md](dev/widget-batched-updates-design.md);
-deferred to a follow-up PR. The fix is per-widget batching — coalesce
-same-flush messages for one widget into a `values: {…}` map delivered
-as one `update(values)` call (a breaking widget-contract change). This
-is a visual-atomicity improvement, not a correctness one — the
-per-binding force-send fix above closes the correctness gap, so
-editor-class demos work today. Widget authors wrapping atomic-render
-libraries in the meantime should lump the related state into one
-bound prop with a structured value (Plotly's `{data, layout}`,
-Mapbox's `{center, zoom, bearing}`).
+Server side, `irid_queue_widget_attr` ([mount.R](R/mount.R)) appends each
+`(attr, value)` to a per-widget pending map on
+`session$userData$irid_widget_pending` instead of sending immediately; a
+one-shot `session$onFlushed` handler drains every widget's map at flush
+end. Both widget send sites route through it — the binding observers and
+the event force-send-on-no-op echo — so they coalesce together within a
+flush. DOM and text targets are unaffected (no analogous race; each DOM
+attribute write is its own concern). The batch sequence is the highest
+contributed by any binding in the flush (or absent for a purely
+programmatic update); the universal stale-echo gate compares it exactly
+as before.
+
+Batching is **intra-flush only**: a prop updating in one flush and
+another in a later flush still produce two messages (delaying delivery
+would fight Shiny's reactive model). For libraries with incremental
+update primitives (CodeMirror's separate `view.dispatch()` calls) the
+distinction is invisible; the win is for atomic-render libraries, where a
+coordinated same-flush multi-write now redraws once. Design rationale and
+non-goals in
+[dev/widget-batched-updates-design.md](dev/widget-batched-updates-design.md).
 
 ## Remaining Work
 

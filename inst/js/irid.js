@@ -200,7 +200,10 @@
       var w = widgets[msg.id];
       if (!w) return;
       if (typeof w.handle.update === 'function') {
-        w.handle.update(msg.attr, msg.value);
+        // Always a `values: {attr -> value}` map (one or more keys),
+        // coalesced server-side per widget per flush. A single-prop change
+        // is just a one-entry map.
+        w.handle.update(msg.values);
       }
       return;
     }
