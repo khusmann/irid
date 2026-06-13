@@ -158,8 +158,8 @@ PlotlyOutput(
 )
 
 tags$p(\() {
-  pts <- selected()
-  if (is.null(pts)) "No selection" else paste(length(pts), "points")
+  pts <- selected()   # data.frame(curve, point), or NULL
+  if (is.null(pts)) "No selection" else paste(nrow(pts), "points")
 })
 ```
 
@@ -241,13 +241,15 @@ PlotlyOutput(
   onLegendDoubleclick = \(event) isolate_trace(event$curveNumber),
   onClickAnnotation   = \(event) handle(event),
   onSunburstClick     = \(event) drill_down(event),
-  onDeselect          = \(event) selected(NULL),
+  onDeselect          = \(event) log("cleared"),   # side effect only — see note
   onSelecting         = \(event) preview(event$points),
   onBrushing          = \(event) preview(event$points)
 )
 ```
 
 Pass only the callbacks you need. Listeners are only attached on the client for events with a corresponding callback.
+
+`onDeselect` is a *notification*, not the way you clear the selection: when `selected_points` is bound, `plotly_deselect` already sets it to `NULL` through its own prop channel. Use `onDeselect` only for an additional side effect (logging, resetting a sibling), never to mirror the clear by hand.
 
 ### Constrained writes with `reactiveProxy`
 
@@ -485,8 +487,8 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
     if (s.layout.uirevision == null) s.layout.uirevision = "irid";
     TABLE.forEach(function (entry) {
       var v = state[entry.name];
-      if (v != null) setSpecPath(s, entry.path, v);
-    });
+      if (v != null) entry.writeSpec(s, v);   // identity for ranges; per-trace
+    });                                        // converter for the data[*] entries
     return s;
   }
 
@@ -508,9 +510,9 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
     });
     sendEvent("relayout", payload);          // raw escape hatch (no-op if unbound)
   });
-  el.on("plotly_selected", function (e) { setProp("selected_points", e.points); });
+  el.on("plotly_selected", function (e) { setProp("selected_points", pointsToFrame(e.points)); });
   el.on("plotly_deselect", function ()  { setProp("selected_points", null); });
-  el.on("plotly_restyle",  function (e) { setProp("trace_visibility", readVisibility(el)); });
+  el.on("plotly_restyle",  function ()  { setProp("trace_visibility", readVisibility(el)); });
   el.on("plotly_click",    function (e) { sendEvent("click", e); });
   el.on("plotly_hover",    function (e) { sendEvent("hover", e); });
   // ... one listener per discrete event in the wrapper's events list ...
@@ -525,11 +527,11 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
         var v = values[entry.name];
         state[entry.name] = v;
         if (reactNeeded) return;             // folded into the upcoming render()
-        if (v == null) {                     // "defer to spec" at that path
-          Plotly.relayout(el, relayoutPatch(entry.path, getSpecPath(spec, entry.path)));
-        } else if (!sameAsCurrent(el, entry.path, v)) {
-          Plotly.relayout(el, relayoutPatch(entry.path, v));   // snap / apply
-        }
+        // entry.apply picks the primitive — Plotly.relayout for layout paths,
+        // Plotly.restyle for the data[*] entries — and runs the value->spec
+        // conversion; entry.applyDeferred re-applies the spec's own value.
+        if (v == null) entry.applyDeferred(el, spec);          // "defer to spec"
+        else if (!entry.matchesCurrent(el, v)) entry.apply(el, v);   // snap / apply
       });
       if (reactNeeded) render();             // one redraw for the whole batch
     },
@@ -543,7 +545,7 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
 Notes on what's load-bearing on the substrate:
 
 - `props` arrives as a single merged object containing both the spec and the named state args — the `irid-widget-init.props` contract. The factory doesn't need to know which fields were callable on the R side; that shows up only in which keys later appear in `update(values)`.
-- `update(values)` receives a `{ key -> value }` map, never a single `(key, value)` pair. Multiple props that changed in the same server flush — e.g. a new `spec` and a fresh `xaxis_range` — arrive coalesced in one call, so the factory folds them into a single `Plotly.react()` and the atomic-render library redraws once, no flash. Pure state changes (no `spec`) take the targeted-`relayout` path per key.
+- `update(values)` receives a `{ key -> value }` map, never a single `(key, value)` pair. Multiple props that changed in the same server flush — e.g. a new `spec` and a fresh `xaxis_range` — arrive coalesced in one call, so the factory folds them into a single `Plotly.react()` and the atomic-render library redraws once, no flash. Pure state changes (no `spec`) take the targeted per-key apply path (`Plotly.relayout` for layout entries, `Plotly.restyle` for the `data[*]` entries).
 - `setProp` and `sendEvent` are silent no-ops for keys/events with no R subscriber. The widget can register listeners for every plotly event unconditionally and let the framework gate which round-trip — the per-field `setProp` writes and the discrete `sendEvent` notifications alike.
 - The widget's `destroy()` runs from the client's detach walker on `irid-swap` / `irid-mutate` removals — no custom client teardown code in `PlotlyOutput`.
 
@@ -575,6 +577,11 @@ The translation table is the list of plotly features `PlotlyOutput` knows how to
 - **Name** — the named arg as seen by the user
 - **Spec path** — where the value is merged into the plotly spec
 - **Source event** — the plotly.js event that writes back to it
+- **Converters / apply primitive** — `fromEvent` (event payload → canonical
+  value), `writeSpec` (value → spec merge), and `apply` (value → live graph via
+  `Plotly.relayout` or `Plotly.restyle`). Symmetric entries get identity
+  defaults; the asymmetric `data[*]` entries supply their own (see *Value
+  shapes*).
 
 Launch-scope table (everything else lives in the `onRelayout` escape hatch):
 
@@ -586,8 +593,78 @@ Launch-scope table (everything else lives in the `onRelayout` escape hatch):
 | `yaxis<n>_range`       | `layout.yaxis<n>.range`    | `plotly_relayout` (pattern-matched)   |
 | `dragmode`             | `layout.dragmode`          | `plotly_relayout`                     |
 | `hovermode`            | `layout.hovermode`         | `plotly_relayout`                     |
-| `selected_points`      | `data[*].selectedpoints`   | `plotly_selected` / `plotly_brushed` / `plotly_deselect` |
-| `trace_visibility`     | `data[*].visible`          | `plotly_restyle`                      |
+| `selected_points` †    | `data[*].selectedpoints`   | `plotly_selected` / `plotly_brushed` / `plotly_deselect` |
+| `trace_visibility` †   | `data[*].visible`          | `plotly_restyle`                      |
+
+† Not symmetric — the event payload and the spec path differ in shape, and the
+field lives on a `data[*]` array (applied via `Plotly.restyle`, not
+`Plotly.relayout`). See *Value shapes* below.
+
+### Value shapes for selection and visibility
+
+Most table entries are *symmetric*: the event reports the same shape the spec
+path consumes (a range in, a range out), so the entry's `writeSpec` / `apply` /
+`fromEvent` are identity wrappers over `setSpecPath` and `Plotly.relayout`. Two
+entries are not symmetric — the event payload and the spec path speak different
+languages — so each defines a canonical R value and converts in both directions.
+The asymmetry is sealed inside the translation-table entry; user code only ever
+sees the canonical value.
+
+**`selected_points` — `data.frame(curve, point)` (1-based), or `NULL`.**
+
+`plotly_selected` returns a flat list of point *objects*
+(`{curveNumber, pointNumber, x, y, …}`) spanning every trace, while the spec
+path `data[*].selectedpoints` wants per-trace *integer index* arrays. The
+canonical value bridges them as a two-column data frame — one row per selected
+point — echoing `{plotly}`'s own `event_data("plotly_selected")` shape:
+
+| column  | meaning                               |
+|---------|---------------------------------------|
+| `curve` | 1-based trace index                   |
+| `point` | 1-based point index within that trace |
+
+irid reports **1-based** indices, not plotly.js's 0-based `curveNumber` /
+`pointNumber`, so `df()[selected()$point, ]` indexes the bound data directly.
+The JS↔value boundary does the ±1. (This is the one deliberate divergence from
+`{plotly}`'s 0-based `event_data` — reversible if matching plotly verbatim turns
+out to matter more than R-native indexing.)
+
+- **event → value** (`pointsToFrame`, on `plotly_selected`): map each
+  `payload.points[i]` to a row `(curveNumber + 1, pointNumber + 1)`.
+  `plotly_deselect` → `NULL`.
+- **value → spec** (`writeSpec` / `apply`): group rows by `curve` and set
+  `data[curve − 1].selectedpoints = point − 1` per trace via `Plotly.restyle`.
+  A trace that is part of an active selection but holds no selected points gets
+  `[]` (plotly dims it); a `NULL` value omits `selectedpoints` entirely (no
+  dimming).
+
+The value carries only what *persists and restores* a selection. The rich,
+transient geometry — coordinates, box/lasso extent — is not state; it rides the
+`onSelecting` raw payload during the drag (and an `onSelected` callback for the
+final payload, if one is added — additive, parallel to how `onRelayout` sits
+beside the range props). Bookmark
+fidelity: the `(curve, point)` pairs restore the highlighted/dimmed state across
+a reload as long as the underlying data order is stable; the selection rectangle
+itself is not redrawn.
+
+**`trace_visibility` — character vector over `{"true","false","legendonly"}`,
+trace-aligned, or `NULL`.**
+
+`plotly_restyle` reports only *which* traces changed and to what
+(`[{visible:"legendonly"}, [2]]`); the spec path `data[*].visible` is a
+per-trace tri-state. The canonical value is the full trace-aligned vector:
+
+- **event → value** (`readVisibility`, on `plotly_restyle`): read every trace's
+  current `visible` off the graph and stringify (`true → "true"`,
+  `false → "false"`, `"legendonly"` unchanged).
+- **value → spec** (`writeSpec` / `apply`): set each `data[i].visible` to the
+  typed value (`"true" → true`, `"false" → false`, else `"legendonly"`) via
+  `Plotly.restyle`.
+- `NULL` defers to the spec — visibility is left untouched during the merge.
+
+A plain logical vector can't hold the `"legendonly"` third state, so the value
+is character; a caller toggling visibility compares against the three string
+literals.
 
 Fields to add post-launch as usage patterns become clear:
 
