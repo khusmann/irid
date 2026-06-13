@@ -20,10 +20,10 @@ character scalar.}
 \item{props}{Named list of props. Callable values are two-way-capable
 bindings; non-callable values are init-only constants. \code{NULL} entries
 are forwarded to JS as \code{null} (not dropped). Wrap a value in
-\code{\link[=irid_wire]{irid_wire()}} to tune its write-back timing.}
+\code{\link[=wire]{wire()}} to tune its write-back timing.}
 
 \item{events}{Named list of notifications (client → server), keyed by wire
-event name. Each value is a handler, an \code{\link[=irid_wire]{irid_wire()}}, or \code{NULL}
+event name. Each value is a handler, a \code{\link[=wire]{wire()}}, or \code{NULL}
 (dropped). \code{dom_opts} is not allowed.}
 
 \item{deps}{Optional \code{html_dependency} or list of them. Required for
@@ -32,7 +32,7 @@ any widget whose JS isn't already loaded by some other means.}
 \item{container}{Optional \code{shiny.tag} for the wrapper element.
 Defaults to \code{tags$div()}. irid sets \code{id} and \code{data-irid-widget}
 automatically. Configure any DOM events on the container by wrapping
-their handlers in \code{\link[=irid_wire]{irid_wire()}} on the container directly.}
+their handlers in \code{\link[=wire]{wire()}} on the container directly.}
 }
 \value{
 A irid widget construct with class \code{irid_widget}.
@@ -56,15 +56,15 @@ dropped and the canonical value is snapped back). Whether a prop is
 \code{setProp}; the snap-back machinery is latent until it does. A non-callable
 prop rides in the init message as a constant and is never re-sent.
 
-Wrap a prop in \code{\link[=irid_wire]{irid_wire()}} only to \strong{tune} its round-trip timing
-(\code{content = irid_wire(content, irid_debounce(200))}) — never to enable or
+Wrap a prop in \code{\link[=wire]{wire()}} only to \strong{tune} its round-trip timing
+(\code{content = wire(content, wire_debounce(200))}) — never to enable or
 disable two-way. To react to a prop's change, observe the bound reactive
 or pass a \code{reactiveProxy}; a bound prop is not \emph{also} handled.
 
 \code{events} carries genuine notifications the widget emits that correspond to
 no prop (e.g. \code{cursor-changed}). Keys are the wire event names the widget
 JS passes to \code{sendEvent()} (lowercase kebab-case by web \code{CustomEvent}
-convention). Each value is a handler or an \code{\link[=irid_wire]{irid_wire()}} (to tune timing);
+convention). Each value is a handler or a \code{\link[=wire]{wire()}} (to tune timing);
 \code{NULL} entries are dropped so optional handlers forward declaratively.
 \code{dom_opts} is illegal on a widget event.
 }

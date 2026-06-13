@@ -223,33 +223,33 @@ test_that("value = reactiveProxy(get, set) bridges the sync-write case", {
   expect_equal(log, "typed")
 })
 
-# --- irid_wire carrier config ------------------------------------------------
+# --- wire carrier config ------------------------------------------------
 
-test_that("bare onClick equals irid_wire(handler) with default config", {
+test_that("bare onClick equals wire(handler) with default config", {
   h <- function() NULL
   bare <- process_tags(tags$button(onClick = h))
-  wired <- process_tags(tags$button(onClick = irid_wire(h)))
+  wired <- process_tags(tags$button(onClick = wire(h)))
   expect_equal(bare$events[[1]]$mode, "immediate")
   expect_equal(wired$events[[1]]$mode, "immediate")
   expect_equal(bare$events[[1]]$event, "click")
   expect_equal(wired$events[[1]]$event, "click")
 })
 
-test_that("irid_wire timing sets the dispatch mode", {
+test_that("wire timing sets the dispatch mode", {
   result <- process_tags(
-    tags$button(onClick = irid_wire(\() NULL, irid_throttle(100)))
+    tags$button(onClick = wire(\() NULL, wire_throttle(100)))
   )
   expect_equal(result$events[[1]]$mode, "throttle")
   expect_equal(result$events[[1]]$ms, 100)
   expect_true(result$events[[1]]$leading)
 })
 
-test_that("irid_wire with dom_opts but no timing keeps the per-event default", {
+test_that("wire with dom_opts but no timing keeps the per-event default", {
   # The submit event has no per-event default override, so it stays
   # immediate even though dom_opts is set — dom_opts must not clobber timing.
   result <- process_tags(
-    tags$form(onSubmit = irid_wire(
-      \() NULL, dom_opts = irid_dom_opts(prevent_default = TRUE)
+    tags$form(onSubmit = wire(
+      \() NULL, dom_opts = wire_dom_opts(prevent_default = TRUE)
     ))
   )
   expect_equal(result$events[[1]]$mode, "immediate")
@@ -258,7 +258,7 @@ test_that("irid_wire with dom_opts but no timing keeps the per-event default", {
 
 test_that("dom_opts flags land on the event row", {
   result <- process_tags(
-    tags$div(onClick = irid_wire(\() NULL, dom_opts = irid_dom_opts(
+    tags$div(onClick = wire(\() NULL, dom_opts = wire_dom_opts(
       prevent_default = TRUE, stop_propagation = TRUE,
       capture = TRUE, passive = TRUE
     )))
@@ -271,24 +271,24 @@ test_that("dom_opts flags land on the event row", {
 })
 
 test_that("coalesce derives from timing mode; carrier override wins", {
-  immediate <- process_tags(tags$button(onClick = irid_wire(\() NULL)))
+  immediate <- process_tags(tags$button(onClick = wire(\() NULL)))
   expect_false(immediate$events[[1]]$coalesce)
 
   throttled <- process_tags(
-    tags$button(onClick = irid_wire(\() NULL, irid_throttle(100)))
+    tags$button(onClick = wire(\() NULL, wire_throttle(100)))
   )
   expect_true(throttled$events[[1]]$coalesce)
 
   overridden <- process_tags(
-    tags$button(onClick = irid_wire(\() NULL, irid_throttle(100), coalesce = FALSE))
+    tags$button(onClick = wire(\() NULL, wire_throttle(100), coalesce = FALSE))
   )
   expect_false(overridden$events[[1]]$coalesce)
 })
 
 test_that("config-only wire (dom_opts, no handler) is client-only", {
   result <- process_tags(
-    tags$form(onSubmit = irid_wire(
-      dom_opts = irid_dom_opts(prevent_default = TRUE)
+    tags$form(onSubmit = wire(
+      dom_opts = wire_dom_opts(prevent_default = TRUE)
     ))
   )
   expect_length(result$events, 1L)
@@ -297,10 +297,10 @@ test_that("config-only wire (dom_opts, no handler) is client-only", {
   expect_equal(result$events[[1]]$event, "submit")
 })
 
-test_that("irid_wire can tune a value binding's timing", {
+test_that("wire can tune a value binding's timing", {
   rv <- shiny::reactiveVal("")
   result <- process_tags(
-    tags$input(value = irid_wire(rv, irid_debounce(500)))
+    tags$input(value = wire(rv, wire_debounce(500)))
   )
   expect_length(result$bindings, 1L)
   expect_equal(result$bindings[[1]]$attr, "value")
@@ -309,9 +309,9 @@ test_that("irid_wire can tune a value binding's timing", {
   expect_equal(result$events[[1]]$ms, 500)
 })
 
-test_that("value = irid_wire() with no subject errors", {
+test_that("value = wire() with no subject errors", {
   expect_error(
-    process_tags(tags$input(value = irid_wire(timing = irid_debounce(200)))),
+    process_tags(tags$input(value = wire(timing = wire_debounce(200)))),
     "needs a reactive subject"
   )
 })
@@ -319,9 +319,9 @@ test_that("value = irid_wire() with no subject errors", {
 # --- Per-event default timing ------------------------------------------------
 #
 # The default rule is keyed only on the DOM event name: `input` →
-# `irid_debounce(200)`, the high-frequency continuous streams →
-# `irid_throttle(100)` (+ derived coalesce), everything else →
-# `irid_immediate()`.
+# `wire_debounce(200)`, the high-frequency continuous streams →
+# `wire_throttle(100)` (+ derived coalesce), everything else →
+# `wire_immediate()`.
 
 test_that("explicit onInput defaults to debounce(200)", {
   result <- process_tags(tags$input(onInput = function(e) NULL))
@@ -359,7 +359,7 @@ test_that("high-frequency events default to throttle(100) + coalesce", {
 
 test_that("explicit immediate wins over a high-frequency default", {
   result <- process_tags(
-    tags$div(onMouseMove = irid_wire(function(e) NULL, irid_immediate()))
+    tags$div(onMouseMove = wire(function(e) NULL, wire_immediate()))
   )
   expect_equal(result$events[[1]]$mode, "immediate")
   expect_false(result$events[[1]]$coalesce)
@@ -367,7 +367,7 @@ test_that("explicit immediate wins over a high-frequency default", {
 
 test_that("explicit coalesce = FALSE keeps the throttle default but ungates", {
   result <- process_tags(
-    tags$div(onMouseMove = irid_wire(function(e) NULL, coalesce = FALSE))
+    tags$div(onMouseMove = wire(function(e) NULL, coalesce = FALSE))
   )
   expect_equal(result$events[[1]]$mode, "throttle")
   expect_equal(result$events[[1]]$ms, 100)
@@ -387,60 +387,60 @@ test_that("autobind checked defaults to immediate (change event)", {
   expect_equal(result$events[[1]]$mode, "immediate")
 })
 
-test_that("irid_wire timing overrides the per-event default", {
+test_that("wire timing overrides the per-event default", {
   rv <- shiny::reactiveVal("")
   result <- process_tags(
-    tags$input(value = irid_wire(rv, irid_immediate()))
+    tags$input(value = wire(rv, wire_immediate()))
   )
   expect_equal(result$events[[1]]$mode, "immediate")
 })
 
 # --- Misuse: irid construct passed as a slot value ---------------------------
 #
-# `irid_wire` is the one valid construct in an event / value / checked slot.
-# Bare timing shapes, `irid_dom_opts`, control-flow nodes, and outputs are
+# `wire` is the one valid construct in an event / value / checked slot.
+# Bare timing shapes, `wire_dom_opts`, control-flow nodes, and outputs are
 # meaningful only elsewhere; as a slot value they would serialize as raw HTML,
 # so process_tags rejects them loudly.
 
 test_that("bare timing shape on an `on*` prop errors with a pairing hint", {
   expect_error(
-    process_tags(tags$button(onClick = irid_immediate())),
-    "irid_timing"
+    process_tags(tags$button(onClick = wire_immediate())),
+    "irid_wire_timing"
   )
   expect_error(
-    process_tags(tags$button(onClick = irid_immediate())),
-    "pair with a subject inside `irid_wire\\(\\)`.*onClick"
+    process_tags(tags$button(onClick = wire_immediate())),
+    "pair with a subject inside `wire\\(\\)`.*onClick"
   )
 })
 
 test_that("bare timing shape on a non-event attribute uses a generic hint", {
   expect_error(
-    process_tags(tags$div(class = irid_immediate())),
-    "Timing shapes belong inside `irid_wire\\(timing = ...\\)`"
+    process_tags(tags$div(class = wire_immediate())),
+    "Timing shapes belong inside `wire\\(timing = ...\\)`"
   )
 })
 
-test_that("irid_throttle / irid_debounce on an `on*` prop also error", {
+test_that("wire_throttle / wire_debounce on an `on*` prop also error", {
   expect_error(
-    process_tags(tags$button(onClick = irid_throttle(100))),
-    "irid_timing"
+    process_tags(tags$button(onClick = wire_throttle(100))),
+    "irid_wire_timing"
   )
   expect_error(
-    process_tags(tags$input(onInput = irid_debounce(200))),
-    "irid_timing"
-  )
-})
-
-test_that("irid_dom_opts as a slot value errors with a wrapping hint", {
-  expect_error(
-    process_tags(tags$div(onClick = irid_dom_opts(prevent_default = TRUE))),
-    "`irid_dom_opts\\(\\)` belongs inside `irid_wire\\(dom_opts = ...\\)`"
+    process_tags(tags$input(onInput = wire_debounce(200))),
+    "irid_wire_timing"
   )
 })
 
-test_that("irid_wire on a plain attribute binding errors", {
+test_that("wire_dom_opts as a slot value errors with a wrapping hint", {
   expect_error(
-    process_tags(tags$div(class = irid_wire(\() "x"))),
+    process_tags(tags$div(onClick = wire_dom_opts(prevent_default = TRUE))),
+    "`wire_dom_opts\\(\\)` belongs inside `wire\\(dom_opts = ...\\)`"
+  )
+})
+
+test_that("wire on a plain attribute binding errors", {
+  expect_error(
+    process_tags(tags$div(class = wire(\() "x"))),
     "configures event.*and.*value.*checked.*slots"
   )
 })
@@ -469,7 +469,7 @@ test_that("Output node as a slot value errors", {
 
 test_that("error message mentions the offending slot name", {
   expect_error(
-    process_tags(tags$button(onClick = irid_immediate())),
+    process_tags(tags$button(onClick = wire_immediate())),
     "onClick"
   )
   expect_error(
@@ -503,8 +503,8 @@ test_that("without dom_opts, every event entry has prevent_default = FALSE", {
 test_that("dom_opts is per-slot, not broadcast across events", {
   result <- process_tags(
     tags$form(
-      onSubmit = irid_wire(\() NULL,
-                           dom_opts = irid_dom_opts(prevent_default = TRUE)),
+      onSubmit = wire(\() NULL,
+                           dom_opts = wire_dom_opts(prevent_default = TRUE)),
       onClick = \(e) NULL
     )
   )

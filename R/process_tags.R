@@ -21,7 +21,7 @@ is_irid_reactive <- function(x) {
 # `<select value=rv>` synthesises on `change`, not `input`. `change` is
 # the canonical "user picked something" event for a select; `input` also
 # fires but is the wrong one to autobind because the per-event default is
-# `irid_debounce(200)`, so the write to `rv` would lag.
+# `wire_debounce(200)`, so the write to `rv` would lag.
 # Text inputs stay on `input` (keystroke-by-keystroke).
 STATE_BIND_ATTRS <- c("value", "checked")
 state_bind_event <- function(attr_name, tag_name) {
@@ -70,11 +70,11 @@ make_widget_writeback <- function(fn, key) {
   h
 }
 
-# Known high-frequency continuous event streams. Left on `irid_immediate()`
+# Known high-frequency continuous event streams. Left on `wire_immediate()`
 # these are a firehose: every move/scroll fires `Shiny.setInputValue` with
 # no rate limiting and no server-idle backpressure, so the server falls
 # behind processing stale positions and latency grows unbounded. They
-# default to `irid_throttle(100)` instead, whose derived `coalesce = TRUE`
+# default to `wire_throttle(100)` instead, whose derived `coalesce = TRUE`
 # adds the server-idle gate — a paced "latest position" stream the server
 # can keep up with. Discrete events (`click`, `keydown`, …) stay immediate.
 HIGH_FREQ_EVENTS <- c(
@@ -91,11 +91,11 @@ HIGH_FREQ_EVENTS <- c(
 # once per discrete user action → immediate. Explicit timing always wins.
 default_for_event <- function(event_name) {
   if (event_name == "input") {
-    irid_debounce(200)
+    wire_debounce(200)
   } else if (event_name %in% HIGH_FREQ_EVENTS) {
-    irid_throttle(100)
+    wire_throttle(100)
   } else {
-    irid_immediate()
+    wire_immediate()
   }
 }
 
@@ -103,7 +103,7 @@ default_for_event <- function(event_name) {
 # immediate streams shouldn't gate on idle, rate-limited ones should.
 derive_coalesce <- function(mode) !identical(mode, "immediate")
 
-# Resolve an `irid_wire`'s dispatch config for one event into the flat row
+# Resolve a `wire`'s dispatch config for one event into the flat row
 # the event message carries. Carrier `timing` wins, else the per-event
 # default; carrier `coalesce` wins, else derive from the mode; `dom_opts`
 # flags default FALSE when absent.
@@ -217,8 +217,8 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       user_id <- container$attribs$id
       id <- if (!is.null(user_id)) user_id else next_id()
 
-      # Per-key prop dispatch. A callable (bare, or the subject of an
-      # `irid_wire` used to tune timing) becomes a **two-way-capable** prop:
+      # Per-key prop dispatch. A callable (bare, or the subject of a
+      # `wire` used to tune timing) becomes a **two-way-capable** prop:
       # a `target = "widget"` binding (server → client, one observer per
       # key) PLUS a synthesized write-back event row (`kind = "prop"`,
       # client → server via `setProp`). A non-callable rides in the init
@@ -245,8 +245,8 @@ process_tags <- function(tag, counter = irid_id_counter()) {
           bindings[[length(bindings) + 1L]] <<- list(
             id = id, target = "widget", attr = key, fn = subj
           )
-          cfg <- resolve_wire_config(w %||% irid_wire(), key,
-                                     default_timing = irid_immediate())
+          cfg <- resolve_wire_config(w %||% wire(), key,
+                                     default_timing = wire_immediate())
           events[[length(events) + 1L]] <<- list(
             id = id, event = key, handler = make_widget_writeback(subj, key),
             write_targets = key,
@@ -263,14 +263,14 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         }
       }
 
-      # Widget events are genuine notifications, configured with `irid_wire`
+      # Widget events are genuine notifications, configured with `wire`
       # (already normalized + subject-guaranteed by `IridWidget`). Timing /
       # coalesce come from the carrier, defaulting per the event-name rule
-      # (which is `irid_immediate()` for any non-`input` widget event name).
+      # (which is `wire_immediate()` for any non-`input` widget event name).
       for (key in names(node$events)) {
         w <- node$events[[key]]
         handler <- w$subject
-        cfg <- resolve_wire_config(w, key, default_timing = irid_immediate())
+        cfg <- resolve_wire_config(w, key, default_timing = wire_immediate())
         events[[length(events) + 1L]] <<- list(
           id = id, event = key, handler = handler,
           write_targets = attr(handler, "irid_write_targets"),
@@ -382,18 +382,17 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       if (!is_wire) {
         irid_class <- grep("^irid_", class(val), value = TRUE)
         if (length(irid_class) > 0L) {
-          hint <- if ("irid_timing" %in% irid_class) {
+          hint <- if ("irid_wire_timing" %in% irid_class) {
             if (is_event || is_state) {
               paste0(
-                "Timing shapes pair with a subject inside `irid_wire()`: ",
-                "e.g. `", name, " = irid_wire(subject, ", irid_class[[1]],
-                "())`."
+                "Timing shapes pair with a subject inside `wire()`: ",
+                "e.g. `", name, " = wire(subject, wire_debounce(200))`."
               )
             } else {
-              "Timing shapes belong inside `irid_wire(timing = ...)`."
+              "Timing shapes belong inside `wire(timing = ...)`."
             }
           } else if ("irid_dom_opts" %in% irid_class) {
-            "`irid_dom_opts()` belongs inside `irid_wire(dom_opts = ...)`."
+            "`wire_dom_opts()` belongs inside `wire(dom_opts = ...)`."
           } else {
             paste0(
               "Constructs of class `", irid_class[[1]],
@@ -412,11 +411,11 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       # one. Emit a binding (server → client read) and the sole synthetic
       # event entry (client → server write) for that event.
       if (is_state && (is_wire || is_irid_reactive(val))) {
-        w <- as_irid_wire(val)
+        w <- as_wire(val)
         subj <- w$subject
         if (is.null(subj) || !is_irid_reactive(subj)) {
           stop(
-            "`", name, "` needs a reactive subject; `irid_wire()` with no ",
+            "`", name, "` needs a reactive subject; `wire()` with no ",
             "subject configures timing only and has nothing to bind.",
             call. = FALSE
           )
@@ -433,7 +432,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       }
 
       if (is_event && (is_wire || is_irid_reactive(val))) {
-        w <- as_irid_wire(val)
+        w <- as_wire(val)
         js_event <- tolower(sub("^on", "", name))
         # A config-only wire (e.g. `dom_opts` with no handler) attaches a
         # client-side listener but never round-trips — handler stays NULL.
@@ -445,7 +444,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
 
       if (is_wire) {
         stop(
-          "`", name, "`: `irid_wire()` configures event (`on*`) and ",
+          "`", name, "`: `wire()` configures event (`on*`) and ",
           "`value`/`checked` slots, not plain attribute bindings.",
           call. = FALSE
         )

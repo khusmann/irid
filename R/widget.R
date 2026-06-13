@@ -1,6 +1,6 @@
 # Normalize and validate a widget `events` list. Each entry is keyed by the
-# wire event name the widget JS dispatches and is a bare handler, an
-# `irid_wire`, or `NULL`. NULL entries (and `merge()` results that resolve to
+# wire event name the widget JS dispatches and is a bare handler, a
+# `wire`, or `NULL`. NULL entries (and `merge()` results that resolve to
 # a NULL subject — an optional handler the caller didn't supply) are dropped,
 # so wrappers can forward optional handlers declaratively. `dom_opts` is
 # illegal on a widget event (it is delivered via `sendEvent()`, not a DOM
@@ -21,10 +21,10 @@ normalize_widget_events <- function(events) {
   for (key in nms) {
     val <- events[[key]]
     if (!is.function(val) && !inherits(val, "irid_wire")) {
-      stop("`events$", key, "` must be a function or an `irid_wire`; got ",
+      stop("`events$", key, "` must be a function or a `wire`; got ",
            paste(class(val), collapse = "/"), call. = FALSE)
     }
-    w <- as_irid_wire(val)
+    w <- as_wire(val)
     if (!is.null(w$dom_opts)) {
       stop("`dom_opts` is not allowed on the widget event `", key,
            "`: `prevent_default` and friends need a DOM listener, but a ",
@@ -57,15 +57,15 @@ normalize_widget_events <- function(events) {
 #' `setProp`; the snap-back machinery is latent until it does. A non-callable
 #' prop rides in the init message as a constant and is never re-sent.
 #'
-#' Wrap a prop in [irid_wire()] only to **tune** its round-trip timing
-#' (`content = irid_wire(content, irid_debounce(200))`) — never to enable or
+#' Wrap a prop in [wire()] only to **tune** its round-trip timing
+#' (`content = wire(content, wire_debounce(200))`) — never to enable or
 #' disable two-way. To react to a prop's change, observe the bound reactive
 #' or pass a `reactiveProxy`; a bound prop is not *also* handled.
 #'
 #' `events` carries genuine notifications the widget emits that correspond to
 #' no prop (e.g. `cursor-changed`). Keys are the wire event names the widget
 #' JS passes to `sendEvent()` (lowercase kebab-case by web `CustomEvent`
-#' convention). Each value is a handler or an [irid_wire()] (to tune timing);
+#' convention). Each value is a handler or a [wire()] (to tune timing);
 #' `NULL` entries are dropped so optional handlers forward declaratively.
 #' `dom_opts` is illegal on a widget event.
 #'
@@ -75,16 +75,16 @@ normalize_widget_events <- function(events) {
 #' @param props Named list of props. Callable values are two-way-capable
 #'   bindings; non-callable values are init-only constants. `NULL` entries
 #'   are forwarded to JS as `null` (not dropped). Wrap a value in
-#'   [irid_wire()] to tune its write-back timing.
+#'   [wire()] to tune its write-back timing.
 #' @param events Named list of notifications (client → server), keyed by wire
-#'   event name. Each value is a handler, an [irid_wire()], or `NULL`
+#'   event name. Each value is a handler, a [wire()], or `NULL`
 #'   (dropped). `dom_opts` is not allowed.
 #' @param deps Optional `html_dependency` or list of them. Required for
 #'   any widget whose JS isn't already loaded by some other means.
 #' @param container Optional `shiny.tag` for the wrapper element.
 #'   Defaults to `tags$div()`. irid sets `id` and `data-irid-widget`
 #'   automatically. Configure any DOM events on the container by wrapping
-#'   their handlers in [irid_wire()] on the container directly.
+#'   their handlers in [wire()] on the container directly.
 #' @return A irid widget construct with class `irid_widget`.
 #' @export
 IridWidget <- function(

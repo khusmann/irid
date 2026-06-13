@@ -25,9 +25,9 @@ Thermometer <- function(label, value, min, max) {
       tags$input(
         type = "range", min = min, max = max,
         style = "appearance: slider-vertical; height: 200px; width: 30px;",
-        value = irid_wire(
+        value = wire(
           reactiveProxy(get = value, set = \(v) value(as.numeric(v))),
-          irid_throttle(100)
+          wire_throttle(100)
         )
       ),
       tags$small(class = "text-muted", min)
