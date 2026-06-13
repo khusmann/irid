@@ -346,10 +346,16 @@ On first render, non-`NULL` named args are merged into the plotly spec before se
 ## 5. User State vs Spec-Computed State
 
 > **Empirically grounded.** The behavior in this section and the snap-back path
-> in §6 were verified against **Plotly 2.35.2** with the throwaway harness in
+> in §6 were verified against **Plotly 2.35.2** *and* re-confirmed against
+> **Plotly 2.25.2 — the version `{plotly}` 4.12.0 actually bundles** — with the
+> throwaway harness in
 > [`dev/spikes/plotly-uirevision-spike.html`](spikes/plotly-uirevision-spike.html)
-> (questions Q1–Q4). These are exactly the internals that drift between plotly
-> major versions, so re-run the spike when bumping the pinned `{plotly}`.
+> (questions Q1–Q4; the
+> [`-2.25.html`](spikes/plotly-uirevision-spike-2.25.html) copy loads the bundled
+> file). Q1–Q4 returned **identical verdicts on both versions**, so these
+> internals are stable across the 2.25–2.35 range. They are nonetheless exactly
+> the internals that drift between plotly major versions, so re-run the spike when
+> bumping the pinned `{plotly}`.
 
 ### `Plotly.react()` is silent — there is no auto-fit echo to suppress
 
@@ -448,7 +454,7 @@ PlotlyOutput <- function(
   # The spec is always a function; wrap it as a callable prop that serializes
   # to plotly's JSON spec each time its deps change. Like every callable prop
   # it is two-way-capable, but the client never writes the spec back.
-  spec_prop <- function() to_plotly_spec(spec())
+  spec_prop <- function() to_plotly_spec(spec())   # returns a JSON *string* (see below)
 
   IridWidget(
     name  = "plotly",
@@ -489,6 +495,42 @@ What's relying on what in `IridWidget`:
 - **Named state args are two-way props.** Each arg in `...` flows straight into `IridWidget`'s `props`, where per-key `is.function()` dispatch makes a `reactiveVal` (or any callable) a two-way binding and a constant (including `NULL`) an init-only value. Because props are two-way by construction, the wrapper writes *nothing* to get write-back and snap-back — the JS side's `setProp(name, value)` drives the bound callable, and a rejecting `reactiveProxy` snaps the plot back through the per-binding force-send (see below).
 - **`spec` is always a callable prop.** Because the user always passes a function, the spec rides as a binding: `isolate(spec_prop())` seeds the init message, and re-evaluations arrive on the JS side inside the coalesced `update(values)` batch as `values.spec` — folded into the same `Plotly.react()` as any state props that changed in the same flush.
 - **The translation table (§7) lives on the R side** only as the wrapper's reference for validating unknown names at construction time. The JS side keeps its own mirror for two jobs: looking up the spec path when merging, and routing each source-event field to the right `setProp(name, …)`. The wire never carries the table itself.
+
+### Spec serialization — pre-encode with plotly's own `to_JSON`, ship a string
+
+> **Empirically grounded.** Verified against `{plotly}` 4.12.0 with the throwaway
+> harness in [`dev/spikes/plotly-serialize-spike.R`](spikes/plotly-serialize-spike.R).
+
+`to_plotly_spec()` does **not** hand the substrate a raw R list of the spec; it
+returns a **JSON string** that the JS side `JSON.parse`s. The recipe:
+
+```r
+to_plotly_spec <- function(p) {
+  b <- plotly::plotly_build(p)              # works for plot_ly() AND ggplotly() — identical structure
+  plotly:::to_JSON(list(data = b$x$data, layout = b$x$layout, config = b$x$config))
+}
+```
+
+Why a string, not a list: a prop value is serialized by the **substrate's**
+encoder (`shiny:::toJSON`, via `sendCustomMessage`), not plotly's. The two are
+*nearly* identical in practice — Shiny defaults to `digits = 16, use_signif,
+auto_unbox, na = "null"`, so coordinate precision survives (the spike's first
+"4-digit truncation" scare was an artifact of raw `jsonlite` defaults, which
+Shiny overrides). But pre-encoding with plotly's own `to_JSON` **decouples plot
+fidelity from Shiny's JSON option defaults** (a user's `options(shiny.json.*)`,
+Shiny-version drift) and reproduces *exactly* what the `{plotly}` htmlwidget
+itself ships. The string round-trips through the substrate byte-for-byte (spike
+Q2). The **state props** (ranges, dragmode, `selected_points`) stay ordinary
+values — they are simple scalars/vectors the substrate encoder handles cleanly,
+so only `spec` is pre-stringified. JS side: `var m = JSON.parse(props.spec)` then
+`Plotly.react(el, m.data, m.layout, m.config)`.
+
+`plotly_dependency()` is the five html dependencies `plotly_build()` attaches
+(`typedarray`, `jquery`, `crosstalk`, `plotly-htmlwidgets-css`, `plotly-main`),
+grabbed once from a built throwaway plot. All five carry `package` + `src$file`,
+which is exactly what the substrate's `register_widget_dep` resolves. Note the
+bundled **plotly.js is 2.25.2** (not the 2.35.2 a casual CDN pull gives); the §5
+behavioral spike was re-confirmed on 2.25.2 for this reason.
 
 ### Source events route to props, not R-side handlers
 
@@ -805,9 +847,13 @@ The table grows additively. Adding a new entry doesn't break any existing code �
 
 ## 9. Open Questions
 
-### Resolved by the spike (Plotly 2.35.2)
+### Resolved by the spike (Plotly 2.35.2, re-confirmed on the bundled 2.25.2)
 
-These were open; [`dev/spikes/plotly-uirevision-spike.html`](spikes/plotly-uirevision-spike.html) settled them. Re-confirm on a `{plotly}` bump.
+These were open; [`dev/spikes/plotly-uirevision-spike.html`](spikes/plotly-uirevision-spike.html)
+settled them, and the
+[`-2.25.html`](spikes/plotly-uirevision-spike-2.25.html) copy returned identical
+verdicts on the version `{plotly}` 4.12.0 actually bundles. Re-confirm on a
+`{plotly}` bump.
 
 - **Distinguishing user zoom from spec-computed state — moot.** `Plotly.react()` emits *no* `plotly_relayout` (Q1/Q2), so there is no auto-fit echo to filter. The only non-user relayout is the synchronous echo from our *own* targeted `Plotly.relayout()`/`restyle()` (Q4), guarded by the `applying` flag (§5). The earlier user-vs-react timing heuristic is gone.
 - **Snap-back must be targeted, and it works.** A re-`react()` with the unchanged old value does *not* revert a user zoom under `uirevision` (Q2d); a direct `Plotly.relayout()` does. Its echo is swallowed by `applying`, and the same-flush coalescing means a real apply redraws once.
