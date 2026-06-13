@@ -29,9 +29,12 @@ hist(
 ```
 
 - `R/utils.R` holds small base-R list helpers (`compact`, `every`, ...) for
-  predicate-filtering patterns that read worse in base R. Only helpers with a
-  real call site live there — if you need `keep`/`discard`/`some`/etc., add it
-  to `utils.R` when the use site appears rather than reaching for purrr.
+  predicate-filtering patterns that read worse in base R. Each one matches its
+  same-named purrr function's behaviour (so the name is honest, not a
+  look-alike) but takes a plain `\(x) ...` predicate, not purrr's `~` formula.
+  Only helpers with a real call site live there — if you need
+  `keep`/`discard`/`some`/etc., add it to `utils.R` (matching purrr semantics)
+  when the use site appears, rather than depending on purrr.
 
 ## Build
 

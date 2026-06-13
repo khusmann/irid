@@ -1,15 +1,21 @@
-# Small internal list helpers for the predicate-filtering patterns that
-# read worse in base R (boolean-index tricks, `Filter()`, intermediate
-# logical vectors). Predicates are plain `\(x) ...` functions returning a
-# length-1 logical. Only the helpers with real call sites live here — add
-# more (keep/discard/some/...) when a use site actually appears.
+# Small internal list helpers for the predicate-filtering patterns that read
+# worse in base R (boolean-index tricks, `Filter()`, intermediate logical
+# vectors). Behaviour matches the same-named purrr functions so the names
+# don't mislead — they're honest, drop-in-compatible reimplementations, not
+# look-alikes. Predicates are plain `\(x) ...` functions (no purrr `~`
+# formula shorthand). Only helpers with a real call site live here — add more
+# (keep/discard/some/...) when a use site appears, matching purrr semantics.
 
-# Drop `NULL` elements, preserving names.
+# Drop zero-length elements (`NULL`, `character(0)`, ...), preserving names.
+# Matches `purrr::compact()`.
 compact <- function(x) {
-  x[!vapply(x, is.null, logical(1L))]
+  x[as.logical(lengths(x))]
 }
 
-# TRUE if `p` holds for every element (vacuously TRUE for an empty `x`).
+# TRUE if `p` holds for every element (vacuously TRUE for empty `x`).
+# Matches `purrr::every()`: NA / non-`TRUE` predicate results count as FALSE,
+# and it short-circuits on the first non-`TRUE`.
 every <- function(x, p) {
-  all(vapply(x, p, logical(1L)))
+  for (el in x) if (!isTRUE(p(el))) return(FALSE)
+  TRUE
 }
