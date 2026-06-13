@@ -1,7 +1,7 @@
 # Internal argument checks.
 #
 # rlang 1.2.0 exports `check_bool()`, `check_string()`, and the
-# `check_number_*()` family, so we call those directly as `rlang::check_*`.
+# `check_number_*()` family, which we import and call unqualified.
 # `check_function()` is the one we need that rlang keeps standalone-only
 # (unexported), so we provide a minimal equivalent here. It mirrors the
 # rlang `check_*` contract — `allow_null`, lazy `arg`/`call` defaults — and
@@ -13,7 +13,7 @@ check_function <- function(x,
                            arg = rlang::caller_arg(x),
                            call = rlang::caller_env()) {
   if (!missing(x)) {
-    if (rlang::is_function(x)) return(invisible(NULL))
+    if (is_function(x)) return(invisible(NULL))
     if (allow_null && is.null(x)) return(invisible(NULL))
   }
   msg <- if (allow_null) {
