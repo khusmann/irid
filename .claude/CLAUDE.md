@@ -28,6 +28,11 @@ hist(
 )
 ```
 
+- `R/utils.R` holds small base-R list helpers (`compact`, `every`, ...) for
+  predicate-filtering patterns that read worse in base R. Only helpers with a
+  real call site live there — if you need `keep`/`discard`/`some`/etc., add it
+  to `utils.R` when the use site appears rather than reaching for purrr.
+
 ## Build
 
 - Run `devtools::document()` after changing exports or roxygen comments
