@@ -170,15 +170,15 @@ onClick = \() count(count() + 1)                    # neither
 ```
 
 Event timing, backpressure, and `event.preventDefault()` ride the **slot**
-they configure. Wrap a handler (or a bound reactive) in `irid_wire()` to
-attach a timing shape — `irid_immediate()`, `irid_debounce(ms)`, or
-`irid_throttle(ms)` — and DOM listener options via `irid_dom_opts()`:
+they configure. Wrap a handler (or a bound reactive) in `wire()` to
+attach a timing shape — `wire_immediate()`, `wire_debounce(ms)`, or
+`wire_throttle(ms)` — and DOM listener options via `wire_dom_opts()`:
 
 ```r
-tags$input(value = irid_wire(field, irid_debounce(500)))
-tags$button("Save", onClick = irid_wire(\() save(), irid_throttle(1000)))
-tags$form(onSubmit = irid_wire(\(e) handle(e),
-                               dom_opts = irid_dom_opts(prevent_default = TRUE)))
+tags$input(value = wire(field, wire_debounce(500)))
+tags$button("Save", onClick = wire(\() save(), wire_throttle(1000)))
+tags$form(onSubmit = wire(\(e) handle(e),
+                               dom_opts = wire_dom_opts(prevent_default = TRUE)))
 ```
 
 Each event is configured exactly once, on its own slot — there are no
@@ -186,25 +186,25 @@ element-level lists to keep in sync:
 
 ```r
 tags$input(
-  value = irid_wire(field, irid_debounce(500)),
+  value = wire(field, wire_debounce(500)),
   onKeyDown = \(e) if (e$key == "Enter") submit()
 )
 
 tags$form(
-  onSubmit = irid_wire(\() submit(),
-                       dom_opts = irid_dom_opts(prevent_default = TRUE)),
+  onSubmit = wire(\() submit(),
+                       dom_opts = wire_dom_opts(prevent_default = TRUE)),
   onClick = \(e) handle_click(e)
 )
 ```
 
-A bare handler (`onClick = \() …`) is sugar for `irid_wire(\() …)` with the
+A bare handler (`onClick = \() …`) is sugar for `wire(\() …)` with the
 default config. When a wire carries no `timing`, irid applies a per-event
 default keyed on the DOM event name: `input` events default to
-`irid_debounce(200)` (typing floods the wire with intermediate values),
-every other event to `irid_immediate()`. `coalesce` (gate on server idle)
-is universal, so it lives on the carrier — `irid_wire(field,
-irid_debounce(500), coalesce = FALSE)` — and defaults to `TRUE` for
-rate-limited shapes, `FALSE` for `irid_immediate()`.
+`wire_debounce(200)` (typing floods the wire with intermediate values),
+every other event to `wire_immediate()`. `coalesce` (gate on server idle)
+is universal, so it lives on the carrier — `wire(field,
+wire_debounce(500), coalesce = FALSE)` — and defaults to `TRUE` for
+rate-limited shapes, `FALSE` for `wire_immediate()`.
 
 ## Controlled inputs
 

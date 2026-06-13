@@ -41,11 +41,11 @@ reference:
   - title: Wiring
     desc: Configure per-slot dispatch and two-way widget props
     contents:
-      - irid_wire
-      - irid_immediate
-      - irid_throttle
-      - irid_debounce
-      - irid_dom_opts
+      - wire
+      - wire_immediate
+      - wire_throttle
+      - wire_debounce
+      - wire_dom_opts
 
   - title: Widgets
     desc: Build custom irid widgets

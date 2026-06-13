@@ -6,8 +6,8 @@
 R/
   app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Match/Case/Default, Output
-  event.R         irid_wire carrier; irid_immediate/throttle/debounce timing
-                  shapes; irid_dom_opts; merge.irid_wire
+  event.R         wire carrier; wire_immediate/throttle/debounce timing
+                  shapes; wire_dom_opts; merge.irid_wire
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
@@ -59,7 +59,7 @@ Walks the tag tree recursively and produces:
   attributes are replaced by stable auto-generated element IDs. Control-flow
   nodes become a pair of HTML **comment anchors**
   (`<!--irid:s:ID--><!--irid:e:ID-->`) that mark the range where content
-  should be inserted. Per-slot config carried by `irid_wire` (timing,
+  should be inserted. Per-slot config carried by `wire` (timing,
   coalesce, DOM listener options) is consumed during the walk and never
   reaches HTML serialization. Widget nodes become their container element
   with `id` and `data-irid-widget="<name>"` attributes attached.
@@ -87,7 +87,7 @@ Walks the tag tree recursively and produces:
   `irid_ev_{id}_{event}`); DOM-event rows omit `kind`. A given DOM event is
   claimed by **at most one** of {value-binding autobind, explicit `on*`} —
   there is no merge (see the one-channel rule below). `handler` is `NULL` for
-  a config-only event (an `irid_wire` with `dom_opts` but no subject) — the
+  a config-only event (an `wire` with `dom_opts` but no subject) — the
   client attaches a listener for the DOM flags but never round-trips.
 - **`control_flows`** — List of `{type, id, ...}` for each `When`, `Each`,
   or `Match` node.
@@ -118,21 +118,21 @@ runs on write; async reactions observe the bound reactive. This deletes the
 old autobind↔explicit merge, its ordering rule, and the two-timings
 collision.
 
-**Per-slot config (`irid_wire`).** Timing, backpressure, and DOM listener
+**Per-slot config (`wire`).** Timing, backpressure, and DOM listener
 options ride the slot they configure. A bare callable (`onClick = \() …`,
-`value = rv`) is sugar for `irid_wire(callable)` with default config;
-`irid_wire(subject, timing, coalesce, dom_opts)` tunes it. The timing shapes
-(`irid_immediate()`, `irid_throttle(ms, leading)`, `irid_debounce(ms)`) are
+`value = rv`) is sugar for `wire(callable)` with default config;
+`wire(subject, timing, coalesce, dom_opts)` tunes it. The timing shapes
+(`wire_immediate()`, `wire_throttle(ms, leading)`, `wire_debounce(ms)`) are
 pure — they carry only mode-specific fields. `coalesce` is universal so it
 lives on the carrier; when `NULL` it derives from the mode (`immediate →
 FALSE`, rate-limited → `TRUE`). When a wire carries no `timing`, the
 per-event default applies, keyed on the DOM event name: `input` →
-`irid_debounce(200)`, the high-frequency continuous streams (`mousemove`,
+`wire_debounce(200)`, the high-frequency continuous streams (`mousemove`,
 `pointermove`, `touchmove`, `drag`, `dragover`, `scroll`, `wheel`,
-`resize`) → `irid_throttle(100)` (whose derived `coalesce = TRUE` gates the
-stream on server-idle), everything else → `irid_immediate()`. DOM listener
+`resize`) → `wire_throttle(100)` (whose derived `coalesce = TRUE` gates the
+stream on server-idle), everything else → `wire_immediate()`. DOM listener
 flags (`prevent_default`, `stop_propagation`, `capture`, `passive`) bundle
-into `irid_dom_opts()` inside the wire; each defaults to `FALSE`.
+into `wire_dom_opts()` inside the wire; each defaults to `FALSE`.
 
 The tag tree is now plain HTML that can be sent to the client. All reactive
 wiring is deferred to mount.
@@ -390,7 +390,7 @@ attaches a DOM event listener on the element — the listener applies the
 `capture` / `passive` options), reads the element's `value` (and other
 event fields), and pushes the payload through the managed-state via
 `Shiny.setInputValue(inputId, payload, {priority: "event"})`. A
-`clientOnly` entry (a config-only `irid_wire` with `dom_opts` but no
+`clientOnly` entry (a config-only `wire` with `dom_opts` but no
 handler) attaches a bare listener that applies the DOM flags and never
 sends — no managed state, no round-trip. If `source = "widget"`, the
 listener-attach step is skipped;
@@ -542,7 +542,7 @@ process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
 Plotly, Leaflet, ...). It expresses one R-side component on top of an
 init/update/destroy contract on the JS side, and reuses every existing
 irid channel — `irid-attr` for one-way prop updates, `irid-events` for
-event payloads, the optimistic-update sequence counter, the `irid_wire`
+event payloads, the optimistic-update sequence counter, the `wire`
 timing config, the stale indicator, the comment-anchor lifecycle. No
 widget-specific code lives in the transport.
 
@@ -566,14 +566,14 @@ firing `irid-attr target="widget"` → the factory's `update` hook on change)
 **and** a synthesized client → server write-back, accepted when the widget
 JS calls `setProp(key, value)`. A non-callable value rides in the init
 message and is never re-sent (init-only library options need no separate
-API — pass a constant, no observer). Wrapping a prop in `irid_wire` only
+API — pass a constant, no observer). Wrapping a prop in `wire` only
 *tunes* its write-back timing; it never enables or disables two-way.
 
 `events` carries genuine notifications that correspond to *no* prop. Keys
 are lowercase kebab-case (web `CustomEvent` convention — `cursor-changed`,
 `relayout`). No `on` prefix because there's no DOM event mediating — the
 widget JS chooses what to fire via `sendEvent()`. Each value is a handler
-or an `irid_wire` (to tune timing); `NULL` (or a `merge()` resolving to a
+or an `wire` (to tune timing); `NULL` (or a `merge()` resolving to a
 subject-less wire) is dropped, so optional handlers forward declaratively.
 
 ### Two-way props: `setProp` + `irid_prop_*`
@@ -757,12 +757,12 @@ returns silently produce unexpected output.
 
 ### Client-side event filtering (planned)
 
-Add a `filter` field to `irid_dom_opts()` that accepts a JS expression
+Add a `filter` field to `wire_dom_opts()` that accepts a JS expression
 string. The expression is evaluated client-side with the DOM event object
 as `e` — if falsy, the event is never sent to the server (zero
 round-trips). This avoids flooding the server with events the handler
 doesn't care about (e.g. `onKeyDown` that only handles Enter). Deferred to
-a follow-up; `irid_dom_opts` is built extensible so adding `filter` is
+a follow-up; `wire_dom_opts` is built extensible so adding `filter` is
 additive.
 
 An `irid_key_filter()` helper would generate the JS expression for common
@@ -771,9 +771,9 @@ key matching:
 ```r
 tags$input(
   value = field,
-  onKeyDown = irid_wire(
+  onKeyDown = wire(
     \(e) submit(),
-    dom_opts = irid_dom_opts(filter = irid_key_filter("Enter"))
+    dom_opts = wire_dom_opts(filter = irid_key_filter("Enter"))
   )
 )
 ```

@@ -16,10 +16,10 @@ Two gaps remain, both about reaching *beyond* that vocabulary:
   own event names, property-only rich values, and no universal autobind
   convention.
 
-Both build on the [events.md](events.md) model (`irid_wire`,
+Both build on the [events.md](events.md) model (`wire`,
 two-way-capable bound props); this doc adds *vocabulary*, not new config
 machinery. (Originally `dom-events-design.md §5`; rescued and re-expressed
-against `irid_wire` when that doc was folded into `events.md`.)
+against `wire` when that doc was folded into `events.md`.)
 
 ---
 
@@ -31,13 +31,13 @@ name," bypassing the strip-`on`/lowercase rule:
 ```r
 tags$div(
   `on:webkit-fullscreen-change` = handler,
-  `on:library:custom.event`     = irid_wire(handler2, irid_debounce(50))
+  `on:library:custom.event`     = wire(handler2, wire_debounce(50))
 )
 ```
 
 Backticks are required for the colon (and any hyphen), which doubles as a
 visual signal that the name is the literal wire form. The slot is an
-ordinary `on*` slot, so it takes a bare handler or an `irid_wire` exactly
+ordinary `on*` slot, so it takes a bare handler or an `wire` exactly
 like any other event.
 
 This is strictly cleaner than the original sketch, which needed a parallel
@@ -80,7 +80,7 @@ baked in. Three concerns:
 Maps each R `on*` arg to the element's real (non-standard) wire event
 name. `onInput = "sl-input"` means an `onInput` arg registers a listener
 for the `sl-input` `CustomEvent`. Handlers still take a bare function or
-an `irid_wire` per `events.md` — including `dom_opts`, since a custom
+an `wire` per `events.md` — including `dom_opts`, since a custom
 element emits real (often cancelable) `CustomEvent`s, so `prevent_default`
 / `stop_propagation` / `capture` apply.
 
@@ -113,7 +113,7 @@ So `custom_tag` is exactly **"DOM autobind, but you declare the triple the
 platform doesn't know."** There is no synthesized `write_back` handler
 (the original framing) — just a declared two-way prop, consistent with
 `events.md §7`. A caller tunes its timing the same way as any bound prop:
-`SlInput(value = irid_wire(my_reactive, irid_debounce(200)))`.
+`SlInput(value = wire(my_reactive, wire_debounce(200)))`.
 
 ---
 

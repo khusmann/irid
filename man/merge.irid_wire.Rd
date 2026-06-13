@@ -2,19 +2,19 @@
 % Please edit documentation in R/event.R
 \name{merge.irid_wire}
 \alias{merge.irid_wire}
-\title{Overlay one \code{irid_wire} over another}
+\title{Overlay one \code{wire} over another}
 \usage{
 \method{merge}{irid_wire}(x, y, ...)
 }
 \arguments{
-\item{x}{The default \code{irid_wire}.}
+\item{x}{The default \code{wire}.}
 
-\item{y}{The override: an \code{irid_wire}, a bare callable, or \code{NULL}.}
+\item{y}{The override: a \code{wire}, a bare callable, or \code{NULL}.}
 
 \item{...}{Unused.}
 }
 \value{
-An \code{irid_wire}.
+A \code{wire}.
 }
 \description{
 Override-wins overlay used where a widget wrapper layers a caller's input

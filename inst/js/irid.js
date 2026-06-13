@@ -457,7 +457,7 @@
     }, { capture: !!msg.capture, passive: !!msg.passive });
   }
 
-  // A config-only event (irid_wire with dom_opts but no handler): apply the
+  // A config-only event (wire with dom_opts but no handler): apply the
   // DOM listener flags client-side and never round-trip to the server.
   function attachClientOnlyListener(el, msg) {
     el.addEventListener(msg.event, function(e) {

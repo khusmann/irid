@@ -12,7 +12,7 @@ static HTML.
 - [ ] Event handler (`onInput`, `onClick`, etc.) is extracted into `$events`
 - [ ] Event name conversion: `onInput` → `input`, `onClick` → `click` (strip `on`, lowercase)
 - [ ] Bare function handlers follow the per-event default rule (`onInput` → debounce(200), everything else → immediate)
-- [ ] `irid_wire(subject, timing, coalesce, dom_opts)` on a slot supplies `mode`, `ms`, `leading`, `coalesce`, and the `dom_opts` flags to that event entry
+- [ ] `wire(subject, timing, coalesce, dom_opts)` on a slot supplies `mode`, `ms`, `leading`, `coalesce`, and the `dom_opts` flags to that event entry
 - [ ] Element with existing `id` attribute keeps it (not overwritten by auto-ID)
 - [ ] Element with both reactive attrs and events shares one ID
 - [ ] Multiple event handlers on one element (e.g. both `onInput` and `onClick`)
@@ -105,14 +105,14 @@ formal argument count, and that event data is properly cleaned.
 
 ## Rate-limiting metadata propagation
 
-Verify that `irid_immediate`, `irid_throttle`, and `irid_debounce` metadata
+Verify that `wire_immediate`, `wire_throttle`, and `wire_debounce` metadata
 (plus the carrier's resolved `coalesce`) is correctly propagated from R to
 the client.
 
-- [ ] `irid_immediate()` sends `mode = "immediate"`; `coalesce` derives to `FALSE`
-- [ ] `irid_throttle()` sends `mode = "throttle"` with `ms`, `leading`; `coalesce` derives to `TRUE`
-- [ ] `irid_debounce()` sends `mode = "debounce"` with `ms`; `coalesce` derives to `TRUE`
-- [ ] An explicit `coalesce =` on `irid_wire` overrides the mode-derived default
+- [ ] `wire_immediate()` sends `mode = "immediate"`; `coalesce` derives to `FALSE`
+- [ ] `wire_throttle()` sends `mode = "throttle"` with `ms`, `leading`; `coalesce` derives to `TRUE`
+- [ ] `wire_debounce()` sends `mode = "debounce"` with `ms`; `coalesce` derives to `TRUE`
+- [ ] An explicit `coalesce =` on `wire` overrides the mode-derived default
 - [ ] `dom_opts$prevent_default = TRUE` is forwarded to the event entry on the client
 - [ ] timing shapes (`irid_*()`) are pure structs (no `coalesce`, no handler argument)
 
@@ -171,25 +171,25 @@ per event (no composition).
 - [ ] `<select>` write-back listens on `change` (the `value` autobind event for selects)
 - [ ] Radio write-back listens on `change`; only fires when `el.checked === true` (gated by `shouldSkip` to defend against deselect-change)
 
-## `irid_wire` per-slot config
+## `wire` per-slot config
 
-Verify that `irid_wire` on a slot configures timing, coalesce, and DOM
+Verify that `wire` on a slot configures timing, coalesce, and DOM
 listener options for that event.
 
-- [ ] A bare handler/reactive equals `irid_wire(callable)` with default config
+- [ ] A bare handler/reactive equals `wire(callable)` with default config
 - [ ] No config props survive to the output HTML attributes
-- [ ] `irid_wire(h, irid_throttle(100))` sets `mode = "throttle"`, `ms = 100`
-- [ ] `irid_wire(h, dom_opts = irid_dom_opts(prevent_default = TRUE))` with no
+- [ ] `wire(h, wire_throttle(100))` sets `mode = "throttle"`, `ms = 100`
+- [ ] `wire(h, dom_opts = wire_dom_opts(prevent_default = TRUE))` with no
       `timing` keeps the per-event default (no clobber)
-- [ ] `irid_dom_opts` flags (`prevent_default`/`stop_propagation`/`capture`/
+- [ ] `wire_dom_opts` flags (`prevent_default`/`stop_propagation`/`capture`/
       `passive`) land on the event row and are applied client-side
-- [ ] `irid_wire(dom_opts = ...)` with no handler is client-only: a listener
+- [ ] `wire(dom_opts = ...)` with no handler is client-only: a listener
       applies the flags, `clientOnly = TRUE`, no round-trip
-- [ ] Without a `timing`, `input` events default to `irid_debounce(200)`;
-      every other event to `irid_immediate()`
-- [ ] `irid_wire(rv, irid_immediate())` on a text input overrides the 200ms default
+- [ ] Without a `timing`, `input` events default to `wire_debounce(200)`;
+      every other event to `wire_immediate()`
+- [ ] `wire(rv, wire_immediate())` on a text input overrides the 200ms default
 - [ ] `dom_opts` is per-slot, not broadcast across the element's other events
-- [ ] A bare timing shape, `irid_dom_opts`, or `irid_wire` in the wrong slot
+- [ ] A bare timing shape, `wire_dom_opts`, or `wire` in the wrong slot
       errors at process time with a tailored hint
 
 ## `iridApp` rendering
@@ -270,7 +270,7 @@ Verify the sequence-based optimistic update system for controlled inputs.
 - [ ] With throttle (`leading = TRUE`): first event fires immediately, subsequent
       events are gated by both the throttle timer and server idle
 - [ ] With debounce: events are held until the user pauses, then gated by server idle
-- [ ] With `coalesce = FALSE` (default for `irid_immediate`): events fire on
+- [ ] With `coalesce = FALSE` (default for `wire_immediate`): events fire on
       every input without waiting for server — events pile up under high latency
 - [ ] Multiple events in one flush: later sequence overwrites earlier on
       `session$userData$irid_current_sequence`, so all bindings in that flush

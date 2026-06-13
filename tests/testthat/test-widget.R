@@ -50,11 +50,11 @@ test_that("IridWidget errors on malformed props/events", {
   )
   expect_error(
     IridWidget("w", events = list(change = 42)),
-    "must be a function or an `irid_wire`"
+    "must be a function or a `wire`"
   )
 })
 
-test_that("IridWidget accepts a bare function or an irid_wire as an event", {
+test_that("IridWidget accepts a bare function or a wire as an event", {
   h <- function(e) NULL
   w1 <- IridWidget("w", events = list(change = h))
   expect_length(w1$events, 1L)
@@ -62,7 +62,7 @@ test_that("IridWidget accepts a bare function or an irid_wire as an event", {
   expect_identical(w1$events$change$subject, h)
 
   w2 <- IridWidget("w", events = list(
-    change = irid_wire(h, irid_throttle(50))
+    change = wire(h, wire_throttle(50))
   ))
   expect_equal(w2$events$change$timing$mode, "throttle")
 })
@@ -70,8 +70,8 @@ test_that("IridWidget accepts a bare function or an irid_wire as an event", {
 test_that("IridWidget errors on dom_opts on a widget event", {
   expect_error(
     IridWidget("w", events = list(
-      change = irid_wire(function(e) NULL,
-                         dom_opts = irid_dom_opts(prevent_default = TRUE))
+      change = wire(function(e) NULL,
+                         dom_opts = wire_dom_opts(prevent_default = TRUE))
     )),
     "`dom_opts` is not allowed on the widget event"
   )
@@ -98,7 +98,7 @@ test_that("NULL / subject-less event entries are dropped", {
   w <- IridWidget("w", events = list(
     change          = h,
     `cursor-changed` = NULL,
-    blur            = merge(irid_wire(timing = irid_throttle(100)), NULL)
+    blur            = merge(wire(timing = wire_throttle(100)), NULL)
   ))
   expect_length(w$events, 1L)
   expect_named(w$events, "change")
@@ -164,10 +164,10 @@ test_that("read-only prop write-back is a no-op but still declares its target", 
   expect_equal(pe$write_targets, "content")       # snap-back via force-send
 })
 
-test_that("irid_wire tunes a prop's write-back timing (no enable/disable)", {
+test_that("wire tunes a prop's write-back timing (no enable/disable)", {
   rv <- shiny::reactiveVal("")
   out <- process_tags(IridWidget("w", props = list(
-    content = irid_wire(rv, irid_debounce(200))
+    content = wire(rv, wire_debounce(200))
   )))
   # still a binding + prop_fns (two-way unchanged)
   binding_for(out, "widget", "content")
@@ -181,7 +181,7 @@ test_that("dom_opts on a widget prop errors (prop is not DOM-backed)", {
   rv <- shiny::reactiveVal("")
   expect_error(
     process_tags(IridWidget("w", props = list(
-      content = irid_wire(rv, dom_opts = irid_dom_opts(prevent_default = TRUE))
+      content = wire(rv, dom_opts = wire_dom_opts(prevent_default = TRUE))
     ))),
     "`dom_opts` is not allowed on the widget prop"
   )
@@ -227,7 +227,7 @@ test_that("hand-rolled event handlers declare no write_targets", {
   expect_null(event_row(out, "event", "cursor-changed")$write_targets)
 })
 
-test_that("widget event default timing is irid_immediate()", {
+test_that("widget event default timing is wire_immediate()", {
   h <- function(e) NULL
   w <- IridWidget("w", events = list(
     `cursor-changed` = h,
@@ -238,11 +238,11 @@ test_that("widget event default timing is irid_immediate()", {
   for (ev in out$events) expect_equal(ev$mode, "immediate", info = ev$event)
 })
 
-test_that("irid_wire timing lands on the emitted event row", {
+test_that("wire timing lands on the emitted event row", {
   h <- function(e) NULL
   w <- IridWidget("w", events = list(
-    `cursor-changed` = irid_wire(h, irid_throttle(100)),
-    blur             = irid_wire(h, irid_debounce(200))
+    `cursor-changed` = wire(h, wire_throttle(100)),
+    blur             = wire(h, wire_debounce(200))
   ))
   out <- process_tags(w)
   cc <- event_row(out, "event", "cursor-changed")

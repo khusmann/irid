@@ -171,10 +171,10 @@ CodeMirror <- function(
       # `content` is two-way: the editor pushes edits via setProp("content").
       # `merge` layers the caller's reactive over a wrapper default timing,
       # so a caller can still override the debounce.
-      content  = merge(irid_wire(timing = irid_debounce(200)), content),
+      content  = merge(wire(timing = wire_debounce(200)), content),
       # `cursor` is two-way: the editor pushes selection moves via
       # setProp("cursor"), and a server write repositions the editor.
-      cursor   = merge(irid_wire(timing = irid_throttle(100)), cursor),
+      cursor   = merge(wire(timing = wire_throttle(100)), cursor),
       language = language,   # two-way-capable, but one-way in practice
       theme    = theme
     ),
@@ -182,7 +182,7 @@ CodeMirror <- function(
       # A genuine notification (no corresponding prop). Optional — when
       # `onFocusChanged` is NULL the merge resolves to a subject-less wire
       # and IridWidget drops the entry.
-      `focus-changed` = merge(irid_wire(timing = irid_immediate()),
+      `focus-changed` = merge(wire(timing = wire_immediate()),
                               onFocusChanged)
     ),
     deps   = CodeMirrorDeps(),

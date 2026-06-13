@@ -1,9 +1,20 @@
-# Events & bindings — `irid_wire`
+# Events & bindings — `wire`
 
 **Status:** Implemented — tag side (§1–6) and the widget rework (§7) have
 landed; see §8 *Open* for the deferred follow-ups. (Supersedes
 `dom-events-design.md` and `listener-opts-design.md`.)
 **Date:** June 2026
+
+> **Update (June 2026): the carrier was renamed `irid_wire` → `wire`.**
+> The timing shapes became `wire_immediate()` / `wire_throttle()` /
+> `wire_debounce()`, and `irid_dom_opts()` became `wire_dom_opts()`. The S3
+> classes `irid_wire` and `irid_dom_opts` were retained (collision-safe S3
+> dispatch; `merge.irid_wire` is unchanged), and the timing class
+> `irid_timing` became `irid_wire_timing`. This reverses the prefix decision
+> recorded in the *Naming* section below (`irid_` config-family prefix →
+> `wire_` family prefix); that section is kept as the original rationale.
+> Everywhere below, read `irid_wire` as `wire`, `irid_debounce` as
+> `wire_debounce`, etc.
 
 A single per-slot config carrier, `irid_wire`, replaces the family of
 element-level keyed lists (`.event`, `.timing`, `.listener`,

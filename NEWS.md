@@ -3,14 +3,14 @@
 ## Breaking changes
 
 * Event and binding dispatch config now rides the slot it configures via a
-  single carrier, `irid_wire(subject, timing, coalesce, dom_opts)`. The
+  single carrier, `wire(subject, timing, coalesce, dom_opts)`. The
   element-level `.event` and `.prevent_default` props are removed, along
   with `event_immediate()` / `event_throttle()` / `event_debounce()` —
-  replaced by the pure timing shapes `irid_immediate()` /
-  `irid_throttle(ms, leading)` / `irid_debounce(ms)` (with `coalesce`
-  hoisted onto `irid_wire`) and `irid_dom_opts(prevent_default,
+  replaced by the pure timing shapes `wire_immediate()` /
+  `wire_throttle(ms, leading)` / `wire_debounce(ms)` (with `coalesce`
+  hoisted onto `wire`) and `wire_dom_opts(prevent_default,
   stop_propagation, capture, passive)`. A bare handler/reactive in a slot
-  still works as sugar for `irid_wire(callable)`.
+  still works as sugar for `wire(callable)`.
 * A DOM event is now bound *or* handled, never both. Combining a
   `value`/`checked` binding with an explicit `on*` handler for the same
   event (e.g. `value = rv, onInput = ...`) is an error; use
