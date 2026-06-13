@@ -127,7 +127,10 @@ pure — they carry only mode-specific fields. `coalesce` is universal so it
 lives on the carrier; when `NULL` it derives from the mode (`immediate →
 FALSE`, rate-limited → `TRUE`). When a wire carries no `timing`, the
 per-event default applies, keyed on the DOM event name: `input` →
-`irid_debounce(200)`, everything else → `irid_immediate()`. DOM listener
+`irid_debounce(200)`, the high-frequency continuous streams (`mousemove`,
+`pointermove`, `touchmove`, `drag`, `dragover`, `scroll`, `wheel`,
+`resize`) → `irid_throttle(100)` (whose derived `coalesce = TRUE` gates the
+stream on server-idle), everything else → `irid_immediate()`. DOM listener
 flags (`prevent_default`, `stop_propagation`, `capture`, `passive`) bundle
 into `irid_dom_opts()` inside the wire; each defaults to `FALSE`.
 

@@ -24,7 +24,12 @@
 #'
 #' When a wire carries no `timing`, irid applies a per-event default keyed on
 #' the DOM event name: `input` → `irid_debounce(200)` (typing produces a
-#' flood of intermediate values), every other event → `irid_immediate()`.
+#' flood of intermediate values); the high-frequency continuous streams
+#' (`mousemove`, `pointermove`, `touchmove`, `drag`, `dragover`, `scroll`,
+#' `wheel`, `resize`) → `irid_throttle(100)` (paced "latest position"
+#' stream, with the derived `coalesce = TRUE` keeping it from outrunning the
+#' server); every other event → `irid_immediate()`. Explicit `timing` always
+#' wins over the default.
 #'
 #' @section Backpressure (`coalesce`):
 #' `coalesce` is universal across timing modes, so it lives on the carrier,

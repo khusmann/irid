@@ -78,7 +78,12 @@ before firing.
 
 When a wire carries no \code{timing}, irid applies a per-event default keyed on
 the DOM event name: \code{input} → \code{irid_debounce(200)} (typing produces a
-flood of intermediate values), every other event → \code{irid_immediate()}.
+flood of intermediate values); the high-frequency continuous streams
+(\code{mousemove}, \code{pointermove}, \code{touchmove}, \code{drag}, \code{dragover}, \code{scroll},
+\code{wheel}, \code{resize}) → \code{irid_throttle(100)} (paced "latest position"
+stream, with the derived \code{coalesce = TRUE} keeping it from outrunning the
+server); every other event → \code{irid_immediate()}. Explicit \code{timing} always
+wins over the default.
 }
 
 \section{Backpressure (\code{coalesce})}{
