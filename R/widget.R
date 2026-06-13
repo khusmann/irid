@@ -12,7 +12,7 @@ normalize_widget_events <- function(events) {
       "x" = "You supplied {.obj_type_friendly {events}}."
     ))
   }
-  events <- events[!vapply(events, is.null, logical(1L))]
+  events <- compact(events)
   if (length(events) == 0L) return(list())
   nms <- names(events)
   if (is.null(nms) || any(!nzchar(nms))) {
@@ -117,8 +117,7 @@ IridWidget <- function(
     if (inherits(deps, "html_dependency")) {
       deps <- list(deps)
     } else if (is.list(deps)) {
-      ok <- vapply(deps, inherits, logical(1L), "html_dependency")
-      if (!all(ok)) {
+      if (!every(deps, \(d) inherits(d, "html_dependency"))) {
         cli::cli_abort("{.arg deps} must be an {.cls html_dependency} or a list of them.")
       }
     } else {
