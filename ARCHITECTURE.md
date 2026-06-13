@@ -155,6 +155,44 @@ Takes the output of `process_tags` and a Shiny `session`, then wires up:
 Returns a mount handle with `$tag` (the processed HTML) and `$destroy()` (tears
 down all observers).
 
+## Reactive State: `reactiveStore`
+
+`reactiveStore` (see `store.R`) is the hierarchical state container. Its
+construction/read/write API is documented in the `reactiveStore` roxygen;
+the architectural model is:
+
+**Leaves are the source of truth; branches are stateless.** A bare named
+list (length > 0) becomes a navigable branch node; everything else becomes a
+plain `reactiveVal` leaf. Every node is callable (`node()` reads,
+`node(value)` writes), but the distinction is internal:
+
+- **Leaves** hold a `reactiveVal`. Reads and writes go through it directly.
+- **Branches** are plain functions with no state of their own. A branch
+  *read* calls each child and assembles the result — callers subscribe
+  directly to the leaf `reactiveVal`s they touch, never to the branch. A
+  branch *write* validates the incoming keys (unknown or missing keys both
+  error — branch writes replace) and fans out synchronously to each child's
+  write, recursing until every affected leaf `reactiveVal` is set.
+
+```
+Write branch → fans out to children → fans out to leaves (reactiveVal)
+Read leaf    → reactiveVal
+Read branch  → calls children → subscribes to their reactiveVals
+```
+
+**Why there is no circular invalidation:** a branch owns no state, so a
+branch write touches only leaves — it never invalidates the branch's own
+read path. Leaf `reactiveVal` identity is stable across branch writes
+(leaves are written, never replaced), so a captured leaf reference
+(`name <- state$user$name`) stays valid. This is the same acyclic
+leaf-owns-state model that `make_mini_store` projects per-item for `Each`
+and per-case for `Match`.
+
+Branches also satisfy the standard R introspection generics (`names`,
+`length`, `print`, `str`) and integer `[[`, so `lapply`/`purrr::imap`
+iterate a branch directly, yielding child node callables (not resolved
+values) so auto-bind works unchanged.
+
 ## Control Flow Lifecycle
 
 **When** and **Match** each manage a single `current_mount` — a mount handle
@@ -246,6 +284,14 @@ continuously), the leaked leaves accumulate and grow session memory. The
 leak is bounded per-session — it resets when the session ends — but apps in
 that shape should monitor session lifetime until shiny#4372 lands and the
 subdomain cascade reclaims the leaves.
+
+The same subdomain swap also closes a second gap: **user**-created
+observers. A bare `observe()` / `observeEvent()` written inside a component
+body (e.g. an analytics tick in an `Each` item callback) currently attaches
+to the session domain, not the per-item scope, so it keeps firing after the
+item unmounts. Once `make_scope` evaluates the component body inside
+`session$makeSubdomain()`, those user observers attach to the subdomain and
+are torn down with the item — no irid-specific scoping primitive needed.
 
 ## Comment-Anchor Range Protocol
 
@@ -734,9 +780,11 @@ another in a later flush still produce two messages (delaying delivery
 would fight Shiny's reactive model). For libraries with incremental
 update primitives (CodeMirror's separate `view.dispatch()` calls) the
 distinction is invisible; the win is for atomic-render libraries, where a
-coordinated same-flush multi-write now redraws once. Design rationale and
-non-goals in
-[dev/widget-batched-updates-design.md](dev/widget-batched-updates-design.md).
+coordinated same-flush multi-write now redraws once. Non-goals: cross-flush
+batching (would fight Shiny's flush model), DOM/text-target batching (no
+analogous race — each attribute write is its own concern), and generic
+feedback-loop prevention (wrappers break loops with their library's idioms;
+the stale-echo gate only handles transient sequencing).
 
 ## Remaining Work
 

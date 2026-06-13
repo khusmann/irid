@@ -1,6 +1,7 @@
 # Custom elements & non-standard events
 
-**Status:** Proposed follow-on to [events.md](events.md) — optional, undated
+**Status:** Proposed follow-on to the `wire` events model
+([ARCHITECTURE.md](../ARCHITECTURE.md#two-phase-rendering)) — optional, undated
 **Date:** June 2026
 
 irid maps `on*` handler args to DOM events by stripping `on` and
@@ -16,10 +17,9 @@ Two gaps remain, both about reaching *beyond* that vocabulary:
   own event names, property-only rich values, and no universal autobind
   convention.
 
-Both build on the [events.md](events.md) model (`wire`,
-two-way-capable bound props); this doc adds *vocabulary*, not new config
-machinery. (Originally `dom-events-design.md §5`; rescued and re-expressed
-against `wire` when that doc was folded into `events.md`.)
+Both build on the `wire` events model ([ARCHITECTURE.md](../ARCHITECTURE.md)
+— per-slot `wire` config, two-way-capable bound props); this doc adds
+*vocabulary*, not new config machinery.
 
 ---
 
@@ -42,8 +42,8 @@ like any other event.
 
 This is strictly cleaner than the original sketch, which needed a parallel
 `.timing = list(\`on:…\` = …)` keyed list to configure these — re-spelling
-the verbatim name in a second place. Under `events.md`, config rides the
-slot, so the verbatim name appears exactly once.
+the verbatim name in a second place. Under the `wire` model, config rides
+the slot, so the verbatim name appears exactly once.
 
 `on:` is handler-only — it names an event to listen to. Two-way binding on
 a standard element is the hardcoded `value`/`checked` autobind; *declared*
@@ -80,7 +80,7 @@ baked in. Three concerns:
 Maps each R `on*` arg to the element's real (non-standard) wire event
 name. `onInput = "sl-input"` means an `onInput` arg registers a listener
 for the `sl-input` `CustomEvent`. Handlers still take a bare function or
-an `wire` per `events.md` — including `dom_opts`, since a custom
+an `wire` per the `wire` model — including `dom_opts`, since a custom
 element emits real (often cancelable) `CustomEvent`s, so `prevent_default`
 / `stop_propagation` / `capture` apply.
 
@@ -94,7 +94,7 @@ properties on the client; this extends that set per custom element.)
 
 **Open:** the original sketch also proposed a per-instance `.prop` /
 `.value` dot-prefix for ad-hoc property marking. That conflicts with
-`events.md`'s removal of *all* dot-prefix element props. So per-instance
+the `wire` model's removal of *all* dot-prefix element props. So per-instance
 property marking wants a non-dot mechanism — likely a small wrapper
 (`irid_prop(value)`) rather than a `.`-arg. Left open; the
 element-type-level `properties =` declaration covers the common case.
@@ -103,7 +103,7 @@ element-type-level `properties =` declaration covers the common case.
 
 `bind = c(value = "onInput")` declares the **(prop, event) autobind
 triple** that the platform hardcodes for `<input>`'s `value` ↔
-`input`/`change`. Under `events.md`, `value` becomes a two-way-capable
+`input`/`change`. Under the `wire` model, `value` becomes a two-way-capable
 bound prop: the framework shows the reactive inbound and, on the declared
 event (`onInput` → `sl-input`), reads the element's `value` property and
 writes it back — with the same read-only snap-back and timing semantics as
@@ -112,7 +112,8 @@ DOM autobind.
 So `custom_tag` is exactly **"DOM autobind, but you declare the triple the
 platform doesn't know."** There is no synthesized `write_back` handler
 (the original framing) — just a declared two-way prop, consistent with
-`events.md §7`. A caller tunes its timing the same way as any bound prop:
+the two-way widget props in ARCHITECTURE.md. A caller tunes its timing the
+same way as any bound prop:
 `SlInput(value = wire(my_reactive, wire_debounce(200)))`.
 
 ---
@@ -143,5 +144,5 @@ needs irid-managed init/update/destroy, it's an `IridWidget` instead.
   property on that event. An element exposing it under a different
   property needs a richer declaration (e.g. `bind = list(value =
   list(on = "onInput", prop = "currentValue"))`). Defer until a real case.
-- **Validation** — like `events.md §7`'s widget rework, vet against a real
+- **Validation** — like the two-way widget-prop rework, vet against a real
   Web Component (e.g. a Shoelace input) before locking.

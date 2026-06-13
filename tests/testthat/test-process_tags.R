@@ -147,7 +147,7 @@ test_that("autobind handler reads correct key when prop is not last", {
   expect_true(shiny::isolate(rv_checked()))
 })
 
-# --- One channel per event (events.md §4) ------------------------------------
+# --- One channel per event (ARCHITECTURE.md, "One channel per event") --------
 #
 # A given DOM event is driven by a value binding OR an explicit `on*` handler,
 # never both. The check is per-event, not per-element — a binding and an

@@ -120,7 +120,8 @@ resolve_wire_config <- function(wire, event_name, default_timing = NULL) {
   )
 }
 
-# Enforce one channel per DOM event (events.md §4): a given event is driven
+# Enforce one channel per DOM event (see ARCHITECTURE.md, "One channel per
+# event"): a given event is driven
 # by a value binding OR an explicit `on*` handler, never both; and a single
 # explicit handler per event (no composition). `pending_events` entries
 # carry `event` (DOM name) and `autobind` (logical).
