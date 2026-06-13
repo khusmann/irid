@@ -42,7 +42,7 @@ test_that("IridWidget errors on malformed props/events", {
   expect_error(IridWidget("w", events = "x"), "`events` must be a list")
   expect_error(
     IridWidget("w", props = list("unnamed")),
-    "every entry in `props` must be named"
+    "[Ee]very entry in `props` must be named"
   )
   expect_error(
     IridWidget("w", events = list("not a fn or wire")),
@@ -50,7 +50,7 @@ test_that("IridWidget errors on malformed props/events", {
   )
   expect_error(
     IridWidget("w", events = list(change = 42)),
-    "must be a function or a `wire`"
+    "must be a function or a <irid_wire>"
   )
 })
 

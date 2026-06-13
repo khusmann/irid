@@ -25,7 +25,7 @@ test_that("Each accepts a function by (keyed)", {
 })
 
 test_that("Each rejects non-NULL non-function by", {
-  expect_error(Each(\() list(1), \(x) x, by = "id"), "NULL or a function")
+  expect_error(Each(\() list(1), \(x) x, by = "id"), "or a function")
 })
 
 # --- process_tags extraction -------------------------------------------------
@@ -298,7 +298,7 @@ test_that("Each shape transitions via parent collection write trigger rebuild", 
   expect_error(
     built_minis[[2]](list(id = 1L, type = "todo", text = "hi",
                           done = FALSE, extra = "novel")),
-    "Unknown keys"
+    "Unknown key"
   )
   m$handle$destroy()
 })

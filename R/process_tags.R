@@ -132,21 +132,21 @@ enforce_one_channel_per_event <- function(pending_events) {
     has_autobind <- any(autobind[idx])
     n_explicit <- sum(!autobind[idx])
     if (has_autobind && n_explicit > 0L) {
-      stop(
-        "`", nm, "` is claimed by both a value binding (`value`/`checked`) ",
-        "and an explicit `on*` handler on the same element. A DOM event is ",
-        "bound *or* handled, never both. To run a synchronous side-effect ",
-        "on write, use `value = reactiveProxy(get, set)`; to react ",
-        "asynchronously, observe the bound reactive.",
-        call. = FALSE
-      )
+      cli::cli_abort(c(
+        "{.field {nm}} is claimed by both a value binding \\
+         ({.arg value}/{.arg checked}) and an explicit {.code on*} handler \\
+         on the same element.",
+        "i" = "A DOM event is bound {.emph or} handled, never both.",
+        "*" = "To run a synchronous side-effect on write, use \\
+               {.code value = reactiveProxy(get, set)}.",
+        "*" = "To react asynchronously, observe the bound reactive."
+      ))
     }
     if (n_explicit > 1L) {
-      stop(
-        "duplicate handler for event `", nm, "` on one element; ",
-        "attach a single handler per event.",
-        call. = FALSE
-      )
+      cli::cli_abort(c(
+        "Duplicate handler for event {.field {nm}} on one element.",
+        "i" = "Attach a single handler per event."
+      ))
     }
   }
   invisible(pending_events)
@@ -233,11 +233,10 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         val <- node$props[[key]]
         w <- if (inherits(val, "irid_wire")) val else NULL
         if (!is.null(w) && !is.null(w$dom_opts)) {
-          stop(
-            "`dom_opts` is not allowed on the widget prop `", key,
-            "`: a prop is delivered through `setProp()`, not a DOM listener.",
-            call. = FALSE
-          )
+          cli::cli_abort(c(
+            "{.arg dom_opts} is not allowed on the widget prop {.field {key}}.",
+            "i" = "A prop is delivered through {.code setProp()}, not a DOM listener."
+          ))
         }
         subj <- if (!is.null(w)) w$subject else if (is_irid_reactive(val)) val else NULL
         if (!is.null(subj) && is_irid_reactive(subj)) {
@@ -384,26 +383,25 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         if (length(irid_class) > 0L) {
           hint <- if ("irid_wire_timing" %in% irid_class) {
             if (is_event || is_state) {
-              paste0(
-                "Timing shapes pair with a subject inside `wire()`: ",
-                "e.g. `", name, " = wire(subject, wire_debounce(200))`."
+              cli::format_inline(
+                "Timing shapes pair with a subject inside {.fn wire}, \\
+                 e.g. {.code {name} = wire(subject, wire_debounce(200))}."
               )
             } else {
-              "Timing shapes belong inside `wire(timing = ...)`."
+              cli::format_inline("Timing shapes belong inside {.code wire(timing = ...)}.")
             }
           } else if ("irid_dom_opts" %in% irid_class) {
-            "`wire_dom_opts()` belongs inside `wire(dom_opts = ...)`."
+            cli::format_inline("{.fn wire_dom_opts} belongs inside {.code wire(dom_opts = ...)}.")
           } else {
-            paste0(
-              "Constructs of class `", irid_class[[1]],
-              "` belong as children, not as attribute values."
+            cli::format_inline(
+              "Constructs of class {.cls {irid_class[[1]]}} belong as children, \\
+               not as attribute values."
             )
           }
-          stop(
-            "`", name, "` was set to an irid construct (`",
-            paste(irid_class, collapse = "/"), "`). ", hint,
-            call. = FALSE
-          )
+          cli::cli_abort(c(
+            "{.field {name}} was set to an irid construct ({.cls {irid_class}}).",
+            "i" = hint
+          ))
         }
       }
 
@@ -414,11 +412,11 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         w <- as_wire(val)
         subj <- w$subject
         if (is.null(subj) || !is_irid_reactive(subj)) {
-          stop(
-            "`", name, "` needs a reactive subject; `wire()` with no ",
-            "subject configures timing only and has nothing to bind.",
-            call. = FALSE
-          )
+          cli::cli_abort(c(
+            "{.field {name}} needs a reactive subject.",
+            "i" = "{.fn wire} with no subject configures timing only and has \\
+                   nothing to bind."
+          ))
         }
         pending_bindings[[length(pending_bindings) + 1L]] <- list(
           attr = name, fn = subj
@@ -443,10 +441,9 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       }
 
       if (is_wire) {
-        stop(
-          "`", name, "`: `wire()` configures event (`on*`) and ",
-          "`value`/`checked` slots, not plain attribute bindings.",
-          call. = FALSE
+        cli::cli_abort(
+          "{.field {name}}: {.fn wire} configures event ({.code on*}) and \\
+           {.arg value}/{.arg checked} slots, not plain attribute bindings."
         )
       }
 

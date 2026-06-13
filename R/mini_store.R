@@ -67,10 +67,7 @@ make_mini_store <- function(get_record, set_record, scope) {
   # unnamed and partial-named, so we can issue the mini-store-specific
   # message before `build_mini_node` calls `is_branch` internally.
   if (!is_record(initial)) {
-    stop(
-      "make_mini_store: initial record must be a fully named list",
-      call. = FALSE
-    )
+    cli::cli_abort("{.fn make_mini_store}: initial record must be a fully named list.")
   }
 
   node <- build_mini_node(
@@ -298,13 +295,12 @@ validate_each_kinds <- function(item_list) {
   if (length(item_list) == 0L) return(invisible())
   record_flags <- vapply(item_list, is_record, logical(1L))
   if (any(record_flags) && !all(record_flags)) {
-    stop(
-      "Each() items must be either all records (fully named lists) ",
-      "or all scalars/atomics. Mixed-shape lists are usually a ",
-      "data-modeling mistake -- wrap scalars in a record like ",
-      "`list(value = ...)` to mix.",
-      call. = FALSE
-    )
+    cli::cli_abort(c(
+      "{.fn Each} items must be either all records (fully named lists) or \\
+       all scalars/atomics.",
+      "i" = "Mixed-shape lists are usually a data-modeling mistake -- wrap \\
+             scalars in a record like {.code list(value = ...)} to mix."
+    ))
   }
   invisible()
 }

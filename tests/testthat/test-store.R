@@ -49,14 +49,14 @@ test_that("unnamed list at root is rejected", {
 test_that("partially-named list at root errors with positions", {
   expect_error(
     reactiveStore(list(a = 1, "b")),
-    "store root.*partially named.*positions 2"
+    "store root.*partially named.*position 2"
   )
 })
 
 test_that("partially-named list inside a branch errors with path", {
   expect_error(
     reactiveStore(list(group = list(a = 1, "b"))),
-    "'group'.*partially named.*positions 2"
+    "'group'.*partially named.*position 2"
   )
 })
 
@@ -520,7 +520,7 @@ test_that("[[ with out-of-range integer errors", {
 
 test_that("[[ with unknown string key errors", {
   state <- reactiveStore(list(user = list(name = "A")))
-  expect_error(state[["nope"]], "Unknown key 'nope'")
+  expect_error(state[["nope"]], "Unknown key.*nope")
 })
 
 test_that("[[ with NA_character_ errors", {

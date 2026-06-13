@@ -54,9 +54,9 @@ test_that("wire holds subject + config", {
 
 test_that("wire validates each field", {
   expect_error(wire(subject = 5), "`subject` must be a function")
-  expect_error(wire(timing = wire_dom_opts()), "`timing` must be an `irid_wire_timing`")
+  expect_error(wire(timing = wire_dom_opts()), "`timing` must be an <irid_wire_timing>")
   expect_error(wire(coalesce = "yes"), "`coalesce` must be")
-  expect_error(wire(dom_opts = wire_immediate()), "`dom_opts` must be an `irid_dom_opts`")
+  expect_error(wire(dom_opts = wire_immediate()), "`dom_opts` must be an <irid_dom_opts>")
 })
 
 # --- merge.irid_wire ---------------------------------------------------------

@@ -87,7 +87,7 @@ test_that("missing package errors with a clear message", {
   )
   expect_error(
     register_widget_dep(dep),
-    "Could not locate the 'this-package-does-not-exist-9999' package"
+    "Could not locate the this-package-does-not-exist-9999 package"
   )
 })
 

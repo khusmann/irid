@@ -13,8 +13,9 @@ BugReports: https://github.com/khusmann/irid/issues
 Depends:
     R (>= 4.1.0)
 Imports:
-    shiny,
-    htmltools
+    cli,
+    htmltools,
+    shiny
 Suggests:
     DT,
     knitr,

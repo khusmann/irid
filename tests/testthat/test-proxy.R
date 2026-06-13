@@ -23,7 +23,7 @@ test_that("non-callable get errors", {
 
 test_that("set must be a function or NULL", {
   rv <- shiny::reactiveVal(1)
-  expect_error(reactiveProxy(get = rv, set = 1), "function or NULL")
+  expect_error(reactiveProxy(get = rv, set = 1), "function or")
 })
 
 # --- Default pass-through ----------------------------------------------------

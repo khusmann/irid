@@ -94,10 +94,10 @@ wire_immediate <- function() {
 #' @export
 wire_throttle <- function(ms, leading = TRUE) {
   if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
-    stop("`ms` must be a numeric scalar", call. = FALSE)
+    cli::cli_abort("{.arg ms} must be a numeric scalar.")
   }
   if (!is.logical(leading) || length(leading) != 1L || is.na(leading)) {
-    stop("`leading` must be `TRUE` or `FALSE`", call. = FALSE)
+    cli::cli_abort("{.arg leading} must be {.val TRUE} or {.val FALSE}.")
   }
   structure(
     list(mode = "throttle", ms = ms, leading = leading),
@@ -109,7 +109,7 @@ wire_throttle <- function(ms, leading = TRUE) {
 #' @export
 wire_debounce <- function(ms) {
   if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
-    stop("`ms` must be a numeric scalar", call. = FALSE)
+    cli::cli_abort("{.arg ms} must be a numeric scalar.")
   }
   structure(list(mode = "debounce", ms = ms), class = "irid_wire_timing")
 }
@@ -125,7 +125,7 @@ wire_dom_opts <- function(prevent_default = FALSE, stop_propagation = FALSE,
   for (nm in names(flags)) {
     v <- flags[[nm]]
     if (!is.logical(v) || length(v) != 1L || is.na(v)) {
-      stop("`", nm, "` must be `TRUE` or `FALSE`", call. = FALSE)
+      cli::cli_abort("{.arg {nm}} must be {.val TRUE} or {.val FALSE}.")
     }
   }
   structure(flags, class = "irid_dom_opts")
@@ -136,22 +136,29 @@ wire_dom_opts <- function(prevent_default = FALSE, stop_propagation = FALSE,
 wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
                  dom_opts = NULL) {
   if (!is.null(subject) && !is.function(subject)) {
-    stop("`subject` must be a function (handler or reactive) or NULL; got ",
-         paste(class(subject), collapse = "/"), call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg subject} must be a function (handler or reactive) or {.code NULL}.",
+      "x" = "You supplied {.obj_type_friendly {subject}}."
+    ))
   }
   if (!is.null(timing) && !inherits(timing, "irid_wire_timing")) {
-    stop("`timing` must be an `irid_wire_timing` (from `wire_immediate()`, ",
-         "`wire_throttle()`, or `wire_debounce()`) or NULL; got ",
-         paste(class(timing), collapse = "/"), call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg timing} must be an {.cls irid_wire_timing} or {.code NULL}.",
+      "i" = "Build one with {.fn wire_immediate}, {.fn wire_throttle}, \\
+             or {.fn wire_debounce}.",
+      "x" = "You supplied {.obj_type_friendly {timing}}."
+    ))
   }
   if (!is.null(coalesce) &&
       (!is.logical(coalesce) || length(coalesce) != 1L || is.na(coalesce))) {
-    stop("`coalesce` must be `TRUE`, `FALSE`, or NULL", call. = FALSE)
+    cli::cli_abort("{.arg coalesce} must be {.val TRUE}, {.val FALSE}, or {.code NULL}.")
   }
   if (!is.null(dom_opts) && !inherits(dom_opts, "irid_dom_opts")) {
-    stop("`dom_opts` must be an `irid_dom_opts` (from `wire_dom_opts()`) ",
-         "or NULL; got ", paste(class(dom_opts), collapse = "/"),
-         call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg dom_opts} must be an {.cls irid_dom_opts} or {.code NULL}.",
+      "i" = "Build one with {.fn wire_dom_opts}.",
+      "x" = "You supplied {.obj_type_friendly {dom_opts}}."
+    ))
   }
   structure(
     list(subject = subject, timing = timing, coalesce = coalesce,
@@ -168,8 +175,10 @@ as_wire <- function(x) {
   if (is.null(x)) return(wire())
   if (inherits(x, "irid_wire")) return(x)
   if (is.function(x)) return(wire(subject = x))
-  stop("expected a function or a `wire`; got ",
-       paste(class(x), collapse = "/"), call. = FALSE)
+  cli::cli_abort(c(
+    "Expected a function or a {.cls irid_wire}.",
+    "x" = "You supplied {.obj_type_friendly {x}}."
+  ))
 }
 
 #' Overlay one `wire` over another
