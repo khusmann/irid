@@ -31,10 +31,10 @@ event_row <- function(processed, kind, event) {
 # --- Construction validation -------------------------------------------------
 
 test_that("IridWidget errors on a missing/empty name", {
-  expect_error(IridWidget(name = ""), "non-empty character scalar")
-  expect_error(IridWidget(name = NA_character_), "non-empty character scalar")
-  expect_error(IridWidget(name = c("a", "b")), "non-empty character scalar")
-  expect_error(IridWidget(name = 42), "non-empty character scalar")
+  expect_error(IridWidget(name = ""), "must be a single string")
+  expect_error(IridWidget(name = NA_character_), "must be a single string")
+  expect_error(IridWidget(name = c("a", "b")), "must be a single string")
+  expect_error(IridWidget(name = 42), "must be a single string")
 })
 
 test_that("IridWidget errors on malformed props/events", {

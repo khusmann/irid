@@ -1,8 +1,3 @@
-# NULL-coalescing helper. base R gained `%||%` in 4.4.0, but irid targets
-# R >= 4.1.0, so define our own (package-internal; shadows base within the
-# namespace where present).
-`%||%` <- function(x, y) if (is.null(x)) y else x
-
 #' Event & binding dispatch config
 #'
 #' Configure how an event handler or value binding is dispatched between the
@@ -93,12 +88,8 @@ wire_immediate <- function() {
 #' @rdname wire
 #' @export
 wire_throttle <- function(ms, leading = TRUE) {
-  if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
-    cli::cli_abort("{.arg ms} must be a numeric scalar.")
-  }
-  if (!is.logical(leading) || length(leading) != 1L || is.na(leading)) {
-    cli::cli_abort("{.arg leading} must be {.val TRUE} or {.val FALSE}.")
-  }
+  check_number_decimal(ms)
+  check_bool(leading)
   structure(
     list(mode = "throttle", ms = ms, leading = leading),
     class = "irid_wire_timing"
@@ -108,9 +99,7 @@ wire_throttle <- function(ms, leading = TRUE) {
 #' @rdname wire
 #' @export
 wire_debounce <- function(ms) {
-  if (!is.numeric(ms) || length(ms) != 1L || is.na(ms)) {
-    cli::cli_abort("{.arg ms} must be a numeric scalar.")
-  }
+  check_number_decimal(ms)
   structure(list(mode = "debounce", ms = ms), class = "irid_wire_timing")
 }
 
@@ -118,29 +107,24 @@ wire_debounce <- function(ms) {
 #' @export
 wire_dom_opts <- function(prevent_default = FALSE, stop_propagation = FALSE,
                           capture = FALSE, passive = FALSE) {
-  flags <- list(
-    prevent_default = prevent_default, stop_propagation = stop_propagation,
-    capture = capture, passive = passive
+  check_bool(prevent_default)
+  check_bool(stop_propagation)
+  check_bool(capture)
+  check_bool(passive)
+  structure(
+    list(
+      prevent_default = prevent_default, stop_propagation = stop_propagation,
+      capture = capture, passive = passive
+    ),
+    class = "irid_dom_opts"
   )
-  for (nm in names(flags)) {
-    v <- flags[[nm]]
-    if (!is.logical(v) || length(v) != 1L || is.na(v)) {
-      cli::cli_abort("{.arg {nm}} must be {.val TRUE} or {.val FALSE}.")
-    }
-  }
-  structure(flags, class = "irid_dom_opts")
 }
 
 #' @rdname wire
 #' @export
 wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
                  dom_opts = NULL) {
-  if (!is.null(subject) && !is.function(subject)) {
-    cli::cli_abort(c(
-      "{.arg subject} must be a function (handler or reactive) or {.code NULL}.",
-      "x" = "You supplied {.obj_type_friendly {subject}}."
-    ))
-  }
+  check_function(subject, allow_null = TRUE)
   if (!is.null(timing) && !inherits(timing, "irid_wire_timing")) {
     cli::cli_abort(c(
       "{.arg timing} must be an {.cls irid_wire_timing} or {.code NULL}.",
@@ -149,10 +133,7 @@ wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
       "x" = "You supplied {.obj_type_friendly {timing}}."
     ))
   }
-  if (!is.null(coalesce) &&
-      (!is.logical(coalesce) || length(coalesce) != 1L || is.na(coalesce))) {
-    cli::cli_abort("{.arg coalesce} must be {.val TRUE}, {.val FALSE}, or {.code NULL}.")
-  }
+  check_bool(coalesce, allow_null = TRUE)
   if (!is.null(dom_opts) && !inherits(dom_opts, "irid_dom_opts")) {
     cli::cli_abort(c(
       "{.arg dom_opts} must be an {.cls irid_dom_opts} or {.code NULL}.",
@@ -174,7 +155,7 @@ wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
 as_wire <- function(x) {
   if (is.null(x)) return(wire())
   if (inherits(x, "irid_wire")) return(x)
-  if (is.function(x)) return(wire(subject = x))
+  if (is_function(x)) return(wire(subject = x))
   cli::cli_abort(c(
     "Expected a function or a {.cls irid_wire}.",
     "x" = "You supplied {.obj_type_friendly {x}}."

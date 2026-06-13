@@ -17,8 +17,8 @@ test_that("timing shapes carry only their mode-specific fields", {
 })
 
 test_that("timing constructors validate their args", {
-  expect_error(wire_debounce("x"), "`ms` must be a numeric scalar")
-  expect_error(wire_throttle(NA), "`ms` must be a numeric scalar")
+  expect_error(wire_debounce("x"), "`ms` must be a number")
+  expect_error(wire_throttle(NA), "`ms` must be a number")
   expect_error(wire_throttle(100, leading = NA), "`leading` must be")
 })
 

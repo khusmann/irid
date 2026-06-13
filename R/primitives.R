@@ -25,14 +25,14 @@
 #' @return A irid control-flow node.
 #' @export
 When <- function(condition, yes, otherwise = NULL) {
-  if (!is.function(yes)) {
+  if (!is_function(yes)) {
     cli::cli_abort(c(
       "{.arg yes} must be a 0-arg function returning a tag tree, \\
        e.g. {.code \\() tags$div(...)}.",
       "x" = "You supplied {.obj_type_friendly {yes}}."
     ))
   }
-  if (!is.null(otherwise) && !is.function(otherwise)) {
+  if (!is.null(otherwise) && !is_function(otherwise)) {
     cli::cli_abort(c(
       "{.arg otherwise} must be a 0-arg function returning a tag tree or {.code NULL}.",
       "x" = "You supplied {.obj_type_friendly {otherwise}}."
@@ -101,15 +101,11 @@ When <- function(condition, yes, otherwise = NULL) {
 #' @return A irid control-flow node.
 #' @export
 Each <- function(items, fn, by = NULL) {
-  if (!is.function(items)) {
+  if (!is_function(items)) {
     cli::cli_abort("{.arg items} must be a callable, e.g. {.code reactiveVal} or {.code \\() ...}.")
   }
-  if (!is.function(fn)) {
-    cli::cli_abort("{.arg fn} must be a function.")
-  }
-  if (!is.null(by) && !is.function(by)) {
-    cli::cli_abort("{.arg by} must be {.code NULL} or a function.")
-  }
+  check_function(fn)
+  check_function(by, allow_null = TRUE)
   structure(
     list(items = items, by = by, fn = fn),
     class = "irid_each"
@@ -131,7 +127,7 @@ Each <- function(items, fn, by = NULL) {
 #' @return A case definition (a list).
 #' @export
 Case <- function(predicate, body) {
-  if (!is.function(body)) {
+  if (!is_function(body)) {
     cli::cli_abort(c(
       "{.arg body} must be a function returning a tag tree, \\
        e.g. {.code \\() tags$div(...)}.",
@@ -181,7 +177,7 @@ Default <- function(body) {
 #' @return A irid control-flow node.
 #' @export
 Match <- function(callable, ...) {
-  if (!is.function(callable)) {
+  if (!is_function(callable)) {
     cli::cli_abort(c(
       "{.fn Match} requires a leading callable: a {.code reactiveVal}, \\
        {.code reactive}, store leaf, mini-store, or {.code \\() ...} closure.",
@@ -201,7 +197,7 @@ Match <- function(callable, ...) {
 # 1-arg → predicate of bound value).
 normalize_match_case <- function(case) {
   pred <- case$predicate
-  if (!is.function(pred)) {
+  if (!is_function(pred)) {
     literal <- pred
     pred <- function(v) identical(v, literal)
   }

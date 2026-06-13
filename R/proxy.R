@@ -28,12 +28,8 @@
 #' @return A callable with class `c("reactiveProxy", "reactive", "function")`.
 #' @export
 reactiveProxy <- function(get, set = NULL) {
-  if (!is.function(get)) {
-    cli::cli_abort("{.arg get} must be a function.")
-  }
-  if (!is.null(set) && !is.function(set)) {
-    cli::cli_abort("{.arg set} must be a function or {.code NULL}.")
-  }
+  check_function(get)
+  check_function(set, allow_null = TRUE)
   force(get)
   force(set)
   fn <- function(...) {
@@ -75,7 +71,7 @@ print.reactiveProxy <- function(x, ...) {
 #' @return A length-1 logical.
 #' @keywords internal
 can_accept_write <- function(fn) {
-  if (!is.function(fn)) return(FALSE)
+  if (!is_function(fn)) return(FALSE)
   if (inherits(fn, "reactiveProxy")) {
     # A reactiveProxy's writability is whatever the `set` arg was at
     # construction — its outer signature is `function(...)` either way.

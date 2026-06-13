@@ -21,7 +21,7 @@ normalize_widget_events <- function(events) {
   out <- list()
   for (key in nms) {
     val <- events[[key]]
-    if (!is.function(val) && !inherits(val, "irid_wire")) {
+    if (!is_function(val) && !inherits(val, "irid_wire")) {
       cli::cli_abort(c(
         "{.arg events${key}} must be a function or a {.cls irid_wire}.",
         "x" = "You supplied {.obj_type_friendly {val}}."
@@ -99,9 +99,7 @@ IridWidget <- function(
   deps = NULL,
   container = NULL
 ) {
-  if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
-    cli::cli_abort("{.arg name} must be a non-empty character scalar.")
-  }
+  check_string(name, allow_empty = FALSE)
   if (!is.list(props)) {
     cli::cli_abort(c(
       "{.arg props} must be a list.",
