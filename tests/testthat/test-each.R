@@ -453,3 +453,104 @@ test_that("Each positional shape transition does not affect sibling slots", {
   expect_equal(length(last$message$order), 3L)
   m$handle$destroy()
 })
+
+# ---- reconciliation planners --------------------------------------------
+# Pure decision logic behind the reconciler above, exercised directly with
+# plain data (shape signatures stand in as simple strings; the planners only
+# compare them with identical()). The end-to-end behaviour is covered by the
+# mount-based tests above; these lock the decision logic in isolation.
+
+test_that("plan_reconcile_keyed: identical keys and shapes is a no-op", {
+  p <- irid:::plan_reconcile_keyed(
+    old_keys = c("a", "b"), new_keys = c("a", "b"),
+    old_sigs = list(a = "s", b = "s"), new_sigs = list(a = "s", b = "s")
+  )
+  expect_true(p$noop)
+  expect_false(p$has_duplicates)
+})
+
+test_that("plan_reconcile_keyed: add and remove", {
+  p <- irid:::plan_reconcile_keyed(
+    old_keys = c("a", "b"), new_keys = c("b", "c"),
+    old_sigs = list(a = "s", b = "s"),
+    new_sigs = list(b = "s", c = "s")
+  )
+  expect_false(p$noop)
+  expect_equal(p$removed, "a")
+  expect_equal(p$added, "c")
+  expect_equal(p$kept, "b")
+})
+
+test_that("plan_reconcile_keyed: pure reorder keeps all (new order), no add/remove", {
+  p <- irid:::plan_reconcile_keyed(
+    old_keys = c("a", "b", "c"), new_keys = c("c", "a", "b"),
+    old_sigs = list(a = "s", b = "s", c = "s"),
+    new_sigs = list(c = "s", a = "s", b = "s")
+  )
+  expect_false(p$noop) # key order differs
+  expect_equal(p$removed, character(0))
+  expect_equal(p$added, character(0))
+  expect_equal(p$kept, c("c", "a", "b"))
+})
+
+test_that("plan_reconcile_keyed: a kept key whose shape changed is promoted to remove + add", {
+  p <- irid:::plan_reconcile_keyed(
+    old_keys = c("a", "b"), new_keys = c("a", "b"),
+    old_sigs = list(a = "s1", b = "s"),
+    new_sigs = list(a = "s2", b = "s") # 'a' changed shape
+  )
+  expect_false(p$noop)
+  expect_equal(p$removed, "a")
+  expect_equal(p$added, "a")
+  expect_equal(p$kept, "b")
+})
+
+test_that("plan_reconcile_keyed: duplicate keys are flagged", {
+  p <- irid:::plan_reconcile_keyed(
+    old_keys = c("a"), new_keys = c("a", "a"),
+    old_sigs = list(a = "s"), new_sigs = list(a = "s")
+  )
+  expect_true(p$has_duplicates)
+})
+
+test_that("plan_reconcile_positional: same length and shapes is a no-op", {
+  p <- irid:::plan_reconcile_positional(list("s", "s"), list("s", "s"))
+  expect_true(p$noop)
+})
+
+test_that("plan_reconcile_positional: growth builds the new tail", {
+  p <- irid:::plan_reconcile_positional(list("s"), list("s", "s", "s"))
+  expect_false(p$noop)
+  expect_equal(p$build, c(2L, 3L))
+  expect_equal(p$removed, integer(0))
+  expect_equal(p$trim, integer(0))
+  expect_equal(p$shape_changed, integer(0))
+})
+
+test_that("plan_reconcile_positional: shrink trims and removes the tail", {
+  p <- irid:::plan_reconcile_positional(list("s", "s", "s"), list("s"))
+  expect_equal(p$trim, c(2L, 3L))
+  expect_equal(p$removed, c(2L, 3L))
+  expect_equal(p$build, integer(0))
+  expect_equal(p$new_len, 1L)
+})
+
+test_that("plan_reconcile_positional: a mid-list shape change rebuilds that slot in place", {
+  p <- irid:::plan_reconcile_positional(
+    list("s", "s1", "s"), list("s", "s2", "s")
+  )
+  expect_false(p$noop)
+  expect_equal(p$shape_changed, 2L)
+  expect_equal(p$removed, 2L)
+  expect_equal(p$build, 2L)
+})
+
+test_that("plan_reconcile_positional: growth plus a shape change combine", {
+  p <- irid:::plan_reconcile_positional(
+    list("s", "s1"), list("s", "s2", "s", "s")
+  )
+  expect_equal(p$shape_changed, 2L)
+  expect_equal(p$build, c(3L, 4L, 2L)) # grow ++ shape-changed
+  expect_equal(p$removed, 2L)
+  expect_equal(p$new_len, 4L)
+})

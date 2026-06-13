@@ -57,6 +57,82 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
   invisible()
 }
 
+# Pure reconciliation planners for `Each`. These decide *what* changes between
+# two renders of the item list — which entries to remove, add, keep, or
+# rebuild — and return that decision as plain data. They perform no effects:
+# constructing entries (scopes, wrapper ids), tearing down, mounting, and
+# sending `irid-mutate` all stay in the observer below, which consumes the
+# returned plan. Inputs are shape *signatures* (from `shape_signature()`), not
+# live items, so the planners are testable without a Shiny session.
+
+# Keyed mode. `old_keys`/`new_keys` are the previous/current key vectors;
+# `old_sigs`/`new_sigs` are named lists of shape signatures keyed by the
+# corresponding key. A kept key whose shape changed is promoted to
+# remove + add so the entry is rebuilt against its new shape.
+#
+# Returns:
+#   noop           - keys identical and no kept entry changed shape (no DOM work)
+#   has_duplicates - `new_keys` has duplicates (caller raises)
+#   removed/added  - keys to tear down / build (each = set-diff ++ shape-changed)
+#   kept           - surviving keys that only moved (in `new_keys` order)
+plan_reconcile_keyed <- function(old_keys, new_keys, old_sigs, new_sigs) {
+  # Surviving keys in `new_keys` order (intersect preserves first-arg order).
+  surviving <- intersect(new_keys, old_keys)
+  shape_changed <- surviving[!vapply(
+    surviving,
+    function(k) identical(new_sigs[[k]], old_sigs[[k]]),
+    logical(1L)
+  )]
+
+  list(
+    noop = identical(new_keys, old_keys) && length(shape_changed) == 0L,
+    has_duplicates = anyDuplicated(new_keys) > 0L,
+    removed = c(setdiff(old_keys, new_keys), shape_changed),
+    added   = c(setdiff(new_keys, old_keys), shape_changed),
+    kept    = setdiff(surviving, shape_changed)
+  )
+}
+
+# Positional mode. `old_sigs`/`new_sigs` are the previous/current per-slot
+# shape signatures (length = old/new list length). Slot i stays slot i;
+# length changes trim/append at the tail, and a surviving slot whose shape
+# changed is rebuilt in place.
+#
+# Returns:
+#   noop          - same length and no common slot changed shape
+#   trim          - trailing indices to drop (shrink)
+#   removed       - indices to tear down (trim ++ shape-changed)
+#   build         - indices to (re)build (grow ++ shape-changed)
+#   shape_changed - common-slot indices whose shape changed (drives `order`)
+#   new_len       - current list length
+plan_reconcile_positional <- function(old_sigs, new_sigs) {
+  old_len <- length(old_sigs)
+  new_len <- length(new_sigs)
+  common <- min(old_len, new_len)
+
+  shape_changed <- if (common > 0L) {
+    which(!vapply(
+      seq_len(common),
+      function(i) identical(new_sigs[[i]], old_sigs[[i]]),
+      logical(1L)
+    ))
+  } else {
+    integer(0)
+  }
+
+  trim <- if (new_len < old_len) (new_len + 1L):old_len else integer(0)
+  grow <- if (new_len > old_len) (old_len + 1L):new_len else integer(0)
+
+  list(
+    noop = new_len == old_len && length(shape_changed) == 0L,
+    trim = trim,
+    removed = c(trim, shape_changed),
+    build = c(grow, shape_changed),
+    shape_changed = shape_changed,
+    new_len = new_len
+  )
+}
+
 #' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
@@ -461,52 +537,38 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             )
             old_keys <- env$current_keys
 
-            # Detect shape changes among the keys that survive (i.e.
-            # would otherwise be "kept"). A shape transition for a kept
-            # key forces a remove+rebuild for that one entry — the
-            # mini-store's leaf tree is derived from the item at mount
-            # time, so any structural change (scalar↔record, or a
-            # record with different keys at any depth) needs a fresh
-            # entry with the new shape.
-            shape_changed_keys <- character(0)
-            for (i in seq_along(new_keys)) {
-              key <- new_keys[i]
-              if (key %in% old_keys) {
-                new_sig <- shape_signature(item_list[[i]])
-                if (!identical(
-                  new_sig, env$item_mounts[[key]]$shape_sig
-                )) {
-                  shape_changed_keys <- c(shape_changed_keys, key)
-                }
-              }
-            }
+            # Decide the diff from shape signatures (pure — see
+            # `plan_reconcile_keyed`). A kept key whose shape changed is
+            # promoted to remove+add: the mini-store's leaf tree is
+            # derived from the item at mount time, so any structural
+            # change (scalar↔record, or a record with different keys at
+            # any depth) needs a fresh entry with the new shape.
+            new_sigs <- stats::setNames(
+              lapply(item_list, shape_signature), new_keys
+            )
+            old_sigs <- stats::setNames(
+              lapply(old_keys, function(k) env$item_mounts[[k]]$shape_sig),
+              old_keys
+            )
+            plan <- plan_reconcile_keyed(old_keys, new_keys, old_sigs, new_sigs)
 
             # Pure value-change short-circuit. The observer fires on any
             # change to the parent collection (including in-place value
             # edits), but the per-item mini-store / scalar-accessor
-            # propagators handle in-place changes themselves. If the
-            # keys are identical to the previous run AND no kept entry
-            # changed shape, we have no DOM work — and emitting an
+            # propagators handle in-place changes themselves. No key or
+            # shape change means no DOM work — and emitting an
             # `irid-mutate` here detaches every child range into a
             # fragment client-side just to re-insert it, which kills
             # focus on any focused input inside.
-            if (identical(new_keys, old_keys) &&
-                length(shape_changed_keys) == 0L) {
-              return()
-            }
+            if (plan$noop) return()
 
-            if (anyDuplicated(new_keys)) {
+            if (plan$has_duplicates) {
               cli::cli_abort("{.fn Each} requires unique keys from the {.arg by} function.")
             }
 
-            # Shape-changed kept keys are promoted to remove + add so
-            # the entry gets a fresh scope, accessor, and DOM range
-            # built against its new shape.
-            removed_keys <- c(setdiff(old_keys, new_keys), shape_changed_keys)
-            added_keys <- c(setdiff(new_keys, old_keys), shape_changed_keys)
-            kept_keys <- setdiff(
-              intersect(new_keys, old_keys), shape_changed_keys
-            )
+            removed_keys <- plan$removed
+            added_keys <- plan$added
+            kept_keys <- plan$kept
 
             removes <- character(0)
             for (key in removed_keys) {
@@ -562,49 +624,35 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             # changed shape is torn down and rebuilt in place — same
             # DOM mutate as length changes, but with `order` so the
             # client knows where the new range belongs.
-            new_len <- length(item_list)
-            old_len <- length(env$item_mounts)
-            common_len <- min(new_len, old_len)
+            old_sigs <- lapply(
+              seq_along(env$item_mounts),
+              function(i) env$item_mounts[[i]]$shape_sig
+            )
+            new_sigs <- lapply(item_list, shape_signature)
+            plan <- plan_reconcile_positional(old_sigs, new_sigs)
+            new_len <- plan$new_len
+            shape_changed <- plan$shape_changed
+            build_indices <- plan$build
 
-            shape_changed <- integer(0)
-            for (i in seq_len(common_len)) {
-              new_sig <- shape_signature(item_list[[i]])
-              if (!identical(
-                new_sig, env$item_mounts[[i]]$shape_sig
-              )) {
-                shape_changed <- c(shape_changed, i)
-              }
-            }
-
-            if (new_len == old_len && length(shape_changed) == 0L) {
+            if (plan$noop) {
               # Pure value-change — slot accessors handle it. No DOM work.
               return()
             }
 
             # Tear down: trailing trim (if shrunk) + shape-changed slots.
-            trim_indices <- if (new_len < old_len) {
-              (new_len + 1L):old_len
-            } else {
-              integer(0)
-            }
             removes <- character(0)
-            for (i in c(trim_indices, shape_changed)) {
+            for (i in plan$removed) {
               teardown_entry(env$item_mounts[[i]])
               removes <- c(removes, env$item_mounts[[i]]$wrapper_id)
             }
             # Drop trimmed entries; shape-changed slots are overwritten
             # below by their rebuilt entries (same index).
-            if (length(trim_indices) > 0L) {
+            if (length(plan$trim) > 0L) {
               env$item_mounts <- env$item_mounts[seq_len(new_len)]
             }
 
-            # Build: new tail appends + shape-changed replacements.
-            grow_indices <- if (new_len > old_len) {
-              (old_len + 1L):new_len
-            } else {
-              integer(0)
-            }
-            build_indices <- c(grow_indices, shape_changed)
+            # Build: new tail appends + shape-changed replacements (see
+            # `plan_reconcile_positional`).
             inserts <- list()
             for (i in build_indices) local({
               ii <- i
