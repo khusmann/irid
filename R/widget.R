@@ -99,9 +99,7 @@ IridWidget <- function(
   deps = NULL,
   container = NULL
 ) {
-  if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
-    cli::cli_abort("{.arg name} must be a non-empty character scalar.")
-  }
+  rlang::check_string(name, allow_empty = FALSE)
   if (!is.list(props)) {
     cli::cli_abort(c(
       "{.arg props} must be a list.",

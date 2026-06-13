@@ -25,7 +25,7 @@ test_that("Each accepts a function by (keyed)", {
 })
 
 test_that("Each rejects non-NULL non-function by", {
-  expect_error(Each(\() list(1), \(x) x, by = "id"), "or a function")
+  expect_error(Each(\() list(1), \(x) x, by = "id"), "`by` must be a function")
 })
 
 # --- process_tags extraction -------------------------------------------------

@@ -104,12 +104,8 @@ Each <- function(items, fn, by = NULL) {
   if (!is.function(items)) {
     cli::cli_abort("{.arg items} must be a callable, e.g. {.code reactiveVal} or {.code \\() ...}.")
   }
-  if (!is.function(fn)) {
-    cli::cli_abort("{.arg fn} must be a function.")
-  }
-  if (!is.null(by) && !is.function(by)) {
-    cli::cli_abort("{.arg by} must be {.code NULL} or a function.")
-  }
+  check_function(fn)
+  check_function(by, allow_null = TRUE)
   structure(
     list(items = items, by = by, fn = fn),
     class = "irid_each"
