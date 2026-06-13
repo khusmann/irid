@@ -155,7 +155,7 @@ wire <- function(subject = NULL, timing = NULL, coalesce = NULL,
 as_wire <- function(x) {
   if (is.null(x)) return(wire())
   if (inherits(x, "irid_wire")) return(x)
-  if (is.function(x)) return(wire(subject = x))
+  if (rlang::is_function(x)) return(wire(subject = x))
   cli::cli_abort(c(
     "Expected a function or a {.cls irid_wire}.",
     "x" = "You supplied {.obj_type_friendly {x}}."

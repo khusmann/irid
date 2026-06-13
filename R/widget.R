@@ -21,7 +21,7 @@ normalize_widget_events <- function(events) {
   out <- list()
   for (key in nms) {
     val <- events[[key]]
-    if (!is.function(val) && !inherits(val, "irid_wire")) {
+    if (!rlang::is_function(val) && !inherits(val, "irid_wire")) {
       cli::cli_abort(c(
         "{.arg events${key}} must be a function or a {.cls irid_wire}.",
         "x" = "You supplied {.obj_type_friendly {val}}."

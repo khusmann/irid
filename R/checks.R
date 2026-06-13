@@ -13,7 +13,7 @@ check_function <- function(x,
                            arg = rlang::caller_arg(x),
                            call = rlang::caller_env()) {
   if (!missing(x)) {
-    if (is.function(x)) return(invisible(NULL))
+    if (rlang::is_function(x)) return(invisible(NULL))
     if (allow_null && is.null(x)) return(invisible(NULL))
   }
   msg <- if (allow_null) {

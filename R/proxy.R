@@ -71,7 +71,7 @@ print.reactiveProxy <- function(x, ...) {
 #' @return A length-1 logical.
 #' @keywords internal
 can_accept_write <- function(fn) {
-  if (!is.function(fn)) return(FALSE)
+  if (!rlang::is_function(fn)) return(FALSE)
   if (inherits(fn, "reactiveProxy")) {
     # A reactiveProxy's writability is whatever the `set` arg was at
     # construction — its outer signature is `function(...)` either way.
