@@ -1,8 +1,9 @@
 # Each reconciler unification — design
 
-**Status:** Proposed. Builds on the pure-planner extraction
-(`plan_reconcile_keyed` / `plan_reconcile_positional` in `R/mount.R`,
-tested in `tests/testthat/test-each.R`).
+**Status:** Implemented. The two planners (`plan_reconcile_keyed` /
+`plan_reconcile_positional`) are now a single `plan_reconcile` run by a
+mode-agnostic `run_reconcile_plan` executor in `R/mount.R`; tests in
+`tests/testthat/test-each.R`.
 **Date:** June 2026
 
 ---

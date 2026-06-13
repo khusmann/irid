@@ -57,80 +57,125 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
   invisible()
 }
 
-# Pure reconciliation planners for `Each`. These decide *what* changes between
-# two renders of the item list — which entries to remove, add, keep, or
-# rebuild — and return that decision as plain data. They perform no effects:
-# constructing entries (scopes, wrapper ids), tearing down, mounting, and
-# sending `irid-mutate` all stay in the observer below, which consumes the
-# returned plan. Inputs are shape *signatures* (from `shape_signature()`), not
-# live items, so the planners are testable without a Shiny session.
-
-# Keyed mode. `old_keys`/`new_keys` are the previous/current key vectors;
-# `old_sigs`/`new_sigs` are named lists of shape signatures keyed by the
-# corresponding key. A kept key whose shape changed is promoted to
-# remove + add so the entry is rebuilt against its new shape.
+# Pure reconciliation planner for `Each`. Decides *what* changes between two
+# renders of the item list — which entries to remove, add, keep, or rebuild —
+# and returns that decision as plain data. It performs no effects: constructing
+# entries (scopes, wrapper ids), tearing down, mounting, and sending
+# `irid-mutate` all live in `run_reconcile_plan()` below, which consumes the
+# returned plan. Inputs are shape *signatures* (from `shape_signature()`) named
+# by id, so the planner is testable without a Shiny session.
+#
+# Both `Each` modes funnel through here because **positional `Each` is keyed
+# `Each` whose id is the row position**: positional ids are
+# `as.character(seq_len(n))` (always dense `"1".."n"`), keyed ids are the
+# stringified `by(item)`. Every mode difference then collapses to set algebra
+# over `old_ids` / `new_ids`.
+#
+# `old_sigs`/`new_sigs` are named lists of shape signatures keyed by id. A kept
+# id whose shape changed is promoted to remove + add so the entry is rebuilt
+# against its new shape.
 #
 # Returns:
-#   noop           - keys identical and no kept entry changed shape (no DOM work)
-#   has_duplicates - `new_keys` has duplicates (caller raises)
-#   removed/added  - keys to tear down / build (each = set-diff ++ shape-changed)
-#   kept           - surviving keys that only moved (in `new_keys` order)
-plan_reconcile_keyed <- function(old_keys, new_keys, old_sigs, new_sigs) {
-  # Surviving keys in `new_keys` order (intersect preserves first-arg order).
-  surviving <- intersect(new_keys, old_keys)
+#   noop           - ids identical and no kept entry changed shape (no DOM work)
+#   has_duplicates - `new_ids` has duplicates (caller raises; keyed only in
+#                    practice — positional ids never collide)
+#   removed/added  - ids to tear down / build (each = set-diff ++ shape-changed)
+#   kept           - surviving ids that only moved (in `new_ids` order)
+#   order          - full display sequence, or NULL when the client's
+#                    natural insert order already matches (see below)
+#   build_index    - named int: position of each added id in `new_ids`, used to
+#                    seed `pos_rv` and index the live item list
+plan_reconcile <- function(old_ids, new_ids, old_sigs, new_sigs) {
+  # Surviving ids in `new_ids` order (intersect preserves first-arg order).
+  surviving <- intersect(new_ids, old_ids)
   shape_changed <- surviving[!vapply(
     surviving,
-    function(k) identical(new_sigs[[k]], old_sigs[[k]]),
+    function(id) identical(new_sigs[[id]], old_sigs[[id]]),
     logical(1L)
   )]
 
+  removed <- c(setdiff(old_ids, new_ids), shape_changed)
+  added   <- c(setdiff(new_ids, old_ids), shape_changed)
+
+  # `order` policy, derived from the client contract (see the `irid-mutate`
+  # handler in inst/js/irid.js): given only `removes` + tail-`inserts`, the
+  # client produces this DOM sequence —
+  #   natural = (old_ids without `removed`, in old order) ++ (added, insert order)
+  # `added` here is exactly the insert order `run_reconcile_plan` uses. `order`
+  # is required precisely when that differs from the desired `new_ids`. This one
+  # rule reproduces both modes' historical behaviour (positional append / trim
+  # omit it; mid-list rebuild and keyed reorder send it) with no mode flag, and
+  # additionally omits it on keyed tail-appends — a correct payload improvement.
+  natural_order <- c(setdiff(old_ids, removed), added)
+
   list(
-    noop = identical(new_keys, old_keys) && length(shape_changed) == 0L,
-    has_duplicates = anyDuplicated(new_keys) > 0L,
-    removed = c(setdiff(old_keys, new_keys), shape_changed),
-    added   = c(setdiff(new_keys, old_keys), shape_changed),
-    kept    = setdiff(surviving, shape_changed)
+    noop = identical(new_ids, old_ids) && length(shape_changed) == 0L,
+    has_duplicates = anyDuplicated(new_ids) > 0L,
+    removed = removed,
+    added   = added,
+    kept    = setdiff(surviving, shape_changed),
+    order   = if (!identical(new_ids, natural_order)) new_ids else NULL,
+    build_index = stats::setNames(match(added, new_ids), added)
   )
 }
 
-# Positional mode. `old_sigs`/`new_sigs` are the previous/current per-slot
-# shape signatures (length = old/new list length). Slot i stays slot i;
-# length changes trim/append at the tail, and a surviving slot whose shape
-# changed is rebuilt in place.
-#
-# Returns:
-#   noop          - same length and no common slot changed shape
-#   trim          - trailing indices to drop (shrink)
-#   removed       - indices to tear down (trim ++ shape-changed)
-#   build         - indices to (re)build (grow ++ shape-changed)
-#   shape_changed - common-slot indices whose shape changed (drives `order`)
-#   new_len       - current list length
-plan_reconcile_positional <- function(old_sigs, new_sigs) {
-  old_len <- length(old_sigs)
-  new_len <- length(new_sigs)
-  common <- min(old_len, new_len)
-
-  shape_changed <- if (common > 0L) {
-    which(!vapply(
-      seq_len(common),
-      function(i) identical(new_sigs[[i]], old_sigs[[i]]),
-      logical(1L)
-    ))
-  } else {
-    integer(0)
+# Mode-agnostic executor. Runs a `plan_reconcile()` plan against the per-item
+# state held in `env` (`item_mounts`, a named map of entries by string id, and
+# `current_ids`, the ordered id vector). Order of effects mirrors the client's
+# `irid-mutate` handling and the framework's mount/teardown invariants:
+# teardown removed → build added (DOM string) → send mutate → mount added
+# (after the DOM exists) → reposition kept. `build_entry` stays mode-aware (it
+# builds genuinely different value-access closures per mode); the executor only
+# calls it.
+run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
+                               teardown_entry, session, cf_id, depth) {
+  removes <- character(0)
+  for (id in plan$removed) {
+    teardown_entry(env$item_mounts[[id]])
+    removes <- c(removes, env$item_mounts[[id]]$wrapper_id)
+    env$item_mounts[[id]] <- NULL
   }
 
-  trim <- if (new_len < old_len) (new_len + 1L):old_len else integer(0)
-  grow <- if (new_len > old_len) (old_len + 1L):new_len else integer(0)
+  inserts <- list()
+  for (id in plan$added) {
+    slot <- plan$build_index[[id]]
+    entry <- build_entry(id, slot, item_list[[slot]])
+    inserts[[length(inserts) + 1L]] <- as.character(entry$processed$tag)
+    env$item_mounts[[id]] <- entry
+  }
 
-  list(
-    noop = new_len == old_len && length(shape_changed) == 0L,
-    trim = trim,
-    removed = c(trim, shape_changed),
-    build = c(grow, shape_changed),
-    shape_changed = shape_changed,
-    new_len = new_len
-  )
+  msg <- list(id = cf_id)
+  if (length(removes) > 0L) msg$removes <- as.list(removes)
+  if (length(inserts) > 0L) msg$inserts <- inserts
+  if (!is.null(plan$order)) {
+    msg$order <- as.list(vapply(
+      plan$order,
+      function(id) env$item_mounts[[id]]$wrapper_id,
+      character(1L)
+    ))
+  }
+  session$sendCustomMessage("irid-mutate", msg)
+
+  # Mount new entries after their DOM exists.
+  for (id in plan$added) {
+    entry <- env$item_mounts[[id]]
+    entry$mount <- irid_mount_processed(
+      entry$processed, session, depth = depth + 1L
+    )
+    entry$processed <- NULL
+    env$item_mounts[[id]] <- entry
+  }
+
+  # Live position for kept ids whose slot moved. `pos_rv` is keyed-only;
+  # positional entries hold `pos_rv = NULL` (their slot is their identity and
+  # never permutes), so the guard makes this a no-op for them.
+  for (id in plan$kept) {
+    entry <- env$item_mounts[[id]]
+    if (!is.null(entry$pos_rv)) entry$pos_rv(match(id, new_ids))
+  }
+
+  env$current_ids <- new_ids
+  invisible()
 }
 
 #' Mount a pre-processed irid tag tree
@@ -412,12 +457,19 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         cf_nformals <- length(formals(cf_fn))
         keyed <- !is.null(cf_by)
 
-        # Per-item state. Positional mode uses an unnamed list indexed by
-        # slot position; keyed mode uses a named list keyed by stringified
-        # `by(item)`. Each entry holds:
+        # Per-item state, unified across modes (see `plan_reconcile`).
+        # `item_mounts` is always a named map keyed by string id — keyed
+        # ids are the stringified `by(item)`; positional ids are
+        # `as.character(seq_len(n))` (always dense `"1".."n"`, since
+        # positional only grows/trims at the tail and rebuilds in place),
+        # so the map stays equivalent to the old dense list. Each entry
+        # holds:
         #   scope, mount, wrapper_id, accessor, pos_rv (keyed only),
         #   is_record_shape (per-entry — the list may be heterogeneous),
         #   processed (transient — cleared after mount).
+        # `current_ids` is the ordered id vector — the source of truth for
+        # display sequence and for the next render's `old_ids` (a named
+        # map's key order does not track display order after removals).
         #
         # Shape is decided per-entry at build time from the item's
         # current value, not once for the whole list. A slot whose
@@ -426,19 +478,19 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # path as add/remove. This lets `Each(items, \(x) Match(x, ...))`
         # work over heterogeneous lists.
         item_mounts <- list()
-        current_keys <- character(0)
+        current_ids <- character(0)
         env <- environment()
 
         # Build accessor + tag tree + mount entry for one item.
-        # `key_or_idx` is the storage key in `item_mounts`; `slot_index`
-        # is the initial 1-indexed position used to seed `pos_rv`. For
-        # positional mode both are the same integer; for keyed mode the
-        # storage key is the stringified `by(item)`. `item_value` is the
-        # current value at build time — used to pick the accessor shape
-        # and seed the entry's structural signature without re-reading
-        # `cf_items()` (and so heterogeneous lists build each slot
+        # `id` is the storage key in `item_mounts` (stringified `by(item)`
+        # in keyed mode, `as.character(slot)` in positional mode).
+        # `slot_index` is the 1-indexed position in the current item list —
+        # it seeds `pos_rv` (keyed) and is the captured slot (positional).
+        # `item_value` is the current value at build time, used to pick the
+        # accessor shape and seed the entry's structural signature without
+        # re-reading `cf_items()` (so heterogeneous lists build each slot
         # against its own item, not the first one).
-        build_entry <- function(key_or_idx, slot_index, item_value) {
+        build_entry <- function(id, slot_index, item_value) {
           wrapper_id <- counter()
           scope <- make_scope(session)
           shape_sig <- shape_signature(item_value)
@@ -459,7 +511,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
                 function(x) as.character(cf_by(x)),
                 character(1L)
               )
-              match(key_or_idx, keys_now)
+              match(id, keys_now)
             }
             get_value <- function() {
               idx <- current_index()
@@ -477,7 +529,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             pos_accessor <- reactiveProxy(get = function() pos_rv())
           } else {
             # Positional mode: slot index is captured (slots are stable).
-            ii <- key_or_idx
+            ii <- slot_index
             get_value <- function() cf_items()[[ii]]
             set_value <- function(v) {
               new_items <- shiny::isolate(cf_items())
@@ -529,168 +581,55 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           item_list <- cf_items()
           validate_each_kinds(item_list)
 
-          if (keyed) {
-            new_keys <- vapply(
+          # The only per-mode difference is how ids are produced: keyed ids
+          # are the stringified `by(item)`; positional ids are the slot
+          # numbers. Everything after is shared (see `plan_reconcile`).
+          # `USE.NAMES = FALSE` keeps `new_ids` unnamed so it compares
+          # cleanly against the planner's freshly built `natural_order`.
+          new_ids <- if (keyed) {
+            vapply(
               item_list,
               function(x) as.character(cf_by(x)),
-              character(1L)
+              character(1L),
+              USE.NAMES = FALSE
             )
-            old_keys <- env$current_keys
-
-            # Decide the diff from shape signatures (pure — see
-            # `plan_reconcile_keyed`). A kept key whose shape changed is
-            # promoted to remove+add: the mini-store's leaf tree is
-            # derived from the item at mount time, so any structural
-            # change (scalar↔record, or a record with different keys at
-            # any depth) needs a fresh entry with the new shape.
-            new_sigs <- stats::setNames(
-              lapply(item_list, shape_signature), new_keys
-            )
-            old_sigs <- stats::setNames(
-              lapply(old_keys, function(k) env$item_mounts[[k]]$shape_sig),
-              old_keys
-            )
-            plan <- plan_reconcile_keyed(old_keys, new_keys, old_sigs, new_sigs)
-
-            # Pure value-change short-circuit. The observer fires on any
-            # change to the parent collection (including in-place value
-            # edits), but the per-item mini-store / scalar-accessor
-            # propagators handle in-place changes themselves. No key or
-            # shape change means no DOM work — and emitting an
-            # `irid-mutate` here detaches every child range into a
-            # fragment client-side just to re-insert it, which kills
-            # focus on any focused input inside.
-            if (plan$noop) return()
-
-            if (plan$has_duplicates) {
-              cli::cli_abort("{.fn Each} requires unique keys from the {.arg by} function.")
-            }
-
-            removed_keys <- plan$removed
-            added_keys <- plan$added
-            kept_keys <- plan$kept
-
-            removes <- character(0)
-            for (key in removed_keys) {
-              teardown_entry(env$item_mounts[[key]])
-              removes <- c(removes, env$item_mounts[[key]]$wrapper_id)
-              env$item_mounts[[key]] <- NULL
-            }
-
-            inserts <- list()
-            for (key in added_keys) local({
-              k <- key
-              idx <- match(k, new_keys)
-              entry <- build_entry(k, idx, item_list[[idx]])
-              inserts[[length(inserts) + 1L]] <<- as.character(
-                entry$processed$tag
-              )
-              env$item_mounts[[k]] <- entry
-            })
-
-            order <- vapply(new_keys, function(key) {
-              env$item_mounts[[key]]$wrapper_id
-            }, character(1L), USE.NAMES = FALSE)
-
-            session$sendCustomMessage("irid-mutate", list(
-              id = cf_id,
-              removes = as.list(removes),
-              inserts = inserts,
-              order = as.list(order)
-            ))
-
-            for (key in added_keys) {
-              entry <- env$item_mounts[[key]]
-              entry$mount <- irid_mount_processed(
-                entry$processed, session, depth = depth + 1L
-              )
-              entry$processed <- NULL
-              env$item_mounts[[key]] <- entry
-            }
-
-            # Live position fires for any kept item whose slot moved.
-            for (key in kept_keys) {
-              new_idx <- match(key, new_keys)
-              env$item_mounts[[key]]$pos_rv(new_idx)
-            }
-
-            env$current_keys <- new_keys
-
           } else {
-            # Positional mode. Slot i is slot i for as long as it lives;
-            # in-place value changes propagate via each slot accessor's
-            # internal observer (no DOM work here). Length changes
-            # append/destroy at the tail. A surviving slot whose value
-            # changed shape is torn down and rebuilt in place — same
-            # DOM mutate as length changes, but with `order` so the
-            # client knows where the new range belongs.
-            old_sigs <- lapply(
-              seq_along(env$item_mounts),
-              function(i) env$item_mounts[[i]]$shape_sig
-            )
-            new_sigs <- lapply(item_list, shape_signature)
-            plan <- plan_reconcile_positional(old_sigs, new_sigs)
-            new_len <- plan$new_len
-            shape_changed <- plan$shape_changed
-            build_indices <- plan$build
-
-            if (plan$noop) {
-              # Pure value-change — slot accessors handle it. No DOM work.
-              return()
-            }
-
-            # Tear down: trailing trim (if shrunk) + shape-changed slots.
-            removes <- character(0)
-            for (i in plan$removed) {
-              teardown_entry(env$item_mounts[[i]])
-              removes <- c(removes, env$item_mounts[[i]]$wrapper_id)
-            }
-            # Drop trimmed entries; shape-changed slots are overwritten
-            # below by their rebuilt entries (same index).
-            if (length(plan$trim) > 0L) {
-              env$item_mounts <- env$item_mounts[seq_len(new_len)]
-            }
-
-            # Build: new tail appends + shape-changed replacements (see
-            # `plan_reconcile_positional`).
-            inserts <- list()
-            for (i in build_indices) local({
-              ii <- i
-              entry <- build_entry(ii, ii, item_list[[ii]])
-              inserts[[length(inserts) + 1L]] <<- as.character(
-                entry$processed$tag
-              )
-              env$item_mounts[[ii]] <- entry
-            })
-
-            msg <- list(id = cf_id)
-            if (length(removes) > 0L) msg$removes <- as.list(removes)
-            if (length(inserts) > 0L) msg$inserts <- inserts
-            # `order` is required when shape changes happen mid-list —
-            # tail appends and trims are positional by construction, but
-            # a rebuilt mid-slot has a new wrapper_id that the client
-            # needs to position. Send the full ordering whenever any
-            # shape change occurred; tail-only changes still don't need
-            # it (and skipping keeps the wire payload minimal).
-            if (length(shape_changed) > 0L) {
-              msg$order <- as.list(vapply(
-                seq_len(new_len),
-                function(i) env$item_mounts[[i]]$wrapper_id,
-                character(1L)
-              ))
-            }
-            session$sendCustomMessage("irid-mutate", msg)
-
-            # Mount new entries (after DOM exists).
-            for (i in build_indices) {
-              entry <- env$item_mounts[[i]]
-              entry$mount <- irid_mount_processed(
-                entry$processed, session, depth = depth + 1L
-              )
-              entry$processed <- NULL
-              env$item_mounts[[i]] <- entry
-            }
+            as.character(seq_along(item_list))
           }
+          old_ids <- env$current_ids
+
+          # Decide the diff from shape signatures (pure — see
+          # `plan_reconcile`). A kept id whose shape changed is promoted to
+          # remove+add: the mini-store's leaf tree is derived from the item
+          # at mount time, so any structural change (scalar↔record, or a
+          # record with different keys at any depth) needs a fresh entry
+          # with the new shape.
+          new_sigs <- stats::setNames(
+            lapply(item_list, shape_signature), new_ids
+          )
+          old_sigs <- stats::setNames(
+            lapply(old_ids, function(id) env$item_mounts[[id]]$shape_sig),
+            old_ids
+          )
+          plan <- plan_reconcile(old_ids, new_ids, old_sigs, new_sigs)
+
+          # Pure value-change short-circuit. The observer fires on any
+          # change to the parent collection (including in-place value
+          # edits), but the per-item mini-store / scalar-accessor
+          # propagators handle in-place changes themselves. No id or shape
+          # change means no DOM work — and emitting an `irid-mutate` here
+          # detaches every child range into a fragment client-side just to
+          # re-insert it, which kills focus on any focused input inside.
+          if (plan$noop) return()
+
+          if (plan$has_duplicates) {
+            cli::cli_abort("{.fn Each} requires unique keys from the {.arg by} function.")
+          }
+
+          run_reconcile_plan(
+            plan, new_ids, item_list, env, build_entry, teardown_entry,
+            session, cf_id, depth
+          )
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
