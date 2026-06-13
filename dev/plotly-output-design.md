@@ -461,6 +461,56 @@ The raw payload is *also* forwarded — the JS calls `sendEvent("relayout", payl
 
 Single-source props are even simpler: `plotly_selected` → `setProp("selected_points", …)`, `plotly_restyle` → `setProp("trace_visibility", …)`. The discrete-only events (`click`, `hover`, `unhover`, `doubleclick`, …) are pure `sendEvent` calls with no prop side. The wrapper drops any `events` entry whose callback is `NULL`; `setProp` / `sendEvent` are silent no-ops with no R subscriber anyway, but omitting the registration keeps the managed-state table clean.
 
+### Parsing the relayout payload
+
+`plotly_relayout` does not hand back clean `{ "xaxis.range": [lo, hi] }`
+objects. The payload is a flat bag of dot/bracket-notation keys whose exact
+spelling depends on the gesture, and the keys are relative to `layout` (the
+`layout.` prefix of the spec path is dropped). So each relayout-sourced entry
+carries a `relayoutKey` (its spec path minus `layout.`) and a
+`fromRelayout(payload)` reader that returns one of three things:
+
+- a **value** — the field changed; write it to the prop;
+- `null` — the user *reset* the field (e.g. double-click autoscale); clear the
+  prop to `NULL` so it defers to the spec;
+- `undefined` — this gesture didn't touch the field; leave the prop alone.
+
+The `null`-vs-`undefined` split is exactly what the JS sketch's
+`if (v !== undefined) setProp(entry.name, v)` leans on — `null` clears, absent
+abstains.
+
+The gestures a **range** reader must fold together:
+
+| gesture                | payload keys                                | reader result |
+|------------------------|---------------------------------------------|---------------|
+| drag-zoom / pan        | `xaxis.range[0]`, `xaxis.range[1]` (split!) | `[lo, hi]`    |
+| programmatic / API set | `xaxis.range` (whole array)                 | `[lo, hi]`    |
+| double-click reset     | `xaxis.autorange: true` (no range keys)     | `null`        |
+| unrelated gesture      | (key absent)                                | `undefined`   |
+
+A range `fromRelayout` therefore checks, in order: whole-array key → split
+`[0]`/`[1]` keys → `<axis>.autorange === true` → otherwise `undefined`. The
+split form is the one a drag actually produces; the whole-array form never
+appears from direct interaction. A **scalar** entry (`dragmode`, `hovermode`) is
+the simple case: present key → value, absent → `undefined`. Subplot entries use
+the same shapes with the axis number baked into `relayoutKey`
+(`xaxis2.range[0]`, …).
+
+Two robustness notes:
+
+- The split keys arrive together for any drag. If only one half ever shows up,
+  the reader treats the gesture as `undefined` (skip) rather than fabricating a
+  half-range; a follow-up can read the missing half off the graph if real plots
+  turn out to emit partial payloads.
+- `<axis>.autorange: false` — which plotly often includes *alongside* a concrete
+  range — is ignored, because the explicit range is checked first. The reader
+  returns the range, not `null`.
+
+This parsing only runs for genuine user gestures: the `settling` guard (§5)
+`return`s before the fan-out during a `Plotly.react()`, so the auto-fit relayout
+that fires as the spec settles never reaches `fromRelayout` and never clears a
+binding.
+
 ### Snap-back is automatic
 
 The original design specced an explicit JS-side "diff server-authoritative vs last-sent" snap-back path. With the two-way-prop substrate that's gone — the per-binding force-send-on-no-op echo and the widget's idempotent `update` hook combine to deliver it:
@@ -505,7 +555,7 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
     if (settling) return;                   // spec-computed (auto-fit), not user
     TABLE.forEach(function (entry) {
       if (entry.source !== "relayout") return;
-      var v = extractFromPayload(payload, entry.path);
+      var v = entry.fromRelayout(payload);    // value | null | undefined
       if (v !== undefined) setProp(entry.name, v);     // two-way prop write-back
     });
     sendEvent("relayout", payload);          // raw escape hatch (no-op if unbound)
@@ -578,10 +628,12 @@ The translation table is the list of plotly features `PlotlyOutput` knows how to
 - **Spec path** — where the value is merged into the plotly spec
 - **Source event** — the plotly.js event that writes back to it
 - **Converters / apply primitive** — `fromEvent` (event payload → canonical
-  value), `writeSpec` (value → spec merge), and `apply` (value → live graph via
-  `Plotly.relayout` or `Plotly.restyle`). Symmetric entries get identity
-  defaults; the asymmetric `data[*]` entries supply their own (see *Value
-  shapes*).
+  value; relayout-sourced entries use `fromRelayout`, which reads `relayoutKey`
+  out of the shared payload and may return `null`/`undefined` — see *Parsing the
+  relayout payload* in §6), `writeSpec` (value → spec merge), and `apply` (value
+  → live graph via `Plotly.relayout` or `Plotly.restyle`). Symmetric entries get
+  identity defaults; the asymmetric `data[*]` entries supply their own (see
+  *Value shapes*).
 
 Launch-scope table (everything else lives in the `onRelayout` escape hatch):
 
