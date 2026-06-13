@@ -173,7 +173,7 @@ test_that("identical write does not fire leaf observers", {
 test_that("write with unknown key errors", {
   fix <- new_mini(list(a = 1, b = 2))
   expect_error(fix$mini(list(a = 1, b = 2, c = 3)),
-               "Unknown keys.*c")
+               "Unknown key.*c")
 })
 
 test_that("write with non-list errors", {
@@ -311,7 +311,7 @@ test_that("nested unknown-key write errors at the right depth", {
   fix <- new_mini(list(user = list(name = "A", email = "B")))
   expect_error(
     fix$mini(list(user = list(name = "X", phone = "1"))),
-    "Unknown keys.*phone"
+    "Unknown key.*phone"
   )
 })
 

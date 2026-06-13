@@ -26,19 +26,17 @@
 #' @export
 When <- function(condition, yes, otherwise = NULL) {
   if (!is.function(yes)) {
-    stop(
-      "`yes` must be a 0-arg function returning a tag tree ",
-      "(e.g. `\\() tags$div(...)`); got ",
-      paste(class(yes), collapse = "/"),
-      call. = FALSE
-    )
+    cli::cli_abort(c(
+      "{.arg yes} must be a 0-arg function returning a tag tree, \\
+       e.g. {.code \\() tags$div(...)}.",
+      "x" = "You supplied {.obj_type_friendly {yes}}."
+    ))
   }
   if (!is.null(otherwise) && !is.function(otherwise)) {
-    stop(
-      "`otherwise` must be a 0-arg function returning a tag tree or NULL; ",
-      "got ", paste(class(otherwise), collapse = "/"),
-      call. = FALSE
-    )
+    cli::cli_abort(c(
+      "{.arg otherwise} must be a 0-arg function returning a tag tree or {.code NULL}.",
+      "x" = "You supplied {.obj_type_friendly {otherwise}}."
+    ))
   }
   structure(
     list(condition = condition, yes = yes, otherwise = otherwise),
@@ -104,14 +102,13 @@ When <- function(condition, yes, otherwise = NULL) {
 #' @export
 Each <- function(items, fn, by = NULL) {
   if (!is.function(items)) {
-    stop("`items` must be a callable (e.g. `reactiveVal`, `\\() ...`)",
-         call. = FALSE)
+    cli::cli_abort("{.arg items} must be a callable, e.g. {.code reactiveVal} or {.code \\() ...}.")
   }
   if (!is.function(fn)) {
-    stop("`fn` must be a function", call. = FALSE)
+    cli::cli_abort("{.arg fn} must be a function.")
   }
   if (!is.null(by) && !is.function(by)) {
-    stop("`by` must be NULL or a function", call. = FALSE)
+    cli::cli_abort("{.arg by} must be {.code NULL} or a function.")
   }
   structure(
     list(items = items, by = by, fn = fn),
@@ -135,11 +132,11 @@ Each <- function(items, fn, by = NULL) {
 #' @export
 Case <- function(predicate, body) {
   if (!is.function(body)) {
-    stop(
-      "`body` must be a function returning a tag tree (e.g. `\\() tags$div(...)`); ",
-      "got ", paste(class(body), collapse = "/"),
-      call. = FALSE
-    )
+    cli::cli_abort(c(
+      "{.arg body} must be a function returning a tag tree, \\
+       e.g. {.code \\() tags$div(...)}.",
+      "x" = "You supplied {.obj_type_friendly {body}}."
+    ))
   }
   list(predicate = predicate, body = body)
 }
@@ -185,12 +182,11 @@ Default <- function(body) {
 #' @export
 Match <- function(callable, ...) {
   if (!is.function(callable)) {
-    stop(
-      "`Match` requires a leading callable (a `reactiveVal`, `reactive`, ",
-      "store leaf, mini-store, or `\\() ...` closure); got ",
-      paste(class(callable), collapse = "/"),
-      call. = FALSE
-    )
+    cli::cli_abort(c(
+      "{.fn Match} requires a leading callable: a {.code reactiveVal}, \\
+       {.code reactive}, store leaf, mini-store, or {.code \\() ...} closure.",
+      "x" = "You supplied {.obj_type_friendly {callable}}."
+    ))
   }
   cases <- lapply(list(...), normalize_match_case)
   structure(
@@ -272,7 +268,10 @@ TableOutput <- function(fn, ...) {
 #' @export
 DTOutput <- function(fn, ...) {
   if (!requireNamespace("DT", quietly = TRUE)) {
-    stop("Package 'DT' is required for DTOutput(). Install it with install.packages('DT').")
+    cli::cli_abort(c(
+      "The {.pkg DT} package is required for {.fn DTOutput}.",
+      "i" = 'Install it with {.run install.packages("DT")}.'
+    ))
   }
   Output(DT::renderDT, DT::DTOutput, fn, ...)
 }

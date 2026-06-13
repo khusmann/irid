@@ -7,28 +7,33 @@
 # listener, so `preventDefault` and friends have nothing to act on).
 normalize_widget_events <- function(events) {
   if (!is.list(events)) {
-    stop("`events` must be a list; got ",
-         paste(class(events), collapse = "/"), call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg events} must be a list.",
+      "x" = "You supplied {.obj_type_friendly {events}}."
+    ))
   }
   events <- events[!vapply(events, is.null, logical(1L))]
   if (length(events) == 0L) return(list())
   nms <- names(events)
   if (is.null(nms) || any(!nzchar(nms))) {
-    stop("every entry in `events` must be named with its wire event name",
-         call. = FALSE)
+    cli::cli_abort("Every entry in {.arg events} must be named with its wire event name.")
   }
   out <- list()
   for (key in nms) {
     val <- events[[key]]
     if (!is.function(val) && !inherits(val, "irid_wire")) {
-      stop("`events$", key, "` must be a function or a `wire`; got ",
-           paste(class(val), collapse = "/"), call. = FALSE)
+      cli::cli_abort(c(
+        "{.arg events${key}} must be a function or a {.cls irid_wire}.",
+        "x" = "You supplied {.obj_type_friendly {val}}."
+      ))
     }
     w <- as_wire(val)
     if (!is.null(w$dom_opts)) {
-      stop("`dom_opts` is not allowed on the widget event `", key,
-           "`: `prevent_default` and friends need a DOM listener, but a ",
-           "widget event is delivered through `sendEvent()`.", call. = FALSE)
+      cli::cli_abort(c(
+        "{.arg dom_opts} is not allowed on the widget event {.field {key}}.",
+        "i" = "{.arg prevent_default} and friends need a DOM listener, but a \\
+               widget event is delivered through {.code sendEvent()}."
+      ))
     }
     # A NULL subject (bare `NULL`, or `merge(default, NULL)` for an optional
     # handler) means no handler — drop the entry.
@@ -95,16 +100,18 @@ IridWidget <- function(
   container = NULL
 ) {
   if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(name)) {
-    stop("`name` must be a non-empty character scalar", call. = FALSE)
+    cli::cli_abort("{.arg name} must be a non-empty character scalar.")
   }
   if (!is.list(props)) {
-    stop("`props` must be a list; got ",
-         paste(class(props), collapse = "/"), call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg props} must be a list.",
+      "x" = "You supplied {.obj_type_friendly {props}}."
+    ))
   }
   if (length(props) > 0L) {
     p_nms <- names(props)
     if (is.null(p_nms) || any(!nzchar(p_nms))) {
-      stop("every entry in `props` must be named", call. = FALSE)
+      cli::cli_abort("Every entry in {.arg props} must be named.")
     }
   }
   events <- normalize_widget_events(events)
@@ -114,17 +121,20 @@ IridWidget <- function(
     } else if (is.list(deps)) {
       ok <- vapply(deps, inherits, logical(1L), "html_dependency")
       if (!all(ok)) {
-        stop("`deps` must be an `html_dependency` or a list of them",
-             call. = FALSE)
+        cli::cli_abort("{.arg deps} must be an {.cls html_dependency} or a list of them.")
       }
     } else {
-      stop("`deps` must be NULL, an `html_dependency`, or a list of them; got ",
-           paste(class(deps), collapse = "/"), call. = FALSE)
+      cli::cli_abort(c(
+        "{.arg deps} must be {.code NULL}, an {.cls html_dependency}, or a list of them.",
+        "x" = "You supplied {.obj_type_friendly {deps}}."
+      ))
     }
   }
   if (!is.null(container) && !inherits(container, "shiny.tag")) {
-    stop("`container` must be NULL or a `shiny.tag`; got ",
-         paste(class(container), collapse = "/"), call. = FALSE)
+    cli::cli_abort(c(
+      "{.arg container} must be {.code NULL} or a {.cls shiny.tag}.",
+      "x" = "You supplied {.obj_type_friendly {container}}."
+    ))
   }
   structure(
     list(
@@ -152,10 +162,9 @@ register_widget_dep <- function(dep) {
   if (!is.null(dep$package)) {
     root <- system.file(package = dep$package)
     if (!nzchar(root)) {
-      stop(
-        "Could not locate the '", dep$package, "' package for ",
-        "widget dependency '", dep$name, "'.",
-        call. = FALSE
+      cli::cli_abort(
+        "Could not locate the {.pkg {dep$package}} package for widget \\
+         dependency {.field {dep$name}}."
       )
     }
     if (!is.null(dep$src$file)) {

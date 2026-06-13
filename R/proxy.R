@@ -29,10 +29,10 @@
 #' @export
 reactiveProxy <- function(get, set = NULL) {
   if (!is.function(get)) {
-    stop("`get` must be a function", call. = FALSE)
+    cli::cli_abort("{.arg get} must be a function.")
   }
   if (!is.null(set) && !is.function(set)) {
-    stop("`set` must be a function or NULL", call. = FALSE)
+    cli::cli_abort("{.arg set} must be a function or {.code NULL}.")
   }
   force(get)
   force(set)

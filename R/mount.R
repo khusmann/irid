@@ -496,8 +496,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             }
 
             if (anyDuplicated(new_keys)) {
-              stop("Each() requires unique keys from the `by` function",
-                   call. = FALSE)
+              cli::cli_abort("{.fn Each} requires unique keys from the {.arg by} function.")
             }
 
             # Shape-changed kept keys are promoted to remove + add so

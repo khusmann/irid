@@ -158,7 +158,7 @@ test_that("value + onInput on the same element errors (one channel)", {
   rv <- shiny::reactiveVal("")
   expect_error(
     process_tags(tags$input(value = rv, onInput = function(e) NULL)),
-    "bound \\*or\\* handled"
+    "bound.*handled"
   )
 })
 
@@ -168,7 +168,7 @@ test_that("checked + onChange on a checkbox errors (one channel)", {
     process_tags(
       tags$input(type = "checkbox", checked = rv, onChange = function(e) NULL)
     ),
-    "bound \\*or\\* handled"
+    "bound.*handled"
   )
 })
 
@@ -176,7 +176,7 @@ test_that("value + onChange on a <select> errors (autobinds on change)", {
   rv <- shiny::reactiveVal("")
   expect_error(
     process_tags(tags$select(value = rv, onChange = function(e) NULL)),
-    "bound \\*or\\* handled"
+    "bound.*handled"
   )
 })
 
@@ -206,7 +206,7 @@ test_that("duplicate explicit handlers on one event error", {
   h2 <- function(e) NULL
   expect_error(
     process_tags(htmltools::tag("input", list(onInput = h1, onInput = h2))),
-    "duplicate handler for event `input`"
+    "[Dd]uplicate handler for event input"
   )
 })
 

@@ -54,12 +54,12 @@ is_branch <- function(value, path) {
   if (is.null(nm)) return(FALSE)
   if (all(nzchar(nm))) return(TRUE)
   empty_idx <- which(!nzchar(nm))
-  stop(sprintf(
-    "List at %s is partially named (positions %s have no names). %s",
-    if (nzchar(path)) sprintf("'%s'", path) else "store root",
-    paste(empty_idx, collapse = ", "),
-    "Use a fully named list (store node) or a fully unnamed list (leaf)."
-  ), call. = FALSE)
+  where <- if (nzchar(path)) sprintf("'%s'", path) else "store root"
+  cli::cli_abort(c(
+    "{cli::qty(length(empty_idx))}List at {where} is partially named \\
+     (position{?s} {empty_idx} ha{?s/ve} no name).",
+    "i" = "Use a fully named list (store node) or a fully unnamed list (leaf)."
+  ))
 }
 
 # Drops the `AsIs` class added by `I()`, leaving any other classes intact.
@@ -89,7 +89,7 @@ build_node <- function(value, path, root = FALSE) {
     )
     make_store(children, keys, path)
   } else {
-    if (root) stop("`initial` must be a named list", call. = FALSE)
+    if (root) cli::cli_abort("{.arg initial} must be a named list.")
     shiny::reactiveVal(strip_asis(value))
   }
 }
@@ -127,32 +127,26 @@ validate_write <- function(node, value) {
   env <- environment(node)
   label <- env$label
   if (!is.list(value)) {
-    stop(sprintf(
-      "Write to %s expected a named list, got %s",
-      label, paste(class(value), collapse = "/")
-    ), call. = FALSE)
+    cli::cli_abort(c(
+      "Write to {label} expected a named list.",
+      "x" = "You supplied {.obj_type_friendly {value}}."
+    ))
   }
   write_keys <- names(value)
   if (length(value) > 0L &&
       (is.null(write_keys) || !all(nzchar(write_keys)))) {
-    stop(sprintf(
-      "Write to %s expected a named list (got unnamed elements)",
-      label
-    ), call. = FALSE)
+    cli::cli_abort(c(
+      "Write to {label} expected a named list.",
+      "x" = "It has unnamed elements."
+    ))
   }
   unknown <- setdiff(write_keys, env$keys)
   if (length(unknown) > 0L) {
-    stop(sprintf(
-      "Unknown keys in store node %s: %s",
-      label, paste(unknown, collapse = ", ")
-    ), call. = FALSE)
+    cli::cli_abort("{cli::qty(unknown)}Unknown key{?s} in store node {label}: {.val {unknown}}.")
   }
   missing_keys <- setdiff(env$keys, write_keys)
   if (length(missing_keys) > 0L) {
-    stop(sprintf(
-      "Missing keys in store node %s: %s",
-      label, paste(missing_keys, collapse = ", ")
-    ), call. = FALSE)
+    cli::cli_abort("{cli::qty(missing_keys)}Missing key{?s} in store node {label}: {.val {missing_keys}}.")
   }
   for (k in env$keys) {
     validate_write(env$children[[k]], value[[k]])
@@ -183,51 +177,41 @@ length.reactiveStore <- function(x) {
   keys <- env$keys
   if (is.numeric(i)) {
     if (length(i) != 1L) {
-      stop(
-        "`[[` on a reactiveStore requires a single index",
-        call. = FALSE
-      )
+      cli::cli_abort("{.code [[} on a {.cls reactiveStore} requires a single index.")
     }
     if (!is.na(i) && i != as.integer(i)) {
-      stop(sprintf(
-        "`[[` on a reactiveStore requires an integer index (got %s)",
-        format(i)
-      ), call. = FALSE)
+      cli::cli_abort(c(
+        "{.code [[} on a {.cls reactiveStore} requires an integer index.",
+        "x" = "You supplied {.val {i}}."
+      ))
     }
     idx <- as.integer(i)
     if (is.na(idx) || idx < 1L || idx > length(keys)) {
-      stop(sprintf(
-        "Index %s out of range for store node with %d children",
-        format(i), length(keys)
-      ), call. = FALSE)
+      cli::cli_abort(
+        "Index {.val {i}} out of range for store node with {length(keys)} \\
+         child{?ren}."
+      )
     }
     env$children[[keys[idx]]]
   } else if (is.character(i)) {
     if (length(i) != 1L || is.na(i)) {
-      stop(
-        "`[[` on a reactiveStore requires a single key",
-        call. = FALSE
-      )
+      cli::cli_abort("{.code [[} on a {.cls reactiveStore} requires a single key.")
     }
     if (!(i %in% keys)) {
-      stop(sprintf("Unknown key '%s' in store node", i), call. = FALSE)
+      cli::cli_abort("Unknown key {.val {i}} in store node.")
     }
     env$children[[i]]
   } else {
-    stop(
-      "`[[` on a reactiveStore requires a string or integer index",
-      call. = FALSE
-    )
+    cli::cli_abort("{.code [[} on a {.cls reactiveStore} requires a string or integer index.")
   }
 }
 
 #' @export
 `[[<-.reactiveStore` <- function(x, i, value) {
-  stop(
-    "Cannot assign into a reactiveStore with `[[<-`. ",
-    "Use `store$key(value)` or `store(list(key = value))`.",
-    call. = FALSE
-  )
+  cli::cli_abort(c(
+    "Cannot assign into a {.cls reactiveStore} with {.code [[<-}.",
+    "i" = "Use {.code store$key(value)} or {.code store(list(key = value))}."
+  ))
 }
 
 #' @export
