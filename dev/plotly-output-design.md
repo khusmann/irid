@@ -345,33 +345,70 @@ On first render, non-`NULL` named args are merged into the plotly spec before se
 
 ## 5. User State vs Spec-Computed State
 
-### The problem
+> **Empirically grounded.** The behavior in this section and the snap-back path
+> in §6 were verified against **Plotly 2.35.2** with the throwaway harness in
+> [`dev/spikes/plotly-uirevision-spike.html`](spikes/plotly-uirevision-spike.html)
+> (questions Q1–Q4). These are exactly the internals that drift between plotly
+> major versions, so re-run the spike when bumping the pinned `{plotly}`.
 
-On first render, Plotly produces a concrete layout from the spec — either explicit ranges the user set in the plot call, or auto-fit ranges computed from the data when the spec left axes unspecified. Either way, `plotly_relayout` fires with the resulting values shortly after `Plotly.react()` settles. If we naively capture these, we write spec-computed ranges back into the bound callable. Now those ranges are "locked in" — the next data change preserves them instead of letting the spec re-compute.
+### `Plotly.react()` is silent — there is no auto-fit echo to suppress
 
-This matters most for auto-fit cases (where the computed range depends on data that may change), but the same issue applies to any spec-driven state that should follow the spec rather than override it.
+The original worry was that re-rendering would emit `plotly_relayout` with
+spec-computed (auto-fit) ranges that we'd capture as if the user had set them,
+locking them in. The spike shows that does **not** happen: `Plotly.react()`
+fires *no* `plotly_relayout` at all — not on an auto-range recompute from new
+data (Q1), not on an explicit range change, not on an `autorange: true` reset
+(Q2). Every `plotly_relayout` observed came from a genuine user gesture (a
+drag-zoom, which emits split `xaxis.range[0]` / `[1]` keys, or the zoom-tool
+select, which emits a lone `dragmode`). So the spec/data path needs no
+echo-suppression heuristic.
 
-### The solution
+### The real echo source: our own programmatic mutations
 
-The client-side handler distinguishes user-initiated layout changes from spec-computed ones:
+What *does* re-fire `plotly_relayout` is **our own** `Plotly.relayout()` /
+`Plotly.restyle()` — the targeted calls the `update` hook makes for snap-back,
+apply, and reset (Q4). The echo fires **synchronously, inside the call, before
+the returned promise resolves**, and carries the whole-array key
+(`xaxis.range: [lo, hi]`), not the split form. Unguarded it would loop:
+relayout → echo → `setProp` → write → …
 
-1. **On mount**, record that no user interaction has occurred.
-2. **On `plotly_relayout`**, check whether the event was triggered by user interaction (zoom/pan/drag) or by `Plotly.react()` settling the spec.
-3. Only write state back for user-initiated changes.
+The guard is a single `applying` flag the factory raises around every
+programmatic graph mutation and clears in that call's `.then()`; the
+`plotly_relayout` listener early-returns while it is set:
 
-`plotly_relayout` fires for both cases, but the timing and payload differ. Spec-computed updates fire synchronously after a `Plotly.react()` call; user zooms fire in response to mouse events. The client tracks whether a `Plotly.react()` call is in flight and suppresses relayout events that fire synchronously after it.
-
-If this heuristic proves unreliable, a fallback approach: only capture state after user interaction events (`plotly_selecting`, `plotly_relayouting`) and ignore `plotly_relayout` entirely as a state source.
-
-### NULL means "defer to the spec"
-
-`NULL` in any named arg means **"don't override the spec"** — both as the initial default and as a programmatic reset:
-
-```r
-xrange(NULL)   # defer to the spec
+```js
+function mutate(fn) { applying = true; return fn().then(function () { applying = false; }); }
+// el.on("plotly_relayout", function (p) { if (applying) return; /* fan out */ });
 ```
 
-When merging state into the spec, `NULL`-valued named args are simply omitted. Whatever the plot's spec function produced at that path — an explicit range, an `autorange: true`, or no setting at all — is what takes effect. `NULL` is *not* a command to force auto-fit; it's a signal that `PlotlyOutput` should not touch that field during the merge.
+Because the echo *precedes* the promise, clearing in `.then()` is always in time
+— the spike confirmed the flag is still set at echo time under every clear-timing
+tried (immediate, rAF, 50 ms). The `matchesCurrent` idempotence check (§6)
+remains as a secondary backstop for cross-flush races, but the flag alone
+suppresses the self-echo. (This replaces the earlier "tell a user zoom from a
+react-settling echo by timing" heuristic — there is nothing to distinguish on
+the react side, and the flag is an exact guard, not a timing guess.)
+
+### NULL: "stay out of the merge" and "reset to the spec" are different acts
+
+`NULL` in a named arg means **"PlotlyOutput is not controlling this field"** —
+but the spike shows that *releasing* control and *resetting* the view diverge,
+because `uirevision` makes them behave differently:
+
+- **A binding that is already `NULL` across a data-change `react()`** — the merge
+  omits the field; `uirevision` then *preserves whatever is on screen* (a user
+  zoom stays; an untouched auto-range keeps tracking the data). `NULL` here is
+  **not** a reset — it leaves the current view alone. (Q2b: react with no range
+  preserved the hand-zoom.)
+- **A binding *transitioning* to `NULL`** (`xrange(NULL)` as a deliberate reset)
+  — the `update` hook's `applyDeferred` issues a **targeted**
+  `Plotly.relayout(el, {"xaxis.autorange": true})` (or the spec's explicit range
+  if it has one), which bypasses `uirevision` and genuinely reverts to the spec's
+  view. (Q2e: explicit `autorange: true` reset works; Q2d: a merge alone cannot.)
+
+So `xrange(NULL)` *does* reset — via the targeted path — while a binding that is
+simply already `NULL` during a data update stays out of the way. Both readings of
+"defer to the spec" hold; they just run through different code paths.
 
 ---
 
@@ -506,10 +543,12 @@ Two robustness notes:
   range — is ignored, because the explicit range is checked first. The reader
   returns the range, not `null`.
 
-This parsing only runs for genuine user gestures: the `settling` guard (§5)
-`return`s before the fan-out during a `Plotly.react()`, so the auto-fit relayout
-that fires as the spec settles never reaches `fromRelayout` and never clears a
-binding.
+This parsing only runs for genuine user gestures. `Plotly.react()` itself emits
+no `plotly_relayout` (§5, spike Q1/Q2), so there is no auto-fit echo to filter;
+the only non-user relayout is the synchronous echo from our *own* targeted
+`Plotly.relayout()` / `Plotly.restyle()`, which the `applying` guard (§5)
+`return`s on before the fan-out — so a snap-back/apply/reset we issued never
+re-enters `fromRelayout`.
 
 ### Snap-back is automatic
 
@@ -520,17 +559,26 @@ The original design specced an explicit JS-side "diff server-authoritative vs la
 3. The force-send-on-no-op loop, **scoped to that one binding** (`write_targets = "xaxis_range"`), re-reads it with `isolate()` and queues an `irid-attr target="widget"` carrying the **old** canonical value in the coalesced `values` map, tagged with the source sequence. (This is what makes read-only snap-back automatic for every two-way prop — the wrapper writes nothing extra to get it.)
 4. The widget's `update({xaxis_range: oldValue})` hook compares against plotly's current state, sees a mismatch, and calls `Plotly.relayout(el, {"xaxis.range": oldValue})` — the snap. (The stale-echo gate upstream guarantees ordered batches, so the hook needs no sequence argument.)
 
-The per-binding scoping matters for plotly specifically: a relayout that only moved the x-axis must not force-send `yaxis_range` while a debounced y-axis write is still in flight. Targeted `Plotly.relayout()` bypasses `uirevision` preservation because it's a direct state update, not a reconciliation. **The wrapper writes nothing extra to get snap-back; declaring the prop is sufficient** — a framework guarantee for every two-way prop.
+The per-binding scoping matters for plotly specifically: a relayout that only moved the x-axis must not force-send `yaxis_range` while a debounced y-axis write is still in flight.
+
+**Step 4 must be a *targeted* `Plotly.relayout()`, not a re-`react()` — the spike proves it.** Re-rendering the spec with the unchanged old range merged in does *not* snap the plot back: under `uirevision`, a layout value equal to the previous render's value loses to the user's intervening zoom (Q2d — the re-asserted `[0,6]` was ignored in favor of the hand-zoom). Only a direct `Plotly.relayout()` overrides the live view, because it's a state update, not a reconciliation. The echo that targeted call then fires is swallowed by the `applying` guard (Q4), and `matchesCurrent` backstops any cross-flush race. **The wrapper writes nothing extra to get snap-back; declaring the prop is sufficient** — a framework guarantee for every two-way prop.
+
+One consequence worth surfacing to users: a **constant** (init-only) range prop is therefore *uncontrolled* — it seeds the initial view but has no write-back and no snap-back, so a user zoom sticks. To *lock* a range against interaction, bind a read-only `reactiveProxy` (its rejected write triggers the snap-back above); a bare constant is an initial value, not a constraint.
 
 ### JS side — `irid.defineWidget("plotly", ...)`
 
 ```js
 irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
   var TABLE = PLOTLY_TRANSLATION_TABLE;     // mirror of the R-side table
-  var settling = false;                     // suppress auto-fit relayout echoes
+  var applying = false;                     // raised around our own graph mutations
   var spec = props.spec;
   var state = {};
   TABLE.forEach(function (e) { state[e.name] = props[e.name]; });
+
+  // every programmatic mutation runs through this guard. react() is silent (Q1/
+  // Q2) so wrapping it is only defensive; relayout()/restyle() echo a synchronous
+  // plotly_relayout (Q4) that the guard makes the listener ignore.
+  function mutate(fn) { applying = true; return fn().then(function () { applying = false; }); }
 
   function merge(spec, state) {
     var s = deepCopy(spec);
@@ -543,16 +591,14 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
   }
 
   function render() {
-    settling = true;
-    var m = merge(spec, state);
-    return Plotly.react(el, m.data, m.layout).then(function () { settling = false; });
+    return mutate(function () { var m = merge(spec, state); return Plotly.react(el, m.data, m.layout); });
   }
 
   render();
 
   // user-driven layout changes fan out across the named state props
   el.on("plotly_relayout", function (payload) {
-    if (settling) return;                   // spec-computed (auto-fit), not user
+    if (applying) return;                   // our own relayout/restyle echo, not user
     TABLE.forEach(function (entry) {
       if (entry.source !== "relayout") return;
       var v = entry.fromRelayout(payload);    // value | null | undefined
@@ -577,10 +623,12 @@ irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
         var v = values[entry.name];
         state[entry.name] = v;
         if (reactNeeded) return;             // folded into the upcoming render()
-        // entry.apply picks the primitive — Plotly.relayout for layout paths,
-        // Plotly.restyle for the data[*] entries — and runs the value->spec
-        // conversion; entry.applyDeferred re-applies the spec's own value.
-        if (v == null) entry.applyDeferred(el, spec);          // "defer to spec"
+        // entry.apply / applyDeferred pick the primitive — Plotly.relayout for
+        // layout paths, Plotly.restyle for the data[*] entries — run the
+        // value->spec conversion, and wrap the call in mutate() so its echo is
+        // guarded. applyDeferred resets to the spec's value (autorange:true when
+        // the spec has no explicit range — a real reset, not a merge-omit; §5).
+        if (v == null) entry.applyDeferred(el, spec);          // "defer to spec" = reset
         else if (!entry.matchesCurrent(el, v)) entry.apply(el, v);   // snap / apply
       });
       if (reactNeeded) render();             // one redraw for the whole batch
@@ -741,7 +789,7 @@ The table grows additively. Adding a new entry doesn't break any existing code �
 - `onRelayout` escape hatch for fields outside the table
 - `reactiveProxy` for constrained writes — snap-back falls out of `IridWidget`'s per-binding force-send-on-no-op echo + the widget's `update(values)` hook calling `Plotly.relayout`
 - Bookmark serialization via user-constructed `reactiveStore`s
-- Auto-fit vs user-state distinction (client-side `settling` flag inside the widget factory)
+- Self-echo suppression for our own programmatic mutations (client-side `applying` flag inside the widget factory; `Plotly.react()` itself is silent, so there is no auto-fit echo to distinguish — §5)
 - `uirevision`-aware client-side state handling
 
 ### What this does not cover
@@ -757,9 +805,14 @@ The table grows additively. Adding a new entry doesn't break any existing code �
 
 ## 9. Open Questions
 
-### Detecting user-initiated relayout
+### Resolved by the spike (Plotly 2.35.2)
 
-The heuristic for distinguishing user zoom from auto-fit (Section 5) needs validation against real Plotly behavior. If unreliable, the fallback of only capturing state after explicit interaction events may be necessary.
+These were open; [`dev/spikes/plotly-uirevision-spike.html`](spikes/plotly-uirevision-spike.html) settled them. Re-confirm on a `{plotly}` bump.
+
+- **Distinguishing user zoom from spec-computed state — moot.** `Plotly.react()` emits *no* `plotly_relayout` (Q1/Q2), so there is no auto-fit echo to filter. The only non-user relayout is the synchronous echo from our *own* targeted `Plotly.relayout()`/`restyle()` (Q4), guarded by the `applying` flag (§5). The earlier user-vs-react timing heuristic is gone.
+- **Snap-back must be targeted, and it works.** A re-`react()` with the unchanged old value does *not* revert a user zoom under `uirevision` (Q2d); a direct `Plotly.relayout()` does. Its echo is swallowed by `applying`, and the same-flush coalescing means a real apply redraws once.
+- **`matchesCurrent` reads public API.** After a zoom, `gd.layout.xaxis.range` equals `gd._fullLayout.xaxis.range` (Q3) — no `_fullLayout` introspection needed for layout ranges.
+- **`NULL` reset is real, via the targeted path.** Merge-omit preserves the current view (Q2b); a genuine reset needs `autorange: true` (Q2e), which `applyDeferred` issues. Both behaviors are intended (§5).
 
 ### `plotly_brushed` vs `plotly_selected` internal state
 
@@ -770,13 +823,12 @@ The heuristic for distinguishing user zoom from auto-fit (Section 5) needs valid
 
 Launch plan: ship with one `selected_points` arg fed from both events, since that's the likelier shared-state scenario. If plotly.js behavior shows they're distinct, add a second named arg — additive change, no breaking.
 
-### Snap-back reliability with `uirevision`
+### Snap-back residuals beyond the launch table
 
-The snap-back path (Section 6) is now: `setProp` write → R rejects → per-binding force-send-on-no-op → `irid-attr target="widget"` echo (in the coalesced `values` map) → widget `update(values)` hook → targeted `Plotly.relayout()`. The widget-substrate half is well-defined; the unknowns are plotly-internal:
+The snap-back path (Section 6) is settled for the launch-scope layout ranges and scalars (spike Q2d/Q3/Q4). What the spike did *not* cover, to confirm when those fields are promoted from the `onRelayout` escape hatch into the table:
 
-- Whether targeted `relayout` reliably bypasses `uirevision` preservation for every bound field (arrays like `xaxis.range`, scalars like `dragmode`, nested paths like `scene.camera.eye.x`)
-- Behavior under rapid user interactions while a correction is in flight (the widget's idempotence check — "incoming value equals plotly's current value" — gates redundant relayouts, but ordering with plotly's own transition layer needs prototype validation)
-- Whether the widget can usefully read plotly's "current state at path" for the comparison (likely via `el._fullLayout` introspection or a per-event cache of last-sent payloads)
+- **Nested / post-launch paths** — `scene.camera.eye.x` (3D), mapbox viewport, geo rotation. Targeted `relayout` was only verified for `xaxis.range` and `dragmode`; whether it bypasses `uirevision` identically for nested camera paths, and whether `matchesCurrent` can read them off public state, needs its own check before each is added.
+- **Animated transitions** — if a plot uses plotly's transition/animation layer, a correction issued mid-transition may interleave with plotly's own tween. The `applying` guard + `matchesCurrent` should still converge, but ordering under an active transition is unverified.
 
 ### Integration with irid's stale UI indicator
 

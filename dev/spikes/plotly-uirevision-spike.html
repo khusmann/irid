@@ -16,6 +16,9 @@
         while the user has since zoomed?  (The crux of merge-on-react vs snap-back.)
     Q3  After a zoom, does the PUBLIC gd.layout.xaxis.range reflect the live range,
         so `matchesCurrent` can avoid private gd._fullLayout?
+    Q4  Does our OWN Plotly.relayout() re-fire plotly_relayout (an echo loop), and
+        does a synchronous `applying` flag catch the echo — or do we lean on the
+        matchesCurrent idempotence gate?
 -->
 <html lang="en">
 <head>
@@ -77,6 +80,13 @@
       <h2>Q3 — public range reflects live zoom?</h2>
       <p class="hint">Updated on every relayout/react, and on “Read current range now”.</p>
       <div class="verdict" id="v-q3">verdict: (zoom, then read)</div>
+
+      <h2>Q4 — does our own relayout echo, and does a flag catch it?</h2>
+      <div class="step"><button data-q4>programmatic Plotly.relayout([1,4])</button></div>
+      <p class="hint">Zoom somewhere first (so [1,4] differs from the current view), then click. Watch
+        whether a <span class="t-relayout">relayout</span> echo fires and whether
+        <span class="settling-on">applying=TRUE</span> when it does. Re-run across clear-modes.</p>
+      <div class="verdict" id="v-q4">verdict: (run Q4)</div>
     </div>
 
     <div>
@@ -98,19 +108,21 @@
 <script>
 const gd = document.getElementById('plot');
 let settling = false;
+let applying = false;                      // set around our own Plotly.relayout() calls (Q4)
 let q1MarkT = null, q1Saw = [];           // Q1 capture window
+let q4MarkT = null, q4Saw = [];           // Q4 capture window
 const logEl = document.getElementById('log');
 const lines = [];
 
 function record(type, data) {
-  const entry = { t: +performance.now().toFixed(1), type, settling, data };
+  const entry = { t: +performance.now().toFixed(1), type, settling, applying, data };
   lines.push(entry);
   const span = document.createElement('div');
   span.className = 'row';
-  const s = settling ? ' [settling=TRUE]' : '';
+  const flags = (settling ? ' [settling=TRUE]' : '') + (applying ? ' [applying=TRUE]' : '');
   const body = typeof data === 'string' ? data : JSON.stringify(data);
   span.innerHTML = `<span class="t-${type}">${entry.t.toString().padStart(8)} ${type}</span>`
-                 + `<span class="${settling ? 'settling-on' : ''}">${s}</span> ${escapeHtml(body)}`;
+                 + `<span class="${(settling || applying) ? 'settling-on' : ''}">${flags}</span> ${escapeHtml(body)}`;
   logEl.appendChild(span);
   logEl.scrollTop = logEl.scrollHeight;
   return entry;
@@ -129,6 +141,7 @@ Plotly.newPlot(gd, baseData, baseLayout(), {responsive:true}).then(() => { settl
 gd.on('plotly_relayout', (payload) => {
   const e = record('relayout', { keys: Object.keys(payload), payload });
   if (q1MarkT !== null) q1Saw.push(e);
+  if (q4MarkT !== null) q4Saw.push(e);
   updateQ3();
 });
 
@@ -186,6 +199,41 @@ document.querySelectorAll('[data-q2]').forEach(b => b.onclick = () => {
       `last react → xaxis.range = ${JSON.stringify(pubRange())}\n`
       + `(compare against what you set / your hand-zoom to see whether the merge or uirevision won)`;
   }, 300);
+});
+
+// ---- Q4: does our own Plotly.relayout() re-fire plotly_relayout, and does a
+//          synchronous `applying` flag (cleared per clearMode) catch the echo? ----
+document.querySelectorAll('[data-q4]').forEach(b => b.onclick = () => {
+  q4MarkT = performance.now(); q4Saw = [];
+  applying = true;
+  record('action', 'Q4: programmatic Plotly.relayout xaxis.range=[1,4]');
+  Plotly.relayout(gd, { 'xaxis.range': [1, 4] }).then(() => {
+    record('react', { relayoutResolved: true, applyingStillTrue: applying, range: pubRange() });
+    const mode = document.getElementById('clearMode').value;
+    if (mode === 'then') applying = false;
+    else if (mode === 'raf') requestAnimationFrame(() => { applying = false; record('react', 'applying cleared (rAF)'); });
+    else setTimeout(() => { applying = false; record('react', 'applying cleared (50ms)'); }, 50);
+  });
+  record('react', { afterRelayoutCallSync: true, applying });
+  setTimeout(() => {
+    const rel = q4Saw.filter(e => e.type === 'relayout');
+    const onA = rel.filter(e => e.applying).length;
+    const offA = rel.filter(e => !e.applying).length;
+    let conclusion;
+    if (rel.length === 0)
+      conclusion = 'No echo — programmatic relayout did NOT re-fire plotly_relayout (no guard needed at all).';
+    else if (offA === 0)
+      conclusion = 'Echo fired while applying=TRUE → a synchronous flag (clear-mode='
+                 + document.getElementById('clearMode').value + ') catches it.';
+    else
+      conclusion = 'LEAK: ' + offA + ' echo(es) after applying cleared → this clear-mode misses it; '
+                 + 'rely on matchesCurrent idempotence or a later clear.';
+    document.getElementById('v-q4').textContent =
+      `Q4 [clear=${document.getElementById('clearMode').value}] relayout echoes: ${rel.length}`
+      + ` (applying=TRUE: ${onA}, FALSE: ${offA})\n⇒ ${conclusion}`;
+    record('verdict', 'Q4 ' + conclusion);
+    q4MarkT = null;
+  }, 700);
 });
 
 // ---- Q3 ----
