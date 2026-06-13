@@ -1,6 +1,6 @@
 # Per-event default timing table — design
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** June 2026
 
 ---

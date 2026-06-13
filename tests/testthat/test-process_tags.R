@@ -319,7 +319,9 @@ test_that("value = irid_wire() with no subject errors", {
 # --- Per-event default timing ------------------------------------------------
 #
 # The default rule is keyed only on the DOM event name: `input` →
-# `irid_debounce(200)`, everything else → `irid_immediate()`.
+# `irid_debounce(200)`, the high-frequency continuous streams →
+# `irid_throttle(100)` (+ derived coalesce), everything else →
+# `irid_immediate()`.
 
 test_that("explicit onInput defaults to debounce(200)", {
   result <- process_tags(tags$input(onInput = function(e) NULL))
@@ -335,6 +337,41 @@ test_that("explicit onChange defaults to immediate", {
 test_that("explicit onClick defaults to immediate", {
   result <- process_tags(tags$button(onClick = function() NULL))
   expect_equal(result$events[[1]]$mode, "immediate")
+})
+
+test_that("high-frequency events default to throttle(100) + coalesce", {
+  hi_events <- c(
+    onMouseMove = "mousemove", onPointerMove = "pointermove",
+    onTouchMove = "touchmove", onDrag = "drag", onDragOver = "dragover",
+    onScroll = "scroll", onWheel = "wheel", onResize = "resize"
+  )
+  for (attr in names(hi_events)) {
+    args <- list(function(e) NULL)
+    names(args) <- attr
+    result <- process_tags(do.call(tags$div, args))
+    ev <- result$events[[1]]
+    expect_equal(ev$event, hi_events[[attr]])
+    expect_equal(ev$mode, "throttle", info = attr)
+    expect_equal(ev$ms, 100, info = attr)
+    expect_true(ev$coalesce, info = attr)
+  }
+})
+
+test_that("explicit immediate wins over a high-frequency default", {
+  result <- process_tags(
+    tags$div(onMouseMove = irid_wire(function(e) NULL, irid_immediate()))
+  )
+  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_false(result$events[[1]]$coalesce)
+})
+
+test_that("explicit coalesce = FALSE keeps the throttle default but ungates", {
+  result <- process_tags(
+    tags$div(onMouseMove = irid_wire(function(e) NULL, coalesce = FALSE))
+  )
+  expect_equal(result$events[[1]]$mode, "throttle")
+  expect_equal(result$events[[1]]$ms, 100)
+  expect_false(result$events[[1]]$coalesce)
 })
 
 test_that("autobind value defaults to debounce(200) (input event)", {

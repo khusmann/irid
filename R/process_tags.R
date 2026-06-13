@@ -70,11 +70,33 @@ make_widget_writeback <- function(fn, key) {
   h
 }
 
-# Per-event default timing. Typing produces a flood of `input` events so
-# the bare default is debounce; everything else fires once per user action
-# and goes immediate.
+# Known high-frequency continuous event streams. Left on `irid_immediate()`
+# these are a firehose: every move/scroll fires `Shiny.setInputValue` with
+# no rate limiting and no server-idle backpressure, so the server falls
+# behind processing stale positions and latency grows unbounded. They
+# default to `irid_throttle(100)` instead, whose derived `coalesce = TRUE`
+# adds the server-idle gate — a paced "latest position" stream the server
+# can keep up with. Discrete events (`click`, `keydown`, …) stay immediate.
+HIGH_FREQ_EVENTS <- c(
+  "mousemove", "pointermove", "touchmove",
+  "drag", "dragover",
+  "scroll", "wheel",
+  "resize"
+)
+
+# Per-event default timing, consulted only when the carrier leaves `timing`
+# NULL. Three classes: typing (`input`) floods intermediate values →
+# debounce for the settled value; high-frequency streams → throttle (+
+# derived coalesce) for a paced continuous stream; everything else fires
+# once per discrete user action → immediate. Explicit timing always wins.
 default_for_event <- function(event_name) {
-  if (event_name == "input") irid_debounce(200) else irid_immediate()
+  if (event_name == "input") {
+    irid_debounce(200)
+  } else if (event_name %in% HIGH_FREQ_EVENTS) {
+    irid_throttle(100)
+  } else {
+    irid_immediate()
+  }
 }
 
 # `coalesce` derives from the timing mode when the carrier leaves it NULL:
