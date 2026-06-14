@@ -178,24 +178,24 @@
           var g = groupSelection(v);
           s.data.forEach(function (tr, i) { if (g[i]) tr.selectedpoints = g[i]; });
         },
+        // Both set and clear must drop the active drag selection FIRST: while
+        // one is active plotly owns selectedpoints, so a bare restyle is a
+        // silent no-op (and a leftover outline rectangle stays on screen). So
+        // clear layout.selections, THEN restyle the per-point dimming to the
+        // new value (or null). matchesCurrent (below) is what keeps a user's
+        // OWN fresh marquee from being wiped — the drag's echo matches current
+        // state and is skipped, so only a *different* (programmatic) selection
+        // reaches here and clears the stale outline.
         apply: function (el, v) {
           var g = groupSelection(v);
-          // per-trace array; the outer array cycles across traces, so each
-          // element is one trace's selectedpoints value (no extra wrap).
           var sel = el.data.map(function (_, i) { return g[i] || []; });
           return mutate(function () {
-            return Plotly.restyle(el, { selectedpoints: sel });
+            return Plotly.relayout(el, { selections: null }).then(function () {
+              return Plotly.restyle(el, { selectedpoints: sel });
+            });
           });
         },
         applyDeferred: function (el) {
-          // Clearing a selection has two halves and the ORDER matters. While a
-          // drag selection is active plotly owns selectedpoints, so a restyle
-          // is a silent no-op; and erasing only the dimming leaves the outline
-          // rectangle on screen (the user otherwise has to double-click the
-          // plot to clear it). So: drop the active selection + outline FIRST
-          // (layout.selections), THEN clear the per-point dimming. Only the
-          // clear path touches layout.selections — the set/echo path must not,
-          // or it would erase the outline of the user's own fresh drag.
           var sel = el.data.map(function () { return null; });
           return mutate(function () {
             return Plotly.relayout(el, { selections: null }).then(function () {
@@ -203,7 +203,21 @@
             });
           });
         },
-        matchesCurrent: function () { return false; }
+        // True when the graph ALREADY shows exactly this selection — the echo
+        // of a user's own drag (plotly set selectedpoints from it). Skipping it
+        // leaves their marquee intact; a mismatch (programmatic set) falls
+        // through to apply, which clears the stale outline first.
+        matchesCurrent: function (el, v) {
+          var g = groupSelection(v);
+          return el.data.every(function (tr, i) {
+            var want = g[i] || [];
+            var have = tr.selectedpoints || [];
+            if (want.length !== have.length) return false;
+            var hs = {};
+            have.forEach(function (x) { hs[x] = true; });
+            return want.every(function (x) { return hs[x]; });
+          });
+        }
       };
     }
 
