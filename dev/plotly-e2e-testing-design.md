@@ -1,8 +1,8 @@
 # PlotlyOutput end-to-end testing — design
 
 **Status:** Implemented — `chromote`/`callr` suite live in `tests/testthat/`
-(`helper-e2e.R` driver: `irid_app()` + free `app_*`/`plt_*` functions,
-`test-plotly-e2e.R`, `fixtures/{kitchen-sink,subplot,ggplotly,gated}.R`),
+(`helper-e2e.R` driver: `e2e_app()` + free `e2e_*`/`e2e_plt_*` functions,
+`test-plotly-e2e.R`, `fixtures/plotly/{kitchen-sink,subplot,ggplotly,gated}.R`),
 covering all 26 §3 rows, plus `test-plotly.R` pure-R unit tests for the R
 surface. Gated behind
 `skip_on_cran()` + prerequisite skips + a local `IRID_E2E=1` opt-out; run with
@@ -329,7 +329,7 @@ tests/testthat/
                        guard, validation, serialization) — fast, always run
   test-plotly-e2e.R    the §3 matrix as named testthat cases; expect_*() on the
                        readout/gd state; uses the driver
-  fixtures/
+  fixtures/plotly/
     kitchen-sink.R     test-owned app modeled on examples/plotly.R (rows 1–17, 22–26)
     subplot.R          row 18
     ggplotly.R         row 19
@@ -341,17 +341,18 @@ working directory, and `helper-*.R` files are auto-sourced by testthat before th
 tests run. Everything is R now — no Node, no shell orchestration.
 
 The harness is a **plain state object + free functions, deliberately not R6 and
-not a `$`-method closure object.** `irid_app(fixture)` returns a list
-(`$session`, `$proc`, `$url`, `$caps`); every operation is a free `app_*`
-(generic irid) / `plt_*` (plotly) function taking it first —
-`app_click(app, "#x")`, `plt_range(app, "xaxis")`, `plt_drag_select(app)`. This
-is the most statically-checkable shape in R: a free-function call site is a real
-symbol, so `codetools`/`lintr`'s `object_usage_linter` flags a misspelled or
-removed helper (`plt_rnge(app, …)` → *"no visible global function definition"*),
-whereas a `$`-method call (`app$rng()`) is dynamic and invisible to static
-analysis whether the object is R6 *or* a closure — the fluent style trades away
-the very call-site linting we want. The `app_*` core works for any irid app; the
-`plt_*` layer adds the gd-state readers and plotly gestures. `test-plotly-e2e.R`
+not a `$`-method closure object.** `e2e_app(fixture)` returns a list
+(`$session`, `$proc`, `$url`, `$caps`); every operation is a free `e2e_*`
+(generic irid) / `e2e_plt_*` (plotly) function taking it first —
+`e2e_click(app, "#x")`, `e2e_plt_range(app, "xaxis")`, `e2e_plt_drag_select(app)`.
+This is the most statically-checkable shape in R: a free-function call site is a
+real symbol, so `codetools`/`lintr`'s `object_usage_linter` flags a misspelled or
+removed helper (`e2e_plt_rnge(app, …)` → *"no visible global function
+definition"*), whereas a `$`-method call (`app$rng()`) is dynamic and invisible
+to static analysis whether the object is R6 *or* a closure — the fluent style
+trades away the very call-site linting we want. The `e2e_*` core works for any
+irid app; the `e2e_plt_*` layer adds the gd-state readers and plotly gestures.
+`test-plotly-e2e.R`
 runs the §3 matrix as named `test_that()` cases with ordinary `expect_*()`
 assertions, so a failure reports the case name and the offending value. Each
 case's app + browser are torn down via `withr::defer` on the test frame.

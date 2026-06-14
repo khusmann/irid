@@ -4,22 +4,22 @@
 # app in a background `callr` process (a real, separate Shiny session) and drives
 # a headless Chrome via `chromote` (a CDP client).
 #
-# The driver is a PLAIN STATE OBJECT plus FREE FUNCTIONS, not R6 and not a
-# `$`-method closure object. `irid_app()` returns a list ($session, $proc, $url,
-# $caps); every operation is a free `app_*` (generic irid) / `plt_*` (plotly)
-# function taking it first. This is the most statically-checkable shape in R: a
-# free-function call site is a real symbol, so `codetools`/`lintr` flags a
-# misspelled or removed helper. A `$`-method call (`app$rang()`) is dynamic and
-# invisible to static analysis whether the object is R6 or a closure — so the
-# fluent style buys ergonomics at the cost of the very call-site linting we want.
+# Naming: everything is scoped under `e2e_`. The generic app/browser driver is
+# `e2e_*` (reusable for any irid app/widget); the PlotlyOutput-specific layer is
+# `e2e_plt_*`. The driver is a PLAIN STATE OBJECT (`e2e_app()` returns a list:
+# $session, $proc, $url, $caps) plus FREE FUNCTIONS taking it first — NOT R6 and
+# not a `$`-method closure object. A free-function call site is a real symbol, so
+# `codetools`/`lintr` flags a misspelled or removed helper (`e2e_plt_rnge(app, …)`
+# -> "no visible global function definition"); a `$`-method call (`app$rng()`) is
+# dynamic and invisible to static analysis whether the object is R6 or a closure.
 #
-#   app <- irid_app("kitchen-sink.R")
-#   plt_await(app, 3)
-#   app_click(app, "#btn-economy")
-#   app_wait_idle(app)
-#   plt_range(app, "xaxis")          # c(20, 35)
-#   app_readout(app, "#ro-selection")
-#   plt_drag_select(app)
+#   app <- e2e_app("plotly/kitchen-sink.R")
+#   e2e_plt_await(app, 3)
+#   e2e_click(app, "#btn-economy")
+#   e2e_wait_idle(app)
+#   e2e_plt_range(app, "xaxis")          # c(20, 35)
+#   e2e_readout(app, "#ro-selection")
+#   e2e_plt_drag_select(app)
 #
 # Three drive primitives mirror the round-trip directions: click the real DOM
 # controls (server <- client), synthesize a plotly gesture (client -> server via
@@ -82,10 +82,10 @@ e2e_boot_fn <- function(fixture_path, pkg_root, port) {
 # the child's stderr for Shiny's "Listening on ..." banner. This deliberately
 # does NOT poll the port with socketConnection(): each refused probe while the
 # app boots leaks an R connection slot, and across the suite's ~17 boots that
-# exhausts R's ~128-connection table. read_error_lines() reads processx pipes,
-# which are not R connections. Returns the boot-phase stderr it consumed so the
-# caller can seed its own error tracking. The timeout is generous because the
-# child runs pkgload::load_all(), slow when the machine is already loaded.
+# exhausts R's ~128-connection table ("all connections are in use").
+# read_error_lines() reads processx pipes, which are not R connections. The
+# timeout is generous because the child runs pkgload::load_all(), slow when the
+# machine is already loaded.
 e2e_wait_listening <- function(proc, timeout = 90) {
   deadline <- Sys.time() + timeout
   seen <- character()
@@ -104,108 +104,18 @@ e2e_wait_listening <- function(proc, timeout = 90) {
   }
 }
 
-# --- low-level browser impl (take a ChromoteSession `b`) --------------------
-# The driver methods are thin closures over these; they stay free functions so
-# they are independently testable and reusable.
-
-# Evaluate JS in the page and return the value to R. awaitPromise resolves a
-# returned promise first, so a `Plotly.relayout(...).then(...)` can be awaited.
-e2e_eval <- function(b, js, await = TRUE) {
-  res <- b$Runtime$evaluate(
-    js, returnByValue = TRUE, awaitPromise = await, wait_ = TRUE
-  )
-  if (!is.null(res$exceptionDetails)) {
-    det <- res$exceptionDetails
-    msg <- det$exception$description %e2e||% det$text %e2e||% "unknown JS error"
-    stop("JS exception: ", msg, call. = FALSE)
-  }
-  res$result$value
-}
-
-# Poll a JS boolean expression until truthy (round-trips are async).
-e2e_wait_until <- function(b, js_bool, timeout = 30, interval = 0.2) {
-  deadline <- Sys.time() + timeout
-  guarded <- paste0(
-    "(function(){try{return !!(", js_bool, ");}catch(e){return false;}})()"
-  )
-  repeat {
-    if (isTRUE(e2e_eval(b, guarded))) return(invisible(TRUE))
-    if (Sys.time() > deadline) stop("Timeout waiting for: ", js_bool, call. = FALSE)
-    Sys.sleep(interval)
-  }
-}
-
-# Install a busy/idle tracker that mirrors Shiny's shiny:busy / shiny:idle (the
-# same events irid's stale indicator listens to). Shiny dispatches these as
-# *jQuery* events, not native ones, so the tracker attaches via jQuery — which
-# is not yet loaded right after navigate, so the install self-bootstraps once
-# window.jQuery appears. wait_for_idle then waits for a quiet idle window — a
-# real settle signal, not a fixed sleep. Idempotent.
-e2e_install_idle <- function(b) {
-  e2e_eval(b, "(function () {
-    if (window.__iridIdleInstalled) return true;
-    function attach() {
-      if (!window.jQuery) return false;
-      window.__iridIdle = { busy: false, lastChange: Date.now() };
-      window.jQuery(document).on('shiny:busy', function () {
-        window.__iridIdle.busy = true; window.__iridIdle.lastChange = Date.now();
-      });
-      window.jQuery(document).on('shiny:idle', function () {
-        window.__iridIdle.busy = false; window.__iridIdle.lastChange = Date.now();
-      });
-      window.__iridIdleInstalled = true;
-      return true;
-    }
-    if (!attach()) {
-      var t = setInterval(function () { if (attach()) clearInterval(t); }, 50);
-    }
-    return true;
-  })()")
-}
-
-# Wait until the server has been idle continuously for `quiet` ms. A reactive
-# chain that flushes more than once briefly toggles busy between flushes; the
-# quiet window bridges that gap.
-e2e_wait_for_idle <- function(b, quiet = 0.25, timeout = 15, interval = 0.1) {
-  deadline <- Sys.time() + timeout
-  repeat {
-    st <- e2e_eval(b, "({busy: window.__iridIdle ? window.__iridIdle.busy : false, since: window.__iridIdle ? (Date.now() - window.__iridIdle.lastChange) : 1e9})")
-    if (isFALSE(st$busy) && st$since >= quiet * 1000) return(invisible(TRUE))
-    if (Sys.time() > deadline) return(invisible(FALSE))
-    Sys.sleep(interval)
-  }
-}
-
-# A real left-button drag with intermediate moves (plotly's select tool builds
-# the outline from the move stream — a single jump produces no selection).
-e2e_drag <- function(b, x1, y1, x2, y2, steps = 6) {
-  b$Input$dispatchMouseEvent(type = "mousePressed", x = x1, y = y1,
-                             button = "left", buttons = 1, clickCount = 1,
-                             wait_ = TRUE)
-  for (i in seq_len(steps)) {
-    b$Input$dispatchMouseEvent(
-      type = "mouseMoved",
-      x = x1 + (x2 - x1) * i / steps, y = y1 + (y2 - y1) * i / steps,
-      button = "left", buttons = 1, wait_ = TRUE
-    )
-  }
-  b$Input$dispatchMouseEvent(type = "mouseReleased", x = x2, y = y2,
-                             button = "left", buttons = 1, clickCount = 1,
-                             wait_ = TRUE)
-}
-
 # Boot the fixture app in a background process, retrying on a fresh port if it
 # fails to come up — across a suite of ~17 sequential boots a just-released port
 # can still be in TIME_WAIT and fail to rebind. Registers teardown on success.
+#
+# supervise = FALSE is deliberate: the callr supervisor opens (and never
+# releases) a pipe connection per process, re-introducing the connection-table
+# exhaustion above. Teardown kills the process explicitly via withr::defer, so
+# the supervisor's crash-cleanup is redundant here.
 e2e_boot_app <- function(fixture, env, attempts = 3) {
   last_err <- NULL
   for (i in seq_len(attempts)) {
     port <- httpuv::randomPort()
-    # supervise = FALSE is deliberate: the callr supervisor opens (and never
-    # releases) pipe connections per process, so across the suite's ~17 sequential
-    # boots it exhausts R's ~128-connection table ("all connections are in use").
-    # Teardown kills the process explicitly via withr::defer, so the supervisor's
-    # crash-cleanup is redundant here.
     proc <- callr::r_bg(
       e2e_boot_fn,
       args = list(
@@ -228,20 +138,12 @@ e2e_boot_app <- function(fixture, env, attempts = 3) {
        conditionMessage(last_err))
 }
 
-# --- the app handle + the generic `app_*` API -------------------------------
-#
-# The driver is a PLAIN state object (a list: $session, $proc, $url, $caps) and
-# every operation is a free `app_*` (generic irid) / `plt_*` (plotly) function
-# taking it as the first argument. This is the most lintable shape in R: unlike
-# a `$`-method object (R6 *or* closure), a free-function call site is a real
-# symbol, so `codetools`/`lintr` flags a misspelled or removed helper
-# (`plt_rang(app, ...)` -> "no visible global function definition"). A `$`-method
-# call (`app$rang()`) is dynamic and invisible to static analysis either way.
+# --- the app handle + the generic `e2e_*` API -------------------------------
 
 # Boot a fixture app + headless browser and return the handle. Teardown is
 # registered on `env` (the calling test frame) so both processes die when the
 # test exits.
-irid_app <- function(fixture, env = parent.frame(), viewport = c(1280, 900)) {
+e2e_app <- function(fixture, env = parent.frame(), viewport = c(1280, 900)) {
   skip_unless_e2e()
 
   boot <- e2e_boot_app(fixture, env)
@@ -266,38 +168,91 @@ irid_app <- function(fixture, env = parent.frame(), viewport = c(1280, 900)) {
       d$exception$description %e2e||% d$text %e2e||% "exception")
   })
 
-  url <- sprintf("http://127.0.0.1:%d", boot$port)
-  b$Page$navigate(url, wait_ = TRUE)
-  e2e_install_idle(b)
-
-  structure(
-    list(session = b, proc = boot$proc, url = url, caps = caps),
-    class = "irid_app"
+  app <- structure(
+    list(session = b, proc = boot$proc,
+         url = sprintf("http://127.0.0.1:%d", boot$port), caps = caps),
+    class = "e2e_app"
   )
+  b$Page$navigate(app$url, wait_ = TRUE)
+  e2e_install_idle(app)
+  app
 }
 
-# Evaluate JS in the page and return the value to R.
-app_eval <- function(app, js, await = TRUE) e2e_eval(app$session, js, await)
-
-# Poll a JS boolean expression until truthy.
-app_wait_until <- function(app, js_bool, timeout = 30) {
-  e2e_wait_until(app$session, js_bool, timeout)
+# Evaluate JS in the page and return the value to R. awaitPromise resolves a
+# returned promise first, so a `Plotly.relayout(...).then(...)` can be awaited.
+e2e_eval <- function(app, js, await = TRUE) {
+  res <- app$session$Runtime$evaluate(
+    js, returnByValue = TRUE, awaitPromise = await, wait_ = TRUE
+  )
+  if (!is.null(res$exceptionDetails)) {
+    det <- res$exceptionDetails
+    msg <- det$exception$description %e2e||% det$text %e2e||% "unknown JS error"
+    stop("JS exception: ", msg, call. = FALSE)
+  }
+  res$result$value
 }
 
-# Wait until the server has been idle continuously for `quiet` s (shiny:idle).
-app_wait_idle <- function(app, quiet = 0.25, timeout = 15) {
-  e2e_wait_for_idle(app$session, quiet = quiet, timeout = timeout)
+# Poll a JS boolean expression until truthy (round-trips are async).
+e2e_wait_until <- function(app, js_bool, timeout = 30, interval = 0.2) {
+  deadline <- Sys.time() + timeout
+  guarded <- paste0(
+    "(function(){try{return !!(", js_bool, ");}catch(e){return false;}})()"
+  )
+  repeat {
+    if (isTRUE(e2e_eval(app, guarded))) return(invisible(TRUE))
+    if (Sys.time() > deadline) stop("Timeout waiting for: ", js_bool, call. = FALSE)
+    Sys.sleep(interval)
+  }
+}
+
+# Install a busy/idle tracker that mirrors Shiny's shiny:busy / shiny:idle (the
+# same events irid's stale indicator listens to). Shiny dispatches these as
+# *jQuery* events, not native ones, so the tracker attaches via jQuery — not yet
+# loaded right after navigate, so the install self-bootstraps once window.jQuery
+# appears. Idempotent. (Internal — called from e2e_app().)
+e2e_install_idle <- function(app) {
+  e2e_eval(app, "(function () {
+    if (window.__iridIdleInstalled) return true;
+    function attach() {
+      if (!window.jQuery) return false;
+      window.__iridIdle = { busy: false, lastChange: Date.now() };
+      window.jQuery(document).on('shiny:busy', function () {
+        window.__iridIdle.busy = true; window.__iridIdle.lastChange = Date.now();
+      });
+      window.jQuery(document).on('shiny:idle', function () {
+        window.__iridIdle.busy = false; window.__iridIdle.lastChange = Date.now();
+      });
+      window.__iridIdleInstalled = true;
+      return true;
+    }
+    if (!attach()) {
+      var t = setInterval(function () { if (attach()) clearInterval(t); }, 50);
+    }
+    return true;
+  })()")
+}
+
+# Wait until the server has been idle continuously for `quiet` s — a real settle
+# signal, not a fixed sleep. A reactive chain that flushes more than once briefly
+# toggles busy between flushes; the quiet window bridges that gap.
+e2e_wait_idle <- function(app, quiet = 0.25, timeout = 15, interval = 0.1) {
+  deadline <- Sys.time() + timeout
+  repeat {
+    st <- e2e_eval(app, "({busy: window.__iridIdle ? window.__iridIdle.busy : false, since: window.__iridIdle ? (Date.now() - window.__iridIdle.lastChange) : 1e9})")
+    if (isFALSE(st$busy) && st$since >= quiet * 1000) return(invisible(TRUE))
+    if (Sys.time() > deadline) return(invisible(FALSE))
+    Sys.sleep(interval)
+  }
 }
 
 # Click a DOM control by selector (server <- client via the genuine event path).
-app_click <- function(app, sel) {
-  e2e_eval(app$session,
-           sprintf("document.querySelector(%s).click(), true", to_js_str(sel)))
+e2e_click <- function(app, sel) {
+  e2e_eval(app, sprintf("document.querySelector(%s).click(), true", to_js_str(sel)))
 }
 
 # Set a control's value and fire the binding's event.
-app_set_input <- function(app, sel, value, event = "input") {
-  e2e_eval(app$session, sprintf(
+e2e_set_input <- function(app, sel, value, event = "input") {
+  e2e_eval(app, sprintf(
     "(function(){var e=document.querySelector(%s);e.value=%s;e.dispatchEvent(new Event(%s,{bubbles:true}));return e.value;})()",
     to_js_str(sel), to_js_str(as.character(value)), to_js_str(event)
   ))
@@ -305,125 +260,57 @@ app_set_input <- function(app, sel, value, event = "input") {
 
 # Read an element's trimmed textContent (a readout reflects the server-side
 # reactiveVal — the source of truth to compare gd state against).
-app_readout <- function(app, sel) {
-  e2e_eval(app$session, sprintf(
+e2e_readout <- function(app, sel) {
+  e2e_eval(app, sprintf(
     "(function(){var e=document.querySelector(%s);return e?e.textContent.trim():null;})()",
     to_js_str(sel)
   ))
 }
 
-# A settle window (rarely needed — prefer poll_until / app_wait_idle).
-settle <- function(sec = 2) Sys.sleep(sec)
+# A real left-button drag with intermediate moves (plotly's select tool builds
+# the outline from the move stream — a single jump produces no selection).
+# (Internal — used by e2e_plt_drag_select().)
+e2e_drag <- function(app, x1, y1, x2, y2, steps = 6) {
+  b <- app$session
+  b$Input$dispatchMouseEvent(type = "mousePressed", x = x1, y = y1,
+                             button = "left", buttons = 1, clickCount = 1,
+                             wait_ = TRUE)
+  for (i in seq_len(steps)) {
+    b$Input$dispatchMouseEvent(
+      type = "mouseMoved",
+      x = x1 + (x2 - x1) * i / steps, y = y1 + (y2 - y1) * i / steps,
+      button = "left", buttons = 1, wait_ = TRUE
+    )
+  }
+  b$Input$dispatchMouseEvent(type = "mouseReleased", x = x2, y = y2,
+                             button = "left", buttons = 1, clickCount = 1,
+                             wait_ = TRUE)
+}
 
-app_exceptions <- function(app) app$caps$exceptions
-app_console <- function(app) app$caps$console
+# A settle window (rarely needed — prefer e2e_poll / e2e_wait_idle).
+e2e_settle <- function(sec = 2) Sys.sleep(sec)
+
+e2e_exceptions <- function(app) app$caps$exceptions
+e2e_console <- function(app) app$caps$console
 
 # Fail if the app's stderr emitted an R error since the last drain — the
 # count-around-a-gesture pattern that localizes a bug to an exact action.
-app_expect_no_error <- function(app) {
+e2e_expect_no_error <- function(app) {
   lines <- tryCatch(app$proc$read_error_lines(), error = function(e) character())
   errs <- grep("Error", lines, value = TRUE)
   testthat::expect_equal(errs, character(),
     info = paste("app stderr errors:", paste(errs, collapse = " | ")))
 }
 
-app_stop <- function(app) {
+e2e_stop <- function(app) {
   tryCatch(app$session$close(), error = function(e) NULL)
   tryCatch(app$proc$kill(), error = function(e) NULL)
 }
 
-# --- the plotly `plt_*` layer -----------------------------------------------
-
-# Evaluate a JS body that has `gd` (the graph div) in scope.
-plt_gd_eval <- function(app, body, await = FALSE) {
-  e2e_eval(app$session, sprintf(
-    "(function(){var gd=document.querySelector('%s');%s})()", PLOTLY_GD, body
-  ), await = await)
-}
-
-# Wait for the plot to render N traces (the row-1 readiness gate).
-plt_await <- function(app, n_traces, timeout = 40) {
-  e2e_wait_until(app$session, sprintf(
-    "window.Plotly && document.querySelector('%s') && document.querySelector('%s').data && document.querySelector('%s').data.length === %d",
-    PLOTLY_GD, PLOTLY_GD, PLOTLY_GD, n_traces
-  ), timeout = timeout)
-  invisible(app)
-}
-
-# ---- client -> server gestures (drive plotly's own API / emitter) ----
-plt_relayout <- function(app, obj) {
-  e2e_eval(app$session, sprintf(
-    "(function(){var gd=document.querySelector('%s');return Plotly.relayout(gd,%s).then(function(){return true;});})()",
-    PLOTLY_GD, jsonlite::toJSON(obj, auto_unbox = TRUE)
-  ), await = TRUE)
-}
-plt_restyle <- function(app, obj, trace_index) {
-  e2e_eval(app$session, sprintf(
-    "(function(){var gd=document.querySelector('%s');return Plotly.restyle(gd,%s,[%d]).then(function(){return true;});})()",
-    PLOTLY_GD, jsonlite::toJSON(obj, auto_unbox = TRUE), trace_index
-  ), await = TRUE)
-}
-plt_emit <- function(app, event, payload = NULL) {
-  pl <- if (is.null(payload)) "{}" else jsonlite::toJSON(payload, auto_unbox = TRUE)
-  e2e_eval(app$session, sprintf(
-    "(function(){var gd=document.querySelector('%s');gd.emit(%s,%s);return true;})()",
-    PLOTLY_GD, to_js_str(event), pl
-  ))
-}
-# A real drag-select over a fraction of the plot interior. Aims at `.nsewdrag`
-# (offset in from the edges) so the drag lands on the plot area, not an axis;
-# `dragmode` must be a select tool.
-plt_drag_select <- function(app, fx1 = 0.15, fy1 = 0.15, fx2 = 0.85, fy2 = 0.85) {
-  r <- e2e_eval(app$session, sprintf(
-    "(function(){var d=document.querySelector('%s .nsewdrag');var r=d.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()",
-    PLOTLY_GD
-  ))
-  e2e_drag(app$session, r$x + r$w * fx1, r$y + r$h * fy1,
-           r$x + r$w * fx2, r$y + r$h * fy2)
-}
-
-# ---- gd state readers (what the plot shows) ----
-plt_range <- function(app, axis = "xaxis") {
-  plt_gd_eval(app, sprintf("var a=gd.layout&&gd.layout['%s'];return a?a.range:null;", axis))
-}
-plt_autorange <- function(app, axis = "xaxis") {
-  plt_gd_eval(app, sprintf("var a=gd.layout&&gd.layout['%s'];return a?!!a.autorange:null;", axis))
-}
-plt_dragmode <- function(app) plt_gd_eval(app, "return gd.layout?gd.layout.dragmode:null;")
-plt_hovermode <- function(app) plt_gd_eval(app, "return gd.layout?gd.layout.hovermode:null;")
-plt_n_traces <- function(app) plt_gd_eval(app, "return gd.data?gd.data.length:0;")
-# tri-state visibility of the trace with the given name (identity lookup).
-plt_visible <- function(app, name) {
-  plt_gd_eval(app, sprintf(
-    "var t=(gd.data||[]).filter(function(x){return String(x.name)===%s;})[0];return t?(t.visible===undefined?true:t.visible):null;",
-    to_js_str(as.character(name))
-  ))
-}
-# total selected points across all traces (the dimming layer).
-plt_n_selected <- function(app) {
-  plt_gd_eval(app, "return (gd.data||[]).reduce(function(n,t){return n+((t.selectedpoints&&t.selectedpoints.length)||0);},0);")
-}
-# number of selectedpoints arrays that are actually set (not null/undefined).
-plt_n_selected_traces <- function(app) {
-  plt_gd_eval(app, "return (gd.data||[]).filter(function(t){return t.selectedpoints!=null;}).length;")
-}
-# count of outline rectangles (layout.selections + rendered .selectionlayer).
-plt_n_selections <- function(app) {
-  plt_gd_eval(app, "return (gd.layout&&gd.layout.selections)?gd.layout.selections.length:0;")
-}
-plt_outline_paths <- function(app) {
-  plt_gd_eval(app, sprintf(
-    "return document.querySelectorAll('%s .select-outline, %s .selectionlayer path').length;",
-    PLOTLY_GD, PLOTLY_GD
-  ))
-}
-
-# --- shared assertion helpers ------------------------------------------------
-
 # Poll an R-side reader until a predicate holds (or timeout), returning the last
 # value so the caller can assert on it. Robust alternative to a blind sleep when
 # the settled value is known.
-poll_until <- function(reader, pred, timeout = 15, interval = 0.3) {
+e2e_poll <- function(reader, pred, timeout = 15, interval = 0.3) {
   deadline <- Sys.time() + timeout
   repeat {
     v <- tryCatch(reader(), error = function(e) NULL)
@@ -431,4 +318,90 @@ poll_until <- function(reader, pred, timeout = 15, interval = 0.3) {
     if (Sys.time() > deadline) return(v)
     Sys.sleep(interval)
   }
+}
+
+# --- the plotly `e2e_plt_*` layer -------------------------------------------
+
+# Evaluate a JS body that has `gd` (the graph div) in scope.
+e2e_plt_eval <- function(app, body, await = FALSE) {
+  e2e_eval(app, sprintf(
+    "(function(){var gd=document.querySelector('%s');%s})()", PLOTLY_GD, body
+  ), await = await)
+}
+
+# Wait for the plot to render N traces (the row-1 readiness gate).
+e2e_plt_await <- function(app, n_traces, timeout = 40) {
+  e2e_wait_until(app, sprintf(
+    "window.Plotly && document.querySelector('%s') && document.querySelector('%s').data && document.querySelector('%s').data.length === %d",
+    PLOTLY_GD, PLOTLY_GD, PLOTLY_GD, n_traces
+  ), timeout = timeout)
+  invisible(app)
+}
+
+# ---- client -> server gestures (drive plotly's own API / emitter) ----
+e2e_plt_relayout <- function(app, obj) {
+  e2e_eval(app, sprintf(
+    "(function(){var gd=document.querySelector('%s');return Plotly.relayout(gd,%s).then(function(){return true;});})()",
+    PLOTLY_GD, jsonlite::toJSON(obj, auto_unbox = TRUE)
+  ), await = TRUE)
+}
+e2e_plt_restyle <- function(app, obj, trace_index) {
+  e2e_eval(app, sprintf(
+    "(function(){var gd=document.querySelector('%s');return Plotly.restyle(gd,%s,[%d]).then(function(){return true;});})()",
+    PLOTLY_GD, jsonlite::toJSON(obj, auto_unbox = TRUE), trace_index
+  ), await = TRUE)
+}
+e2e_plt_emit <- function(app, event, payload = NULL) {
+  pl <- if (is.null(payload)) "{}" else jsonlite::toJSON(payload, auto_unbox = TRUE)
+  e2e_eval(app, sprintf(
+    "(function(){var gd=document.querySelector('%s');gd.emit(%s,%s);return true;})()",
+    PLOTLY_GD, to_js_str(event), pl
+  ))
+}
+# A real drag-select over a fraction of the plot interior. Aims at `.nsewdrag`
+# (offset in from the edges) so the drag lands on the plot area, not an axis;
+# `dragmode` must be a select tool.
+e2e_plt_drag_select <- function(app, fx1 = 0.15, fy1 = 0.15, fx2 = 0.85, fy2 = 0.85) {
+  r <- e2e_eval(app, sprintf(
+    "(function(){var d=document.querySelector('%s .nsewdrag');var r=d.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};})()",
+    PLOTLY_GD
+  ))
+  e2e_drag(app, r$x + r$w * fx1, r$y + r$h * fy1,
+           r$x + r$w * fx2, r$y + r$h * fy2)
+}
+
+# ---- gd state readers (what the plot shows) ----
+e2e_plt_range <- function(app, axis = "xaxis") {
+  e2e_plt_eval(app, sprintf("var a=gd.layout&&gd.layout['%s'];return a?a.range:null;", axis))
+}
+e2e_plt_autorange <- function(app, axis = "xaxis") {
+  e2e_plt_eval(app, sprintf("var a=gd.layout&&gd.layout['%s'];return a?!!a.autorange:null;", axis))
+}
+e2e_plt_dragmode <- function(app) e2e_plt_eval(app, "return gd.layout?gd.layout.dragmode:null;")
+e2e_plt_hovermode <- function(app) e2e_plt_eval(app, "return gd.layout?gd.layout.hovermode:null;")
+e2e_plt_n_traces <- function(app) e2e_plt_eval(app, "return gd.data?gd.data.length:0;")
+# tri-state visibility of the trace with the given name (identity lookup).
+e2e_plt_visible <- function(app, name) {
+  e2e_plt_eval(app, sprintf(
+    "var t=(gd.data||[]).filter(function(x){return String(x.name)===%s;})[0];return t?(t.visible===undefined?true:t.visible):null;",
+    to_js_str(as.character(name))
+  ))
+}
+# total selected points across all traces (the dimming layer).
+e2e_plt_n_selected <- function(app) {
+  e2e_plt_eval(app, "return (gd.data||[]).reduce(function(n,t){return n+((t.selectedpoints&&t.selectedpoints.length)||0);},0);")
+}
+# number of selectedpoints arrays that are actually set (not null/undefined).
+e2e_plt_n_selected_traces <- function(app) {
+  e2e_plt_eval(app, "return (gd.data||[]).filter(function(t){return t.selectedpoints!=null;}).length;")
+}
+# count of outline rectangles (layout.selections + rendered .selectionlayer).
+e2e_plt_n_selections <- function(app) {
+  e2e_plt_eval(app, "return (gd.layout&&gd.layout.selections)?gd.layout.selections.length:0;")
+}
+e2e_plt_outline_paths <- function(app) {
+  e2e_plt_eval(app, sprintf(
+    "return document.querySelectorAll('%s .select-outline, %s .selectionlayer path').length;",
+    PLOTLY_GD, PLOTLY_GD
+  ))
 }
