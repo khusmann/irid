@@ -38,7 +38,13 @@ outside the table.
 \code{ids} (a character vector of id values). Binding it requires the plot to
 supply \code{ids} (\code{plot_ly(ids = ~key)} / \code{aes(ids = key)}); because the value
 is keyed on identity rather than position, the selection survives data
-changes that renumber points (filtering, sorting, trace recomposition).}
+changes that renumber points (filtering, sorting, trace recomposition).
+
+\code{trace_visibility} is the per-trace on/off state, a sparse named character
+vector keyed by trace \code{name} (\code{c("8" = "legendonly")}), values in
+\code{"true"} / \code{"false"} / \code{"legendonly"}. Like \code{selected_ids} it is
+identity-keyed, so it stays correct across trace recomposition; binding it
+requires the traces to be named.}
 
 \item{onClick, onHover, onUnhover, onDoubleclick}{Discrete pointer callbacks.
 Each receives the (slimmed) plotly event payload.}

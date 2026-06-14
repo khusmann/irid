@@ -4,7 +4,7 @@
 \alias{to_plotly_spec}
 \title{Serialize a plotly object to the JSON string PlotlyOutput ships}
 \usage{
-to_plotly_spec(p, require_ids = FALSE)
+to_plotly_spec(p, require_ids = FALSE, require_names = FALSE)
 }
 \arguments{
 \item{p}{A plotly or ggplotly object.}
@@ -13,6 +13,10 @@ to_plotly_spec(p, require_ids = FALSE)
 validate that the built traces carry \code{ids}: error on absence, warn on
 duplicates. Identity-keyed selection resolves against \verb{data[*].ids}, so a
 missing key is a hard, fixable error and a non-unique key is advisory.}
+
+\item{require_names}{When \code{TRUE} (the \code{trace_visibility} binding is in use),
+validate the built traces carry \code{name}s: error on absence, warn on
+duplicates. Visibility is keyed by trace \code{name}.}
 }
 \value{
 A length-1 character vector of JSON.

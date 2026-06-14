@@ -161,7 +161,7 @@ build; the rest are the same shape and should be filled in.
 | 1 | Spec renders, deps load | navigate | `window.Plotly && gd.data.length === <nTraces>` ✓ |
 | 2 | Reactive spec + `uirevision` preserves view | move data slider after a zoom | range unchanged across the data update |
 | 3 | `xaxis_range`/`yaxis_range` server→client | click "Zoom to economy cars" | `gd.layout.xaxis.range ≈ [20,35]`, `yaxis ≈ [50,130]` ✓ |
-| 4 | `trace_visibility` server→client | click "Hide 8-cyl" | `gd.data[2].visible === 'legendonly'` ✓ |
+| 4 | `trace_visibility` (name-keyed) server→client | click "Hide 8-cyl" (sets `c("8"="legendonly")`) | the trace *named* `"8"` has `visible === 'legendonly'` (found by name, not index) ✓ |
 | 5 | `dragmode` two-way | change `<select>` | `gd.layout.dragmode` follows; and a modebar pick writes the select back |
 | 6 | `uirevision` reset | click "Reset view" | `gd.layout.xaxis.autorange` truthy; visibility back to default ✓ |
 | 7 | `onRelayout` escape hatch | `Plotly.relayout(y)` | readout "last relayout" lists the gesture's keys ✓ |
@@ -170,8 +170,8 @@ build; the rest are the same shape and should be filled in.
 | 10 | Snap-back, null canonical (post-reset) | reset, then reject narrow | plot reverts to **autorange** ✓ |
 | 11 | `reactiveProxy` gate | reject narrow zoom | server reactiveVal unchanged (readout `auto`/prior) ✓ |
 | 12 | `onClick` (`slimPoints`) | `gd.emit('plotly_click', …)` | readout shows clicked point's `customdata`/`x`/`y` ✓ |
-| 13 | `selected_points` (`pointsToFrame` → restyle) | `gd.emit('plotly_selected', …)` | readout point count + traces; `gd.data[i].selectedpoints` per-trace ✓ |
-| 14 | Deselect clears (emit path) | `gd.emit('plotly_deselect')` | readout "none"; `selectedpoints` unset ✓ |
+| 13 | `selected_ids` (`idsFromPoints` → restyle) | `gd.emit('plotly_selected', …)` with points at known indices | readout shows the *ids* (names); `gd.data[i].selectedpoints` per-trace resolves from ids ✓ |
+| 14 | Deselect clears (emit path) | `gd.emit('plotly_deselect')` | readout "none"; `selectedpoints` unset (full opacity, not `[]`) ✓ |
 | 15 | Autorange-reset null clear | `gd.emit('plotly_relayout', {'yaxis.autorange':true})` | readout `hp: auto`, no R error ✓ |
 | 16 | **Real drag-select** populates both layers | `Input.dispatchMouseEvent` drag over `.nsewdrag` | readout shows N points; `gd.layout.selections.length === 1`; outline DOM present ✓ |
 | 17 | **Clear selection (button) tears down both layers** | real drag, then click "Clear selection" | readout "none"; `gd.layout.selections.length === 0`; every `selectedpoints` unset; `.selectionlayer path` gone ✓ |
@@ -183,9 +183,10 @@ build; the rest are the same shape and should be filled in.
 | 23 | **Identity-based selection survives filtering** | real drag, then filter (drops a `cyl` group → trace recompose 3→2), then unfilter | selected *names* unchanged across all three; `selectedpoints` re-resolves to survivors after filter and back to the full set after unfilter ✓ |
 | 24 | **Own-mutation echo does not clobber the binding** | real drag (bound via a translating proxy), then filter | the filter's `react()` deselect echo is swallowed by the `applying` guard — selection NOT wiped ✓ |
 | 25 | **Programmatic set over an active drag** | real drag, then click "Select sports cars" | new selection applies; stale `layout.selections` outline cleared (`length === 0`); a re-drag of the *same* points leaves its marquee intact (echo skipped by `matchesCurrent`) ✓ |
+| 26 | **Name-keyed visibility survives recomposition + round-trips** | hide `"8"`, filter so a `cyl` group drops (3→2 traces), unfilter; then a legend toggle | trace `"8"` stays `legendonly` across the recompose (keyed by name, not index); a legend toggle writes the full `{name → state}` map back ✓ |
 
 Rows 18–21 need small dedicated fixtures (a subplot app, a ggplotly app, a
-gated app); the kitchen-sink `examples/plotly.R` covers 1–17 and 22–25. **Rows
+gated app); the kitchen-sink `examples/plotly.R` covers 1–17 and 22–26. **Rows
 13/14 use emit and are necessary but not sufficient — they must be paired with
 the real-drag rows 16/17/23/25, or the outline-clearing and own-echo classes of
 bug slip through.**
@@ -239,6 +240,23 @@ echo → skip, marquee survives) and false for a genuinely different selection
 (programmatic set → clear the stale outline, apply). Row 25 must therefore
 assert *both* directions: a programmatic set clears the outline, and a re-drag
 of the same points keeps its marquee.
+
+### 3.2 Both "which" props are identity-keyed — test recomposition
+
+`selected_ids` (points, keyed by `ids`) and `trace_visibility` (traces, keyed by
+trace `name`) are deliberately **identity-keyed, not positional**, so they
+survive the data change that renumbers their target. The class of bug they guard
+against only appears when the **trace composition changes** — a filter that
+drops an entire group, so `gd.data` goes 3→2 traces and back. A positional value
+would silently mis-target after the renumber; the identity-keyed value
+re-resolves. So the load-bearing assertions (rows 23 and 26) must drive a filter
+that *removes a whole group*, not just thins points within the existing traces —
+the latter never exercises the renumber and a positional implementation would
+pass it. Assert the key (names / id values) is unchanged across
+filter→unfilter, and that the live `selectedpoints` / `visible` re-resolve to it
+each time. Both also require their key on the spec (`ids` for points, `name` for
+traces); a fixture missing it should hit the build-time validation error, which
+is itself worth a row.
 
 ---
 

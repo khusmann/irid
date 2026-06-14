@@ -19,8 +19,10 @@
 #     highlighted) and can be set/cleared from anywhere ("Select sports cars" /
 #     "Clear"), all via plotly's native dimming. No index bookkeeping: the value
 #     is just the names, bound to a plain reactiveVal.
-#   - `trace_visibility`: clicking the legend writes the tri-state vector back;
-#     "Hide 8-cyl" sets it programmatically (server -> client).
+#   - `trace_visibility`: a sparse { trace name -> tri-state } map (keyed by
+#     name, like selected_ids is by id). Clicking the legend writes it back;
+#     "Hide 8-cyl" sets `c("8" = "legendonly")` — correct even after a filter
+#     renumbers the traces.
 #   - Discrete callbacks: onClick inspects a point, onDoubleclick logs a reset,
 #     onRelayout shows the raw payload keys of the last gesture.
 #   - uirevision reset: "Reset view" bumps a revision the spec feeds into
@@ -100,7 +102,10 @@ App <- function() {
             ),
             tags$button(
               class = "btn btn-sm btn-outline-secondary",
-              onClick = \() visible(c("true", "true", "legendonly")),
+              # trace_visibility is keyed by trace NAME (here the cyl level),
+              # not position — so this stays correct even when filtering drops
+              # a group and renumbers the traces.
+              onClick = \() visible(c("8" = "legendonly")),
               "Hide 8-cyl trace"
             ),
             tags$button(
@@ -190,7 +195,8 @@ App <- function() {
           tags$br(),
           \() {
             v <- visible()
-            if (is.null(v)) "visibility: default" else paste0("visibility: ", paste(v, collapse = "/"))
+            if (is.null(v) || !length(v)) "visibility: default"
+            else paste0("visibility: ", paste(names(v), v, sep = "=", collapse = ", "))
           }
         ),
         tags$div(

@@ -63,8 +63,10 @@ coerce_plotly_value <- function(name, v) {
   # unambiguously means "clear" — normalize it back to `NULL`.
   if (is.null(v) || (length(v) == 1L && is.atomic(v) && is.na(v))) return(NULL)
   if (grepl("_range$", name)) return(as.numeric(unlist(v)))
-  if (name %in% c("trace_visibility", "selected_ids")) {
-    return(as.character(unlist(v)))
+  if (identical(name, "selected_ids")) return(as.character(unlist(v)))
+  if (identical(name, "trace_visibility")) {
+    # named map: trace name -> tri-state; preserve the names, values to character
+    return(stats::setNames(as.character(unlist(v)), names(v)))
   }
   v
 }
@@ -131,11 +133,15 @@ prepare_state_props <- function(state) {
 #'   validate that the built traces carry `ids`: error on absence, warn on
 #'   duplicates. Identity-keyed selection resolves against `data[*].ids`, so a
 #'   missing key is a hard, fixable error and a non-unique key is advisory.
+#' @param require_names When `TRUE` (the `trace_visibility` binding is in use),
+#'   validate the built traces carry `name`s: error on absence, warn on
+#'   duplicates. Visibility is keyed by trace `name`.
 #' @return A length-1 character vector of JSON.
 #' @keywords internal
-to_plotly_spec <- function(p, require_ids = FALSE) {
+to_plotly_spec <- function(p, require_ids = FALSE, require_names = FALSE) {
   b <- plotly::plotly_build(p)
   if (require_ids) validate_plotly_ids(b$x$data)
+  if (require_names) validate_plotly_trace_names(b$x$data)
   # plotly:::to_JSON is unexported; getFromNamespace avoids the R CMD check
   # `:::` note while still reproducing plotly's exact encoding.
   to_JSON <- utils::getFromNamespace("to_JSON", "plotly")
@@ -169,6 +175,32 @@ validate_plotly_ids <- function(data) {
       ),
       .frequency = "once",
       .frequency_id = "irid_plotly_ids_unique"
+    )
+  }
+}
+
+# `trace_visibility` keys each trace's visibility on its `name`, so the traces
+# must be named. Presence -> hard error; duplicate names -> once-per-session
+# warning (toggling one name toggles every trace sharing it).
+validate_plotly_trace_names <- function(data) {
+  nms <- vapply(data, function(tr) tr$name %||% NA_character_, character(1L))
+  if (all(is.na(nms))) {
+    cli::cli_abort(c(
+      "{.arg trace_visibility} keys on trace {.field name}, but the plot's \\
+       traces are unnamed.",
+      "i" = "Name the traces, e.g. with {.code color = ~group} in \\
+             {.fn plot_ly} or {.code name =} per trace."
+    ))
+  }
+  named <- nms[!is.na(nms)]
+  if (anyDuplicated(named)) {
+    rlang::warn(
+      paste0(
+        "`trace_visibility`: the plot's trace `name`s are not unique. ",
+        "Toggling a name toggles every trace that shares it."
+      ),
+      .frequency = "once",
+      .frequency_id = "irid_plotly_names_unique"
     )
   }
 }
@@ -244,6 +276,12 @@ plotly_dependency <- function() {
 #'   supply `ids` (`plot_ly(ids = ~key)` / `aes(ids = key)`); because the value
 #'   is keyed on identity rather than position, the selection survives data
 #'   changes that renumber points (filtering, sorting, trace recomposition).
+#'
+#'   `trace_visibility` is the per-trace on/off state, a sparse named character
+#'   vector keyed by trace `name` (`c("8" = "legendonly")`), values in
+#'   `"true"` / `"false"` / `"legendonly"`. Like `selected_ids` it is
+#'   identity-keyed, so it stays correct across trace recomposition; binding it
+#'   requires the traces to be named.
 #' @param onClick,onHover,onUnhover,onDoubleclick Discrete pointer callbacks.
 #'   Each receives the (slimmed) plotly event payload.
 #' @param onDeselect,onSelecting,onBrushing Selection-lifecycle notifications.
@@ -292,10 +330,14 @@ PlotlyOutput <- function(
 
   # The spec is always a function; wrap it as a callable prop that serializes
   # to the plotly JSON string each time its deps change. Two-way-capable like
-  # any callable prop, but the client never writes the spec back. When the
-  # `selected_ids` binding is in use, each build also validates the plot's ids.
-  require_ids <- "selected_ids" %in% names(state)
-  spec_prop <- function() to_plotly_spec(spec(), require_ids = require_ids)
+  # any callable prop, but the client never writes the spec back. The identity-
+  # keyed bindings validate the plot supplies their key on each build:
+  # `selected_ids` needs point `ids`, `trace_visibility` needs trace `name`s.
+  require_ids   <- "selected_ids" %in% names(state)
+  require_names <- "trace_visibility" %in% names(state)
+  spec_prop <- function() {
+    to_plotly_spec(spec(), require_ids = require_ids, require_names = require_names)
+  }
 
   # Throttled relayout/hover events; immediate clicks/selection. NULL handlers
   # resolve to subject-less wires and drop out in normalize_widget_events.

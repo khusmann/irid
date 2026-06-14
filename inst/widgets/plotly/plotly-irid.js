@@ -80,8 +80,17 @@
     if (v === "legendonly") return "legendonly";
     return "true"; // true or undefined
   }
+  // Visibility is keyed by trace NAME (identity), not position — a sparse
+  // { name -> tri-state } map. Like ids for points, name resolution is
+  // layout-agnostic, so toggling survives trace recomposition (a filter that
+  // drops a group renumbers traces but not their names). Traces without a name
+  // can't be keyed and are skipped.
   function readVisibility(el) {
-    return el.data.map(function (tr) { return stringVisibility(tr.visible); });
+    var out = {};
+    el.data.forEach(function (tr) {
+      if (tr.name != null) out[tr.name] = stringVisibility(tr.visible);
+    });
+    return out;
   }
 
   // --- factory ------------------------------------------------------------
@@ -234,23 +243,34 @@
     }
 
     function visibilityEntry() {
+      // `v` is a sparse { traceName -> tri-state } map: set only the named
+      // traces, leave the rest at the spec's default. Resolution is by name,
+      // so it is robust to trace recomposition.
       return {
         name: "trace_visibility", source: "restyle",
         writeSpec: function (s, v) {
-          var vis = [].concat(v);
-          s.data.forEach(function (tr, i) {
-            if (i < vis.length) tr.visible = typedVisibility(vis[i]);
+          s.data.forEach(function (tr) {
+            if (tr.name != null && v[tr.name] !== undefined) {
+              tr.visible = typedVisibility(v[tr.name]);
+            }
           });
         },
         apply: function (el, v) {
-          var vis = [].concat(v).map(typedVisibility);
-          return mutate(function () { return Plotly.restyle(el, { visible: vis }); });
+          var idx = [], vals = [];
+          el.data.forEach(function (tr, i) {
+            if (tr.name != null && v[tr.name] !== undefined) {
+              idx.push(i); vals.push(typedVisibility(v[tr.name]));
+            }
+          });
+          if (!idx.length) return Promise.resolve();
+          // restyle's value array maps 1:1 to the given trace indices.
+          return mutate(function () { return Plotly.restyle(el, { visible: vals }, idx); });
         },
-        applyDeferred: function () { return Promise.resolve(); },
+        applyDeferred: function () { return Promise.resolve(); },  // null -> leave the spec's visibility
         matchesCurrent: function (el, v) {
-          var vis = [].concat(v);
-          return el.data.every(function (tr, i) {
-            return stringVisibility(tr.visible) === String(vis[i]);
+          return el.data.every(function (tr) {
+            if (tr.name == null || v[tr.name] === undefined) return true;
+            return stringVisibility(tr.visible) === String(v[tr.name]);
           });
         }
       };
