@@ -212,3 +212,41 @@ test_that("a batch driven by the current event sequence carries that sequence", 
 
   m$handle$destroy()
 })
+
+test_that("irid_jsonify_names converts named vectors to named lists (JSON objects)", {
+  # A named atomic vector would serialize via Shiny's keep_vec_names path and
+  # warn; a named list gives the same JSON object without the deprecation.
+  expect_identical(irid_jsonify_names(c("8" = "legendonly")), list(`8` = "legendonly"))
+  # Unnamed vectors stay vectors (JSON arrays); scalars pass through.
+  expect_identical(irid_jsonify_names(c(40, 200)), c(40, 200))
+  expect_identical(irid_jsonify_names("pan"), "pan")
+  expect_null(irid_jsonify_names(NULL))
+  # Recurses into lists, preserving keys.
+  expect_identical(
+    irid_jsonify_names(list(a = c(x = 1), b = 1:3)),
+    list(a = list(x = 1), b = 1:3)
+  )
+})
+
+test_that("a named-vector prop round-trips through mount as a JSON object", {
+  # Integration guard for the global jsonify hook (it lives in mount.R, not in
+  # PlotlyOutput): a generic widget whose prop value is a named atomic vector
+  # must reach the wire as a named *list* — so Shiny encodes it as a `{ }`
+  # object — on BOTH the init and the per-flush attr paths.
+
+  # (a) init path: a constant named-vector prop ships as a named list.
+  init <- mount_widget(list(vis = c(`8` = "legendonly", `6` = "true")))
+  init_msg <- Filter(function(m) m$type == "irid-widget-init", init$session$msgs())
+  expect_length(init_msg, 1L)
+  expect_identical(init_msg[[1]]$message$props$vis,
+                   list(`8` = "legendonly", `6` = "true"))
+  init$handle$destroy()
+
+  # (b) attr path: a bound prop updating to a named vector drains as a list.
+  vis <- shiny::reactiveVal(c(`8` = "legendonly"))
+  m <- mount_widget(list(vis = vis))
+  m$session$flushReact()
+  expect_identical(attr_msgs(m$session)[[1]]$message$values$vis,
+                   list(`8` = "legendonly"))
+  m$handle$destroy()
+})

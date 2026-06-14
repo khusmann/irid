@@ -26,6 +26,14 @@ Two inputs representing the same value in different units, where editing either 
 
 A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R list. Adding, toggling, filtering, and removing items are ordinary functions that update that list.
 
+### [Nested Each](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+A question editor showing how `Each` composes with hierarchical state. Each question is projected as a mini-store, a nested `author = list(name, role)` field is itself a sub-mini-store, and an inner `Each` iterates each question's options. Editing a deeply nested field re-renders only that one input, and kept questions keep their inner state across sibling adds and removes.
+
+### [Heterogeneous Each](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+A minimal block editor whose list mixes record shapes — heading, paragraph, and todo blocks. A `Match` inside the `Each` body dispatches on each block's `type`. Changing a block's kind reshapes just that slot in the parent collection: the reconciler tears down the old slot and rebuilds it with a fresh mini-store of the new shape, while sibling blocks keep their state and focus.
+
 ### [Dynamic Column Cards](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 Rebuilds the scenario from [Shiny's dynamic-observers problem](https://www.kylehusmann.com/posts/2025/shiny-dynamic-observers/): pick a dataset, pick columns from it, each column becomes a card with a close button, and removing a card puts the column back in the dropdown. In Shiny this required nested observers, ghost-input workarounds, and a memory leak fix. Here the parent owns a `reactiveVal` and the dropdown and close buttons both read and write it directly.
@@ -37,5 +45,13 @@ irid applies controlled input changes immediately in the browser before the serv
 ### [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 irid components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `iridOutput()` and `renderIrid()`.
+
+### [Plotly Output](../apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+`PlotlyOutput` as a first-class reactive output. Unlike the `{plotly}` htmlwidget, it uses `Plotly.react()` for incremental updates, so a data change preserves the user's zoom, pan, and selection. Axis ranges, drag mode, box/lasso selection (identity-keyed by point `ids`), and per-trace visibility are all exposed as two-way reactive arguments — interactions write back, and a rejecting `reactiveProxy` snaps the plot back.
+
+### [CodeMirror Editor](../apps/codemirror/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+A custom widget built on the `IridWidget` substrate, wrapping CodeMirror 6. Shows a non-trivial widget end to end: a two-way bound document and cursor, a reactive `language` prop that swaps the editor's syntax via a CodeMirror `Compartment`, a `focus-changed` event, and a server-update annotation that keeps the editor from echoing the server's own writes back.
 
 </div>

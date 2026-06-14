@@ -421,3 +421,23 @@ Two representative cases are enough — the mechanism is parent-agnostic, but
 
 - [ ] `irid.debug.latency` option (in seconds) adds `Sys.sleep()` to every event handler
 - [ ] Default value of `0` adds no delay
+
+## End-to-end tests (browser)
+
+Browser-driven round-trip tests live alongside the unit tests in
+`tests/testthat/` and use the `chromote` + `callr` driver in
+`helper-e2e.R` (+ `helper-e2e-plt.R` for the PlotlyOutput layer).
+
+- **Naming convention (load-bearing):** every e2e test file is
+  `test-<area>-e2e.R` (e.g. `test-plotly-e2e.R`). CI selects them with
+  `devtools::test(filter = "e2e")`, so a new browser suite is picked up
+  automatically by following the suffix — no list to maintain.
+- **Gating** (`skip_unless_e2e()`): never on CRAN (`skip_on_cran()`); otherwise
+  opt-in via the `IRID_E2E=1` env var (env vars, not `options()`, are the
+  idiomatic test-gate mechanism). A bare `devtools::test()` skips e2e so it
+  doesn't boot Chrome.
+- **CI**: the main `R-CMD-check` job leaves `IRID_E2E` unset (e2e skips); a
+  dedicated `e2e.yaml` job sets `IRID_E2E=1`, installs Chrome, and runs only the
+  `*-e2e.R` files. Unit tests run once, in the check job.
+- **Run locally:** `IRID_E2E=1 Rscript -e 'devtools::test(filter = "plotly-e2e")'`
+  (one suite) or `filter = "e2e"` (all e2e).

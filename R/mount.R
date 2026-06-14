@@ -45,7 +45,7 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
   }
   # Single-bracket assignment so a legitimate NULL value keeps its key in
   # the map rather than being dropped (`[[<-` with NULL removes the entry).
-  entry$values[attr] <- list(value)
+  entry$values[attr] <- list(irid_jsonify_names(value))
   if (!is.null(sequence)) {
     entry$sequence <- if (is.null(entry$sequence)) {
       sequence
@@ -55,6 +55,19 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
   }
   pending[[id]] <- entry
   invisible()
+}
+
+# Shiny's custom-message encoder serializes named atomic vectors with
+# jsonlite's `keep_vec_names = TRUE`, which is deprecated (a future jsonlite will
+# encode them as arrays, not objects) and warns. Recursively convert named
+# atomic vectors to named lists so an object-shaped value like
+# `c("8" = "legendonly")` (e.g. plotly's `trace_visibility`) still serializes as
+# the `{ "8": "legendonly" }` object the client expects, without the warning.
+# Unnamed vectors and scalars pass through unchanged.
+irid_jsonify_names <- function(value) {
+  if (is.list(value)) return(lapply(value, irid_jsonify_names))
+  if (is.atomic(value) && !is.null(names(value))) return(as.list(value))
+  value
 }
 
 # Pure reconciliation planner for `Each`. Decides *what* changes between two
@@ -229,6 +242,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     for (key in names(wi$prop_fns)) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
+    props <- irid_jsonify_names(props)
     deps <- lapply(wi$deps, register_widget_dep)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
