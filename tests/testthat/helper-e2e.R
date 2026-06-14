@@ -22,6 +22,19 @@ skip_unless_e2e <- function() {
   testthat::skip_if(is.null(chromote::find_chrome()), "no Chrome found")
 }
 
+# CI launch hardening, applied once at source time (before the first
+# ChromoteSession launches Chrome). The default 10s port-open timeout is too
+# tight for a cold GitHub runner — it intermittently aborts the very first test
+# with "Chrome debugging port not open after 10 seconds". A bigger timeout
+# absorbs the cold start; `--disable-dev-shm-usage` keeps headless Chrome off
+# the runner's small /dev/shm (a separate startup-crash mode). No-ops locally.
+if (requireNamespace("chromote", quietly = TRUE)) {
+  options(chromote.timeout = 60)
+  chromote::set_chrome_args(
+    unique(c(chromote::get_chrome_args(), "--disable-dev-shm-usage"))
+  )
+}
+
 to_js_str <- function(x) jsonlite::toJSON(x, auto_unbox = TRUE)
 
 # --- booting the app under test (callr) -------------------------------------
