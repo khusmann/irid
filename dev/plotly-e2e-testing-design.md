@@ -399,23 +399,36 @@ server flush want ~1.5–2.5 s. Two robustness rules learned the hard way:
 This is a heavyweight, browser-dependent suite, but it stays a first-class
 `tests/testthat/` citizen — the same place `shinytest2` and every other R e2e
 suite lives — and earns its keep by **skipping**, not by hiding in a separate
-tree. Each case opens with, in order:
+tree. `skip_unless_e2e()` opens every case (`helper-e2e.R`):
 
 ```r
-skip_on_cran()                                   # CRAN never boots a browser
+skip_on_cran()                                   # CRAN policy: no browser
+on_ci <- isTRUE(as.logical(Sys.getenv("CI")))    # what testthat::skip_on_ci uses
+if (!on_ci && Sys.getenv("IRID_E2E") != "1")     # local: opt in; CI: auto-run
+  skip("e2e: opt in with IRID_E2E=1 (auto-runs on CI)")
 skip_if_not_installed("chromote")
 skip_if_not_installed("callr")
 skip_if(is.null(chromote::find_chrome()))        # no browser present
 ```
 
-`skip_on_cran()` is the load-bearing gate: CRAN sets `NOT_CRAN`, `testthat`
-reads it, and the suite skips cleanly with nothing launched — the idiomatic R
-mechanism, not a home-grown flag. The `skip_if_not_installed()` lines cover
-machines without the browser stack; `chromote` and `callr` are `Suggests`, not
-hard deps, so the default install stays lean. Optionally add a **local** opt-out
-on top — `skip_if(Sys.getenv("IRID_E2E") != "1")` — so a routine
-`devtools::test()` on a dev laptop doesn't spend ~30 s booting Chrome; this is a
-convenience layer, not the CRAN guard (`skip_on_cran()` already is).
+The gating is **env-var driven, not `options()`** — that's the idiomatic R
+mechanism for test conditions (CRAN signals via `NOT_CRAN`, CI via `CI`, and
+`testthat`'s own `skip_on_cran`/`skip_on_ci` read those); `options()` are
+session-scoped runtime config that don't propagate to the fresh R processes
+`R CMD check`/CI spawn. The three behaviors:
+
+- **CRAN** — `skip_on_cran()` (CRAN leaves `NOT_CRAN` unset). Per CRAN policy a
+  check must not require a browser, so the whole suite self-skips.
+- **CI** — `CI=true` (set by every CI system) flips `on_ci`, so the suite runs
+  with no per-CI opt-in flag. CI must install a browser
+  (`chromote::install_chrome()` or a setup-chrome action); absent one, the cases
+  skip at `find_chrome()` rather than fail.
+- **Local** — opt in with `IRID_E2E=1` when working on something the suite covers
+  (`IRID_E2E=1 Rscript -e 'devtools::test(filter = "plotly")'`); a bare
+  `devtools::test()` skips it so the laptop doesn't boot Chrome.
+
+`chromote` and `callr` are `Suggests`, not hard deps, so the default install
+stays lean.
 
 ---
 
