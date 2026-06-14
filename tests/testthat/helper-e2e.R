@@ -1,7 +1,7 @@
 # helper-e2e.R — generic e2e driver for irid apps. The PlotlyOutput-specific
-# layer (e2e_plt_*) lives in helper-e2e-plt.R. Design + rationale:
-# dev/plotly-e2e-testing-design.md. Boots a fixture app in a background callr
-# process and drives headless Chrome via chromote.
+# layer (e2e_plt_*) lives in helper-e2e-plt.R. See TESTING.md (End-to-end tests)
+# for gating + conventions. Boots a fixture app in a background callr process and
+# drives headless Chrome via chromote.
 #
 #   app <- e2e_app("plotly/kitchen-sink.R")
 #   e2e_click(app, "#btn-economy")

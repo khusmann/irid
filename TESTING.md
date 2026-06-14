@@ -426,8 +426,7 @@ Two representative cases are enough — the mechanism is parent-agnostic, but
 
 Browser-driven round-trip tests live alongside the unit tests in
 `tests/testthat/` and use the `chromote` + `callr` driver in
-`helper-e2e.R` (+ `helper-e2e-plt.R` for the PlotlyOutput layer). See
-`dev/plotly-e2e-testing-design.md` for the design.
+`helper-e2e.R` (+ `helper-e2e-plt.R` for the PlotlyOutput layer).
 
 - **Naming convention (load-bearing):** every e2e test file is
   `test-<area>-e2e.R` (e.g. `test-plotly-e2e.R`). CI selects them with

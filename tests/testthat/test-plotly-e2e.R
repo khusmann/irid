@@ -1,6 +1,7 @@
 # End-to-end tests for PlotlyOutput — the round-trip behavior that pure-R unit
-# tests cannot see. See dev/plotly-e2e-testing-design.md for the coverage matrix
-# (each test names its numbered rows) and helper-e2e.R for the driver.
+# tests cannot see. Each test_that() names what it asserts; the trailing numbers
+# (e.g. "(16, 17)") tag rows of the original coverage matrix. The driver is in
+# helper-e2e.R / helper-e2e-plt.R; see TESTING.md for gating + conventions.
 #
 # Heavyweight + browser-dependent: gated behind the driver's skip_unless_e2e()
 # (CRAN, missing chromote/callr/Chrome, or IRID_E2E != "1"). Run locally with:

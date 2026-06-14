@@ -791,6 +791,63 @@ analogous race — each attribute write is its own concern), and generic
 feedback-loop prevention (wrappers break loops with their library's idioms;
 the stale-echo gate only handles transient sequencing).
 
+### PlotlyOutput
+
+`PlotlyOutput` ([plotly.R](R/plotly.R), JS in
+[plotly-irid.js](inst/widgets/plotly/plotly-irid.js)) is a thin `IridWidget`
+wrapper over plotly.js — the flagship shipped widget. It carries no custom
+wire-protocol message and no PlotlyOutput-specific `process_tags` path; it maps
+its surface onto the substrate above:
+
+- **Spec → a JSON-string prop.** The user's `plot_ly()`/`ggplotly()` builder is a
+  callable prop serialized with plotly's own `to_JSON` (`to_plotly_spec`); the JS
+  `JSON.parse`s it and applies it with **`Plotly.react()`** — incremental, so a
+  data change preserves the user's zoom/pan/selection via plotly `uirevision`
+  (unlike the `{plotly}` htmlwidget, which destroys and recreates).
+- **Named state args → two-way props.** Axis ranges, `dragmode`, `hovermode`,
+  `selected_ids`, `trace_visibility` (and subplot axes `xaxis<n>_range`, …) are a
+  *translation table*: the R side only validates the names; the JS factory holds
+  the authoritative mirror mapping each name to a spec path, an `apply`/
+  `applyDeferred`/`matchesCurrent`, and a source plotly event. NULL-initialized
+  args are shipped explicitly (`__irid_state_keys`) because R list semantics drop
+  a `NULL` from the init props object.
+- **Discrete events → widget events** (`onClick`, `onHover`, legend, …); the raw
+  `plotly_relayout` payload is an `onRelayout` escape hatch for fields outside the
+  table.
+
+**Self-echo guard.** `Plotly.react()` is silent (no `plotly_relayout`), but our
+own `Plotly.relayout()`/`restyle()` for apply/snap-back/reset re-fire
+`plotly_relayout` *synchronously, before the promise resolves*. An `applying`
+flag, raised around every programmatic mutation and cleared in `.then()`, makes
+the listener early-return — the exact guard that lets a rejecting `reactiveProxy`
+snap the plot back (the binding force-send echoes the canonical value) without
+looping. `matchesCurrent` is a secondary idempotence backstop.
+
+**NULL is two acts.** A binding *already* `NULL` across a data `react()` stays
+out of the merge (uirevision preserves the view); a binding *transitioning* to
+`NULL` triggers `applyDeferred` — a targeted `relayout({autorange:true})` (or the
+spec's range) that genuinely resets.
+
+**Identity-keyed "which" props.** `selected_ids` keys on per-point plotly `ids`
+and `trace_visibility` on trace `name` — not position — so both survive a data
+change that renumbers/recomposes traces (a filter dropping a whole group). Each
+validates its key is present on the built spec.
+
+**Selection is two-layer.** A box/lasso drag writes *both* `layout.selections`
+(the outline rectangle) and per-trace `data[*].selectedpoints` (the dimming).
+`selected_ids` is the dimming layer; clearing or setting must drop the outline
+**first** (`relayout({selections:null})`) then `restyle` the dimming, because
+while a drag is active plotly owns `selectedpoints` and a bare restyle is a
+silent no-op. `matchesCurrent` keeps a user's own fresh marquee from being wiped
+by its echo.
+
+**Wire-boundary coercion.** Shiny decodes client messages with
+`simplifyVector = FALSE`, so a range arrives as `list(40, 200)` and a
+`setProp(key, null)` as `NA`; `coerce_plotly_value` normalizes each field back to
+its documented R shape (ranges → numeric, the keyed maps → character, `NA`/`null`
+→ `NULL`). `coerce_state_prop` `force()`s its captured name/callable so proxies
+built in a construction loop don't all resolve to the last one.
+
 ## Remaining Work
 
 ### `Portal` (planned)
