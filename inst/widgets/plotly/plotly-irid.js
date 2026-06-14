@@ -334,7 +334,11 @@
         // longer load-bearing for correctness (could drop, or keep purely to
         // spare onRelayout the transient selection geometry).
         var keys = Object.keys(payload);
-        if (keys.length && keys.every(function (k) { return /^selections/.test(k); })) return;
+        // Plotly fires a bare `{}` relayout on some interactions (and our own
+        // settle can surface one). It carries nothing for onRelayout or any
+        // prop, so drop it rather than spuriously notifying with an empty object.
+        if (!keys.length) return;
+        if (keys.every(function (k) { return /^selections/.test(k); })) return;
         // Emit the raw escape-hatch notification FIRST, then the prop writes.
         // setProp and sendEvent share one per-element sequence counter; if the
         // notification went last it would bump the sequence past the prop
@@ -407,7 +411,9 @@
         });
         if (reactNeeded || !ready) render(); // one redraw for the whole batch
       },
-      destroy: function () { Plotly.purge(el); }
+      // Guard on Plotly: a widget gated off before plotly.js finished loading
+      // (the whenPlotly race) can be destroyed with Plotly still undefined.
+      destroy: function () { if (window.Plotly) Plotly.purge(el); }
     };
   });
 })();

@@ -143,6 +143,13 @@ test_that("onRelayout escape hatch, accepted zoom, snap-back, gate (7-11)", {
   e2e_poll(\() e2e_readout(app, "#ro-relayout"), \(t) grepl("xaxis\\.range", t))
   expect_match(e2e_readout(app, "#ro-relayout"), "xaxis\\.range")
 
+  # An empty `{}` relayout is dropped: onRelayout is NOT notified, so the
+  # readout still shows the prior gesture's keys (never "(empty)").
+  e2e_plt_emit(app, "plotly_relayout")  # default payload is "{}"
+  e2e_wait_idle(app)
+  expect_match(e2e_readout(app, "#ro-relayout"), "xaxis\\.range")
+  expect_no_match(e2e_readout(app, "#ro-relayout"), "empty")
+
   # Row 8: an accepted (wide) hp zoom reaches the server and the plot keeps it.
   e2e_plt_relayout(app, list(`yaxis.range[0]` = 50, `yaxis.range[1]` = 160))
   e2e_poll(\() e2e_readout(app, "#ro-viewport"), \(t) grepl("hp: \\[50", t))

@@ -227,3 +227,26 @@ test_that("irid_jsonify_names converts named vectors to named lists (JSON object
     list(a = list(x = 1), b = 1:3)
   )
 })
+
+test_that("a named-vector prop round-trips through mount as a JSON object", {
+  # Integration guard for the global jsonify hook (it lives in mount.R, not in
+  # PlotlyOutput): a generic widget whose prop value is a named atomic vector
+  # must reach the wire as a named *list* — so Shiny encodes it as a `{ }`
+  # object — on BOTH the init and the per-flush attr paths.
+
+  # (a) init path: a constant named-vector prop ships as a named list.
+  init <- mount_widget(list(vis = c(`8` = "legendonly", `6` = "true")))
+  init_msg <- Filter(function(m) m$type == "irid-widget-init", init$session$msgs())
+  expect_length(init_msg, 1L)
+  expect_identical(init_msg[[1]]$message$props$vis,
+                   list(`8` = "legendonly", `6` = "true"))
+  init$handle$destroy()
+
+  # (b) attr path: a bound prop updating to a named vector drains as a list.
+  vis <- shiny::reactiveVal(c(`8` = "legendonly"))
+  m <- mount_widget(list(vis = vis))
+  m$session$flushReact()
+  expect_identical(attr_msgs(m$session)[[1]]$message$values$vis,
+                   list(`8` = "legendonly"))
+  m$handle$destroy()
+})
