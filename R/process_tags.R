@@ -167,6 +167,44 @@ anchor_pair <- function(id) {
   htmltools::HTML(paste0("<!--irid:s:", id, "--><!--irid:e:", id, "-->"))
 }
 
+#' Materialize a node's own htmltools render hooks / tag function
+#'
+#' bslib (and htmltools generally) defer structure to **render time**: a
+#' `shiny.tag` can carry `.renderHooks` that build its final DOM
+#' (`layout_sidebar()`'s grid wrapper, `card()`'s fill plumbing, ...), and
+#' a `shiny.tag.function` produces its tags only when called. [process_tags()]
+#' rebuilds each tag from `name`/`attribs`/`children`, so without running
+#' these first the deferred wrapper is silently dropped (see GH #27).
+#'
+#' This runs only the node's *own* hooks (one level), looping until the node
+#' is a resolved tag / non-tag. Unlike [htmltools::as.tags()] it does **not**
+#' recurse into children — `process_tags`' walker descends into them itself
+#' and resolves each child's hooks as it arrives. That separation is what
+#' lets irid's own children (reactive functions, `irid_output`,
+#' `irid_widget`, control-flow nodes) survive: they never carry render hooks,
+#' so they pass straight through, while a child hook that *moved* them into a
+#' new wrapper still gets walked.
+#'
+#' @param node A node from the tag tree.
+#' @return The node with its top-level render hooks / tag function resolved.
+#' @keywords internal
+resolve_render_hooks <- function(node) {
+  repeat {
+    if (inherits(node, "shiny.tag.function")) {
+      node <- node()
+      next
+    }
+    if (inherits(node, "shiny.tag") && length(node$.renderHooks) > 0L) {
+      hook <- node$.renderHooks[[1L]]
+      node$.renderHooks[[1L]] <- NULL
+      node <- hook(node)
+      next
+    }
+    break
+  }
+  node
+}
+
 #' Create a local ID counter for use within a single `process_tags` call
 #'
 #' @return A function that returns the next ID each time it is called.
@@ -199,6 +237,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
   widget_inits <- list()
 
   walk <- function(node) {
+    if (is.null(node)) return(NULL)
+
+    # Run any deferred htmltools render hooks / tag functions before
+    # inspecting the node, so the materialized structure (bslib layout
+    # wrappers, card fill plumbing, ...) is what we walk and rebuild.
+    node <- resolve_render_hooks(node)
     if (is.null(node)) return(NULL)
 
     if (inherits(node, "irid_output")) {
@@ -449,7 +493,15 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       }
 
       if (!is_irid_reactive(val)) {
-        kept_attribs[[name]] <- val
+        # Append positionally rather than `kept_attribs[[name]] <- val`:
+        # htmltools allows duplicate attribute names and renders them
+        # joined (a tag can carry two `class` attribs — bslib's render
+        # hooks emit exactly that, stacking `bslib-sidebar-layout` and
+        # `html-fill-item`). Name-keyed assignment would collapse the pair
+        # to the last value and silently drop the layout wrapper.
+        # `list(val)` named via `names<-` keeps NULL values intact (a bare
+        # `[[<-` of NULL would extend nothing).
+        kept_attribs <- c(kept_attribs, `names<-`(list(val), name))
         next
       }
 
