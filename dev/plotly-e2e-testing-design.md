@@ -8,11 +8,13 @@
 > that were not kept. **There is currently no automated e2e suite, and the
 > package's 706 pure-R tests cover none of this round-trip behavior** — so every
 > bug listed in §1 is, right now, protected by nothing. This document is the
-> implementation spec for the suite that closes that gap. The intended starting
-> point is §4 (layout, the `chromote` port in §5, CI gating) building the §3
-> matrix as named cases; the kitchen-sink fixture (`examples/plotly.R`) already
-> exercises rows 1–17 and 22–25. Treat the ✓ marks as "known-good behavior to
-> assert," not "already under test."
+> implementation spec for the suite that closes that gap. The intended transport
+> is **`chromote`** (§2) — it installs and drives the local Chrome here, so the
+> "nothing installable" constraint that forced the original Node harness no
+> longer holds. The starting point is §4 (R-native layout, CI gating) building
+> the §3 matrix as named cases; the kitchen-sink fixture (`examples/plotly.R`)
+> already exercises rows 1–17 and 22–26. Treat the ✓ marks as "known-good
+> behavior to assert," not "already under test."
 
 ---
 
@@ -50,50 +52,62 @@ to find and fix all of these; this doc makes it repeatable.
 
 ---
 
-## 2. Harness: headless Chrome over the DevTools Protocol, zero deps
+## 2. Harness: `chromote` driving headless Chrome
 
-The constraint that shaped the approach: no `chromote`, `shinytest2`,
-`puppeteer`, or `playwright` were installable, but a `google-chrome` binary and
-Node 22 were present. Node 22 ships a global `WebSocket` and `fetch`, which is
-all the Chrome DevTools Protocol (CDP) needs — so the harness is a single
-dependency-free Node script driving headless Chrome directly.
+The original harness was a dependency-free Node/CDP script, chosen because at the
+time *nothing* R-native was installable — no `chromote`, `shinytest2`,
+`puppeteer`, or `playwright`. That constraint is gone: **`chromote` installs from
+CRAN and drives the local `google-chrome` here.** It *is* a CDP client, so it
+speaks the exact protocol the Node script hand-rolled (`Page.navigate`,
+`Runtime.evaluate`, `Input.dispatchMouseEvent`, `Network`, `Page.captureScreenshot`)
+— but keeps the entire suite in R, with no Node dependency and no separate
+process to orchestrate by hand. Everything below maps the §1/§3 work onto
+`chromote`'s API; the *semantics* are identical to the Node harness that found
+the bugs, only the transport changes.
 
 ### Moving parts
 
-1. **App under test** — the example app booted headless:
+1. **App under test** — booted in a background R process via `callr::r_bg`, so
+   the app's reactive loop runs in a real, separate Shiny session while the test
+   process drives the browser:
+   ```r
+   app_proc <- callr::r_bg(function(port) {
+     app <- source("dev/e2e/fixtures/kitchen-sink.R")$value
+     shiny::runApp(irid::iridApp(app), port = port,
+                   launch.browser = FALSE, host = "127.0.0.1")
+   }, args = list(port = port))
    ```
-   runApp(iridApp(App), port = <P>, launch.browser = FALSE, host = "127.0.0.1")
-   ```
-   Sourced from `examples/plotly.R` with the trailing `iridApp(App)` stripped,
-   so the same file that ships as the demo is the fixture.
+   The fixture is `examples/plotly.R` with the trailing `iridApp(App)` stripped,
+   so the same file that ships as the demo is the fixture. `app_proc$is_alive()`
+   and `app_proc$read_error()` give lifecycle + the stderr stream (R errors).
 
-2. **Headless Chrome** with a remote debugging port and an isolated profile:
-   ```
-   google-chrome --headless=new --disable-gpu --no-sandbox \
-     --remote-debugging-port=<D> --user-data-dir=<tmp> about:blank
-   ```
-   *Never* `pkill chrome` to clean up — a developer's own Chrome may be running.
-   Track the spawned PID and kill only that.
+2. **Headless Chrome** — `chromote` finds and launches the browser itself
+   (`chromote::find_chrome()`), on an isolated profile, and owns the process
+   lifecycle. No manual `--remote-debugging-port`, no PID tracking, and crucially
+   **no `pkill chrome`** — `b$close()` / `chromote::default_chromote_object()`
+   tear down only the spawned instance, never a developer's own Chrome.
 
-3. **CDP client** — `fetch http://127.0.0.1:<D>/json` to find the page target,
-   open its `webSocketDebuggerUrl`, then speak CDP: `Page.enable`,
-   `Runtime.enable`, `Page.navigate`, and `Runtime.evaluate` with
-   `awaitPromise: true, returnByValue: true` as the one workhorse.
+3. **CDP client** — a `chromote::ChromoteSession`. `b$Page$navigate(url)` and
+   `b$Runtime$evaluate(js, awaitPromise = TRUE, returnByValue = TRUE)` are the
+   one workhorse (returns the value into R directly); the `Input`, `Network`, and
+   `Page` domains are all exposed as `b$Input$...`, `b$Network$...`, etc.
 
-### The two drive primitives
+### The drive primitives
 
-The whole suite is expressible with two ways of poking the page, mirroring the
-two directions of the round-trip:
+The whole suite is expressible with three ways of poking the page, mirroring the
+directions of the round-trip — each is a `chromote` call:
 
-- **Server → client: click the real DOM controls.**
-  ```js
-  [...document.querySelectorAll('button')]
-    .find(b => b.textContent.trim() === 'Hide 8-cyl trace').click();
+- **Server → client: click the real DOM controls** (`b$Runtime$evaluate`).
+  ```r
+  b$Runtime$evaluate("
+    [...document.querySelectorAll('button')]
+      .find(b => b.textContent.trim() === 'Hide 8-cyl trace').click();
+  ")
   ```
   Drives the app's reactiveVals through the genuine event path, then asserts on
   `gd.layout` / `gd.data` and on the rendered readout text.
 
-- **Client → server: synthesize the plotly gesture.**
+- **Client → server: synthesize the plotly gesture** (`b$Runtime$evaluate`).
   - `Plotly.relayout(gd, {'yaxis.range[0]': 100, 'yaxis.range[1]': 120})` fires a
     real `plotly_relayout` (split-key form, exactly what a drag emits) — this
     exercises `fromRelayout → setProp → writeback → snap-back`.
@@ -106,17 +120,20 @@ two directions of the round-trip:
   sequence plumbing are genuinely exercised — only the *physical* mouse event is
   faked.
 
-- **Client → server: a *real* mouse drag (when emit is not enough).**
-  `gd.emit('plotly_selected', …)` is a **trap for selection-clearing tests**: it
-  fires the listener but does **not** create plotly's internal selection — no
-  outline, nothing in `layout.selections`. So the "Clear selection leaves the
-  outline rectangle" bug is *invisible* to emit and only surfaces under a genuine
-  drag. Drive one via CDP `Input.dispatchMouseEvent`:
-  ```js
-  // dragmode must be a select tool; aim at gd's .nsewdrag rect
-  await mouse('mousePressed',  x1, y1);
-  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', lerp(x1,x2,i/6), lerp(y1,y2,i/6));
-  await mouse('mouseReleased', x2, y2);
+- **Client → server: a *real* mouse drag (when emit is not enough)**
+  (`b$Input$dispatchMouseEvent`). `gd.emit('plotly_selected', …)` is a **trap for
+  selection-clearing tests**: it fires the listener but does **not** create
+  plotly's internal selection — no outline, nothing in `layout.selections`. So
+  the "Clear selection leaves the outline rectangle" bug is *invisible* to emit
+  and only surfaces under a genuine drag. `chromote` exposes the same
+  `Input.dispatchMouseEvent` the Node harness used:
+  ```r
+  # dragmode must be a select tool; aim at gd's .nsewdrag rect
+  b$Input$dispatchMouseEvent(type = "mousePressed",  x = x1, y = y1, button = "left")
+  for (i in 1:6)
+    b$Input$dispatchMouseEvent(type = "mouseMoved",
+      x = lerp(x1, x2, i/6), y = lerp(y1, y2, i/6), button = "left")
+  b$Input$dispatchMouseEvent(type = "mouseReleased", x = x2, y = y2, button = "left")
   ```
   A real drag populates **both** layers of selection state — `layout.selections`
   (the outline rectangle) and per-trace `data[*].selectedpoints` (the dimming) —
@@ -126,28 +143,31 @@ two directions of the round-trip:
 
 ### Observability
 
-- Subscribe to `Runtime.consoleAPICalled` and `Runtime.exceptionThrown` and
-  echo them — page errors otherwise vanish silently.
-- Tail the app's stderr log for R errors (`grep -c 'Error'`). The
-  *count-before / count-after* pattern around a single gesture is how the
-  `null → NA` and lazy-capture bugs were localized to an exact action.
+- Subscribe to console/exception events — `b$Runtime$consoleAPICalled` and
+  `b$Runtime$exceptionThrown` (register a callback) and echo them — page errors
+  otherwise vanish silently.
+- Read the app's stderr for R errors via `app_proc$read_error()`. The
+  *count-before / count-after* pattern (count `'Error'` lines around a single
+  gesture) is how the `null → NA` and lazy-capture bugs were localized to an
+  exact action.
 - Read the app's own readout `<div>`s: they reflect the *server-side*
   reactiveVal, so comparing "what the plot shows" (`gd.layout`) against "what
   the server holds" (readout text) cleanly separates a client-apply bug from a
   server-write bug. This split was decisive — e.g. snap-back showed
   `hp: [50,160]` in the readout (server correct) while the plot showed the
   rejected `[100,118]` (client apply missing).
-- **Capture the websocket frames** (`Network.enable` +
-  `Network.webSocketFrameReceived`, filter for `irid-attr`) when the readout and
-  the plot disagree and you can't tell whether the server even sent the update.
-  This is what proved the clear *was* sent as
+- **Capture the websocket frames** (`b$Network$enable()` +
+  a `b$Network$webSocketFrameReceived` callback, filter for `irid-attr`) when the
+  readout and the plot disagree and you can't tell whether the server even sent
+  the update. This is what proved the clear *was* sent as
   `{values:{selected_points:null}}` — moving the hunt from "is the message sent?"
   to "why didn't the client apply it?", which localized the bug to the
   `relayout`/`restyle` order rather than the wire.
-- **Screenshot** (`Page.captureScreenshot`) for anything *layout*-shaped — the
-  bslib sidebar (#27) rendered with all its content present in the DOM but at
-  `0×0`, so only a screenshot (or a `getBoundingClientRect()` check) reveals it.
-  State assertions on `gd.layout`/`gd.data` are blind to "present but invisible."
+- **Screenshot** (`b$screenshot()` / `b$Page$captureScreenshot()`) for anything
+  *layout*-shaped — the bslib sidebar (#27) rendered with all its content present
+  in the DOM but at `0×0`, so only a screenshot (or a `getBoundingClientRect()`
+  check) reveals it. State assertions on `gd.layout`/`gd.data` are blind to
+  "present but invisible."
 
 ---
 
@@ -266,19 +286,25 @@ is itself worth a row.
 
 ```
 dev/e2e/
-  run.sh            orchestration: boot app (bg, tracked PID), launch headless
-                    chrome (tracked PID), run the node driver, tear down PIDs
-  driver.mjs        CDP client + the assertion list; exits non-zero on any fail
+  helpers.R         e2e_app() (callr boot + port), e2e_session() (ChromoteSession),
+                    eval_js(), drag(), console/exception + websocket capture,
+                    teardown — the §2 boilerplate as reusable R helpers
+  test-plotly.R     the §3 matrix as named testthat cases; expect_*() on the
+                    readout/gd state; sources helpers.R
   fixtures/
-    kitchen-sink.R  examples/plotly.R minus the iridApp() launch (rows 1–17, 22)
+    kitchen-sink.R  examples/plotly.R minus the iridApp() launch (rows 1–17, 22–26)
     subplot.R       row 18
     ggplotly.R      row 19
     gated.R         rows 20–21
 ```
 
-`driver.mjs` factors the connection boilerplate (`connectPage`, `evalJs`,
-console/exception capture) used throughout §2 into reusable helpers, then runs
-the §3 matrix as named cases, printing `PASS:`/`FAIL:` lines and a final count.
+Everything is R now — no Node, no shell orchestration. `helpers.R` factors the §2
+connection boilerplate (boot the app under `callr`, open a `ChromoteSession`,
+`eval_js`, console/exception/websocket capture, drag) into reusable helpers;
+`test-plotly.R` runs the §3 matrix as named `test_that()` cases with ordinary
+`expect_*()` assertions, so a failure reports the case name and the offending
+value. The whole suite tears down its app and browser processes in a single
+`withr::defer` / `on.exit` block.
 
 ### Timing discipline
 
@@ -301,36 +327,42 @@ server flush want ~1.5–2.5 s. Two robustness rules learned the hard way:
 
 This is a heavyweight, browser-dependent suite — keep it out of the default
 `devtools::test()` run (which must stay pure R). Gate it behind an env flag
-(`IRID_E2E=1`) or a separate `make e2e` target, and skip cleanly when no
-`google-chrome` binary is found, the same way DT-dependent tests skip when DT
-is absent.
+(`IRID_E2E=1`) or a separate `make e2e` target, and skip cleanly when the
+prerequisites are absent: `skip_if_not_installed("chromote")`,
+`skip_if_not_installed("callr")`, and `skip_if(is.null(chromote::find_chrome()))`
+(no browser) — the same way DT-dependent tests skip when DT is absent. `chromote`
+and `callr` are `Suggests`, not hard deps, so the default install stays lean.
 
 ---
 
-## 5. Migration path
+## 5. Why `chromote`, and the alternative
 
-The dependency-free CDP harness exists because nothing else was installable. If
-the toolchain later gains one, port the *same matrix* onto it — the assertions
-are the asset, not the transport:
+The original harness was a dependency-free Node/CDP script, written that way only
+because nothing R-native was installable at the time. That is no longer true, so
+the design above targets **`chromote`** directly. The reasoning, and the one
+alternative still worth knowing:
 
-- **`chromote`** — the natural R-native target. `b$Runtime$evaluate(...)`
-  replaces `evalJs`; the app can run in-process via `shiny::runApp` in a
-  background `callr` session. Keeps everything in R.
-- **`shinytest2`** — gives app lifecycle + screenshot diffing for free, but its
-  `get_value`/`set_inputs` model is DOM/input-centric; the plotly gestures still
-  need raw `AppDriver$run_js(...)` calls equivalent to the `gd.emit` /
-  `Plotly.relayout` primitives here. The §2 drive primitives transfer verbatim —
-  except the **real mouse drag**, which needs CDP `Input.dispatchMouseEvent`
-  directly (`AppDriver` has no native drag); both chromote and shinytest2 expose
-  the underlying CDP session to send it.
+- **`chromote`** *(chosen)* — R-native and a thin wrapper over the same CDP the
+  Node script spoke, so the port is near-mechanical: `b$Runtime$evaluate(...)`
+  replaces `evalJs`, `b$Input$dispatchMouseEvent` is the real-drag primitive
+  verbatim, and the app runs in a background `callr` session. The whole suite
+  stays in R with no Node toolchain — which is why it's the target.
+- **`shinytest2`** *(alternative)* — gives app lifecycle + screenshot diffing for
+  free, but its `get_value`/`set_inputs` model is DOM/input-centric; the plotly
+  gestures still need raw `AppDriver$run_js(...)` calls equivalent to the
+  `gd.emit` / `Plotly.relayout` primitives here, and the **real mouse drag** needs
+  CDP `Input.dispatchMouseEvent` directly (`AppDriver` has no native drag) — which
+  it can reach because it sits on `chromote` underneath. Reasonable if we later
+  want its snapshot tooling; otherwise plain `chromote` is the smaller surface.
 
-In all three, the three drive primitives (click-the-control; emit-the-plotly-event;
+Across both, the three drive primitives (click-the-control; emit-the-plotly-event;
 real mouse drag), the server-vs-client readout split, and the websocket-frame /
 screenshot observability are unchanged — they are the design, not an artifact of
-CDP. The one assertion that does *not* port is screenshot **pixel-diffing** for
-plot content (SVG/canvas renders vary by machine); keep plot assertions on
-`gd.layout`/`gd.data` state and reserve screenshots for layout/visibility checks
-(row 22).
+the transport. (The retired Node/CDP harness shared them too — the assertions in
+§3 are the asset, not the client that runs them.) The one assertion that does
+*not* port is screenshot **pixel-diffing** for plot content (SVG/canvas renders
+vary by machine); keep plot assertions on `gd.layout`/`gd.data` state and reserve
+screenshots for layout/visibility checks (row 22).
 
 ---
 
