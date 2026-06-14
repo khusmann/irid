@@ -294,6 +294,7 @@
         });
       });
       el.on("plotly_selected", function (e) {
+        if (applying) return;            // echo from our own react/restyle
         // Two parallel channels for one gesture: the `selected_points` prop
         // (index-based, two-way, snap-back-capable) AND a discrete `selected`
         // notification carrying the raw points (incl. customdata) for apps that
@@ -302,8 +303,13 @@
         setProp("selected_points", pointsToFrame(e && e.points));
         sendEvent("selected", slimPoints(e));
       });
-      el.on("plotly_selecting", function (e) { sendEvent("selecting", slimPoints(e)); });
+      el.on("plotly_selecting", function (e) {
+        if (applying) return;
+        sendEvent("selecting", slimPoints(e));
+      });
       el.on("plotly_deselect", function () {
+        if (applying) return;            // a data-change react() deselects —
+        // that is our mutation, not the user clearing; do not write back.
         setProp("selected_points", null);
         sendEvent("deselect", {});
       });
