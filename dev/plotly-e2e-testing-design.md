@@ -1,9 +1,11 @@
 # PlotlyOutput end-to-end testing — design
 
 **Status:** Implemented — `chromote`/`callr` suite live in `tests/testthat/`
-(`helper-e2e.R`, `test-plotly-e2e.R`, `fixtures/{kitchen-sink,subplot,ggplotly,gated}.R`),
-covering all 26 §3 rows. Gated behind `skip_on_cran()` + prerequisite skips +
-a local `IRID_E2E=1` opt-out; run with
+(`helper-e2e.R` driver: `irid_app()` + free `app_*`/`plt_*` functions,
+`test-plotly-e2e.R`, `fixtures/{kitchen-sink,subplot,ggplotly,gated}.R`),
+covering all 26 §3 rows, plus `test-plotly.R` pure-R unit tests for the R
+surface. Gated behind
+`skip_on_cran()` + prerequisite skips + a local `IRID_E2E=1` opt-out; run with
 `IRID_E2E=1 Rscript -e 'devtools::test(filter = "plotly-e2e")'`.
 **Date:** June 2026
 
@@ -319,11 +321,14 @@ under `dev/`, which holds design/plan docs only**:
 
 ```
 tests/testthat/
-  helper-e2e.R         e2e_app() (callr boot + port), e2e_session() (ChromoteSession),
-                       eval_js(), drag(), console/exception + websocket capture,
-                       teardown — the §2 boilerplate as reusable R helpers
+  helper-e2e.R         irid_driver()/plotly_driver() — a CLOSURE-OBJECT driver
+                       (not R6) wrapping callr boot + ChromoteSession + the §2
+                       drive primitives, gd-state readers, wait_for_idle(),
+                       console/exception capture, teardown
+  test-plotly.R        pure-R unit tests for R/plotly.R (coercion, lazy-capture
+                       guard, validation, serialization) — fast, always run
   test-plotly-e2e.R    the §3 matrix as named testthat cases; expect_*() on the
-                       readout/gd state; uses helper-e2e.R
+                       readout/gd state; uses the driver
   fixtures/
     kitchen-sink.R     test-owned app modeled on examples/plotly.R (rows 1–17, 22–26)
     subplot.R          row 18
@@ -333,14 +338,37 @@ tests/testthat/
 
 `testthat::test_path("fixtures/...")` resolves the fixtures regardless of the
 working directory, and `helper-*.R` files are auto-sourced by testthat before the
-tests run. Everything is R now — no Node, no shell orchestration. `helper-e2e.R`
-factors the §2 connection boilerplate (boot the app under `callr`, open a
-`ChromoteSession`, `eval_js`, console/exception/websocket capture, drag) into
-reusable helpers; `test-plotly-e2e.R` runs the §3 matrix as named `test_that()`
-cases with ordinary
-`expect_*()` assertions, so a failure reports the case name and the offending
-value. The whole suite tears down its app and browser processes in a single
-`withr::defer` / `on.exit` block.
+tests run. Everything is R now — no Node, no shell orchestration.
+
+The harness is a **plain state object + free functions, deliberately not R6 and
+not a `$`-method closure object.** `irid_app(fixture)` returns a list
+(`$session`, `$proc`, `$url`, `$caps`); every operation is a free `app_*`
+(generic irid) / `plt_*` (plotly) function taking it first —
+`app_click(app, "#x")`, `plt_range(app, "xaxis")`, `plt_drag_select(app)`. This
+is the most statically-checkable shape in R: a free-function call site is a real
+symbol, so `codetools`/`lintr`'s `object_usage_linter` flags a misspelled or
+removed helper (`plt_rnge(app, …)` → *"no visible global function definition"*),
+whereas a `$`-method call (`app$rng()`) is dynamic and invisible to static
+analysis whether the object is R6 *or* a closure — the fluent style trades away
+the very call-site linting we want. The `app_*` core works for any irid app; the
+`plt_*` layer adds the gd-state readers and plotly gestures. `test-plotly-e2e.R`
+runs the §3 matrix as named `test_that()` cases with ordinary `expect_*()`
+assertions, so a failure reports the case name and the offending value. Each
+case's app + browser are torn down via `withr::defer` on the test frame.
+
+Two implementation hazards the driver encodes, both R-connection-table leaks
+that only surface across the suite's ~17 sequential boots (R caps at ~128
+connections): `callr::r_bg(supervise = TRUE)` leaks a supervisor pipe per
+process, and polling the app's port with `socketConnection()` leaks a slot per
+refused probe. The driver uses `supervise = FALSE` (teardown kills the child
+explicitly) and waits for readiness by watching the child's stderr for Shiny's
+`Listening on …` banner (processx pipes, not R connections).
+
+`wait_for_idle()` is the irid-specific settle primitive: it installs a tracker
+on Shiny's `shiny:busy` / `shiny:idle` jQuery events (the same ones irid's stale
+indicator listens to) and waits for a quiet idle window — a real signal, not a
+blind sleep. Concrete post-conditions are still polled with `poll_until()` where
+the settled value is known.
 
 ### Timing discipline
 

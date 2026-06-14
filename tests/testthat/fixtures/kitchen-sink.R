@@ -207,8 +207,8 @@ App <- function() {
             }),
             tags$br(),
             tags$span(id = "ro-legend", \() {
-              c <- legend()
-              if (is.null(c)) "no legend click" else paste0("legend: ", c)
+              cn <- legend()
+              if (is.null(cn)) "no legend click" else paste0("legend: ", cn)
             })
           )
         )
