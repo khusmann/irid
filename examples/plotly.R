@@ -72,8 +72,15 @@ App <- function() {
           tags$input(
             type = "range", class = "form-range",
             min = "0", max = "300", step = "10",
-            # proxy value coerces the slider's string to an integer on write
-            value = reactiveProxy(get = hp_min, set = \(v) hp_min(as.integer(v)))
+            # proxy value coerces the slider's string to an integer on write.
+            # Filtering changes the data — and because `color = ~cyl` makes one
+            # trace per cylinder group, it can change the trace COUNT, so the
+            # selection's (curve, point) indices no longer line up. Clear the
+            # selection on filter so it never highlights stale/mismatched points.
+            value = reactiveProxy(
+              get = hp_min,
+              set = \(v) { hp_min(as.integer(v)); selected(NULL) }
+            )
           ),
           tags$label(class = "mt-2", "Drag mode"),
           tags$select(
