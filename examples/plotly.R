@@ -58,161 +58,147 @@ App <- function() {
     set = \(v) if (is.null(v) || (v[2] - v[1]) >= 40) yrange(v)
   )
 
-  # A plain Bootstrap grid, not bslib's `layout_sidebar`/`page_sidebar`: those
-  # build their wrapper at render time via tag `.renderHooks`, which irid's
-  # process_tags does not run, so the sidebar grid never materializes. Row/col
-  # divs are static markup irid handles natively.
-  #
-  # TODO(#27): switch back to `page_sidebar(sidebar = sidebar(...), ...)` once
-  # irid preserves bslib `.renderHooks`.
-  page_fluid(
+  # bslib's `page_sidebar` / `sidebar` defer their wrapper to render time via
+  # tag `.renderHooks`; irid's process_tags resolves those (#27), so the bslib
+  # sidebar layout materializes natively.
+  page_sidebar(
     title = "PlotlyOutput kitchen sink",
-    tags$h4(class = "my-3", "PlotlyOutput kitchen sink"),
-    tags$div(
-      class = "row g-3",
 
-      # --- control panel (left) -------------------------------------------
+    # --- control panel (sidebar) ------------------------------------------
+    sidebar = sidebar(
+      title = "Controls",
+      tags$label(\() paste0("Min horsepower: ", hp_min())),
+      tags$input(
+        type = "range", class = "form-range",
+        min = "0", max = "300", step = "10",
+        # No clear-on-filter: the selection is keyed on car name (ids), so
+        # filtering preserves it — filtered-out cars come back highlighted.
+        value = reactiveProxy(get = hp_min, set = \(v) hp_min(as.integer(v)))
+      ),
+      tags$label(class = "mt-2", "Drag mode"),
+      tags$select(
+        class = "form-select form-select-sm",
+        value = dragmode,
+        tags$option(value = "zoom", "Zoom"),
+        tags$option(value = "pan", "Pan"),
+        tags$option(value = "select", "Box select"),
+        tags$option(value = "lasso", "Lasso select")
+      ),
       tags$div(
-        class = "col-md-3",
-        tags$div(
-          class = "border rounded p-3",
-          tags$label(\() paste0("Min horsepower: ", hp_min())),
-          tags$input(
-            type = "range", class = "form-range",
-            min = "0", max = "300", step = "10",
-            # No clear-on-filter: the selection is keyed on car name (ids), so
-            # filtering preserves it — filtered-out cars come back highlighted.
-            value = reactiveProxy(get = hp_min, set = \(v) hp_min(as.integer(v)))
-          ),
-          tags$label(class = "mt-2", "Drag mode"),
-          tags$select(
-            class = "form-select form-select-sm",
-            value = dragmode,
-            tags$option(value = "zoom", "Zoom"),
-            tags$option(value = "pan", "Pan"),
-            tags$option(value = "select", "Box select"),
-            tags$option(value = "lasso", "Lasso select")
-          ),
-          tags$div(
-            class = "d-grid gap-2 mt-3",
-            tags$button(
-              class = "btn btn-sm btn-outline-primary",
-              onClick = \() { xrange(c(20, 35)); ygate(c(50, 130)) },
-              "Zoom to economy cars"
-            ),
-            tags$button(
-              class = "btn btn-sm btn-outline-secondary",
-              # trace_visibility is keyed by trace NAME (here the cyl level),
-              # not position — so this stays correct even when filtering drops
-              # a group and renumbers the traces.
-              onClick = \() visible(c("8" = "legendonly")),
-              "Hide 8-cyl trace"
-            ),
-            tags$button(
-              class = "btn btn-sm btn-outline-primary",
-              # Set the selection from outside the plot — keyed on names.
-              onClick = \() sel_cars(c("Maserati Bora", "Ferrari Dino")),
-              "Select sports cars"
-            ),
-            tags$button(
-              class = "btn btn-sm btn-outline-secondary",
-              onClick = \() sel_cars(character()),
-              "Clear selection"
-            ),
-            tags$button(
-              class = "btn btn-sm btn-outline-danger",
-              # Bump uirevision AND release the bound ranges/selection so the
-              # view fully resets to the spec's autorange.
-              onClick = \() {
-                revision(revision() + 1L)
-                xrange(NULL); yrange(NULL)
-                sel_cars(character()); visible(NULL)
-              },
-              "Reset view"
-            )
+        class = "d-grid gap-2 mt-3",
+        tags$button(
+          class = "btn btn-sm btn-outline-primary",
+          onClick = \() { xrange(c(20, 35)); ygate(c(50, 130)) },
+          "Zoom to economy cars"
+        ),
+        tags$button(
+          class = "btn btn-sm btn-outline-secondary",
+          # trace_visibility is keyed by trace NAME (here the cyl level),
+          # not position — so this stays correct even when filtering drops
+          # a group and renumbers the traces.
+          onClick = \() visible(c("8" = "legendonly")),
+          "Hide 8-cyl trace"
+        ),
+        tags$button(
+          class = "btn btn-sm btn-outline-primary",
+          # Set the selection from outside the plot — keyed on names.
+          onClick = \() sel_cars(c("Maserati Bora", "Ferrari Dino")),
+          "Select sports cars"
+        ),
+        tags$button(
+          class = "btn btn-sm btn-outline-secondary",
+          onClick = \() sel_cars(character()),
+          "Clear selection"
+        ),
+        tags$button(
+          class = "btn btn-sm btn-outline-danger",
+          # Bump uirevision AND release the bound ranges/selection so the
+          # view fully resets to the spec's autorange.
+          onClick = \() {
+            revision(revision() + 1L)
+            xrange(NULL); yrange(NULL)
+            sel_cars(character()); visible(NULL)
+          },
+          "Reset view"
+        )
+      )
+    ),
+
+    # --- plot (main) ------------------------------------------------------
+    PlotlyOutput(
+      \() {
+        df <- filtered()
+        plot_ly(
+          df,
+          x = ~mpg, y = ~hp, color = ~cyl,
+          type = "scatter", mode = "markers",
+          # `ids` keys the selection (stable per-point identity); `customdata`
+          # stays free for the onClick readout below — two distinct jobs.
+          ids = ~name, text = ~name, customdata = ~name,
+          marker = list(size = 11)
+        ) |>
+          layout(
+            uirevision = revision(),
+            dragmode   = "select",
+            xaxis = list(title = "mpg"),
+            yaxis = list(title = "horsepower")
           )
-        )
-      ),
+      },
+      xaxis_range     = xrange,
+      yaxis_range     = ygate,
+      dragmode        = dragmode,
+      selected_ids    = sel_cars,
+      trace_visibility = visible,
+      onClick      = \(e) clicked(e$points[[1]]),
+      onDoubleclick = \() last_evt("double-click (autoscale)"),
+      onRelayout   = \(e) {
+        keys <- names(e)
+        last_evt(if (length(keys)) paste(keys, collapse = ", ") else "(empty)")
+      },
+      # give the plot an explicit height so it renders independently of the
+      # surrounding fill context
+      container = tags$div(style = "height: 480px;")
+    ),
 
-      # --- plot + readouts (right) ----------------------------------------
+    # --- live readouts ----------------------------------------------------
+    tags$div(
+      class = "row mt-2 small",
       tags$div(
-        class = "col-md-9",
-        PlotlyOutput(
+        class = "col-md-4",
+        tags$strong("Viewport"), tags$br(),
         \() {
-          df <- filtered()
-          plot_ly(
-            df,
-            x = ~mpg, y = ~hp, color = ~cyl,
-            type = "scatter", mode = "markers",
-            # `ids` keys the selection (stable per-point identity); `customdata`
-            # stays free for the onClick readout below — two distinct jobs.
-            ids = ~name, text = ~name, customdata = ~name,
-            marker = list(size = 11)
-          ) |>
-            layout(
-              uirevision = revision(),
-              dragmode   = "select",
-              xaxis = list(title = "mpg"),
-              yaxis = list(title = "horsepower")
-            )
+          fmt <- \(r) if (is.null(r)) "auto" else paste0("[", round(r[1], 1), ", ", round(r[2], 1), "]")
+          paste0("mpg: ", fmt(xrange()), " | hp: ", fmt(yrange()))
         },
-        xaxis_range     = xrange,
-        yaxis_range     = ygate,
-        dragmode        = dragmode,
-        selected_ids    = sel_cars,
-        trace_visibility = visible,
-        onClick      = \(e) clicked(e$points[[1]]),
-        onDoubleclick = \() last_evt("double-click (autoscale)"),
-        onRelayout   = \(e) {
-          keys <- names(e)
-          last_evt(if (length(keys)) paste(keys, collapse = ", ") else "(empty)")
-        },
-        # give the plot an explicit height so it renders independently of the
-        # surrounding fill context
-        container = tags$div(style = "height: 480px;")
+        tags$br(),
+        \() paste0("dragmode: ", dragmode())
       ),
-
-      # --- live readouts --------------------------------------------------
       tags$div(
-        class = "row mt-2 small",
-        tags$div(
-          class = "col-md-4",
-          tags$strong("Viewport"), tags$br(),
-          \() {
-            fmt <- \(r) if (is.null(r)) "auto" else paste0("[", round(r[1], 1), ", ", round(r[2], 1), "]")
-            paste0("mpg: ", fmt(xrange()), " | hp: ", fmt(yrange()))
-          },
-          tags$br(),
-          \() paste0("dragmode: ", dragmode())
-        ),
-        tags$div(
-          class = "col-md-4",
-          tags$strong("Selection"), tags$br(),
-          \() {
-            s <- sel_cars()
-            if (!length(s)) "none" else paste0(length(s), ": ", paste(s, collapse = ", "))
-          },
-          tags$br(),
-          \() {
-            v <- visible()
-            if (is.null(v) || !length(v)) "visibility: default"
-            else paste0("visibility: ", paste(names(v), v, sep = "=", collapse = ", "))
-          }
-        ),
-        tags$div(
-          class = "col-md-4",
-          tags$strong("Events"), tags$br(),
-          \() {
-            p <- clicked()
-            if (is.null(p)) "click a point…" else paste0("clicked: ", p$customdata, " (", p$x, " mpg, ", p$y, " hp)")
-          },
-          tags$br(),
-          \() paste0("last relayout: ", last_evt())
-        )
-      )       # close readouts row
-      )       # close col-md-9
-    )         # close row g-3
-  )           # close page_fluid
+        class = "col-md-4",
+        tags$strong("Selection"), tags$br(),
+        \() {
+          s <- sel_cars()
+          if (!length(s)) "none" else paste0(length(s), ": ", paste(s, collapse = ", "))
+        },
+        tags$br(),
+        \() {
+          v <- visible()
+          if (is.null(v) || !length(v)) "visibility: default"
+          else paste0("visibility: ", paste(names(v), v, sep = "=", collapse = ", "))
+        }
+      ),
+      tags$div(
+        class = "col-md-4",
+        tags$strong("Events"), tags$br(),
+        \() {
+          p <- clicked()
+          if (is.null(p)) "click a point…" else paste0("clicked: ", p$customdata, " (", p$x, " mpg, ", p$y, " hp)")
+        },
+        tags$br(),
+        \() paste0("last relayout: ", last_evt())
+      )
+    )
+  )
 }
 
 iridApp(App)
