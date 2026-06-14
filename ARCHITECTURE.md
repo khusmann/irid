@@ -38,6 +38,10 @@ examples/
   plotly.R              Reactive plotly chart via PlotlyOutput — named state
                         args (ranges/dragmode/selection/visibility), snap-back,
                         discrete callbacks, onRelayout escape hatch
+  plotly_stable_selection.R
+                        Identity-based selection: capture via onSelected, key on
+                        data (names), derive the highlight in the spec so the
+                        selection survives filtering
 ```
 
 ## Design Principles

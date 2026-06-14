@@ -11,6 +11,7 @@ PlotlyOutput(
   onHover = NULL,
   onUnhover = NULL,
   onDoubleclick = NULL,
+  onSelected = NULL,
   onDeselect = NULL,
   onSelecting = NULL,
   onBrushing = NULL,
@@ -36,6 +37,12 @@ outside the table.}
 
 \item{onClick, onHover, onUnhover, onDoubleclick}{Discrete pointer callbacks.
 Each receives the (slimmed) plotly event payload.}
+
+\item{onSelected}{Discrete callback fired when a box/lasso selection
+completes, receiving the raw selected points (incl. \code{customdata}). Use this
+to capture a selection as data-domain keys — e.g. store \code{customdata}
+values and re-derive the highlight in the spec — so the selection survives
+data changes that invalidate \code{selected_points}' positional indices.}
 
 \item{onDeselect, onSelecting, onBrushing}{Selection-lifecycle notifications.
 \code{onDeselect} is a side-effect notification only — when \code{selected_points}
