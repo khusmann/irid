@@ -16,6 +16,31 @@
 > already exercises rows 1–17 and 22–26. Treat the ✓ marks as "known-good
 > behavior to assert," not "already under test."
 
+> **Note — self-contained fixtures, and easy to skip.** Two hard rules for the
+> suite, which **override** the "reuse `examples/plotly.R`" shortcut mentioned
+> throughout this doc:
+>
+> 1. **The e2e tests own their fixtures — do not depend on files under
+>    `examples/`.** `examples/*` exist to demo the package and will drift with the
+>    docs; a test suite that sources them couples assertions to demo content and
+>    breaks whenever an example is reworded. The fixtures live with the suite in
+>    `tests/testthat/fixtures/` (testthat's documented home for static fixtures) —
+>    **not** under `dev/`, which is for design/plan docs only. Make them dedicated,
+>    test-owned apps that diverge from the examples on purpose (e.g. the
+>    translating-`reactiveProxy` binding of row 24, the whole-group filter of rows
+>    23/26). Where this doc says "the fixture is `examples/plotly.R` minus the
+>    launch," read it as "a test-owned kitchen-sink fixture modeled on
+>    `examples/plotly.R`."
+> 2. **Make the suite trivial to not run — the idiomatic R way.** It is browser-
+>    and process-heavy and must never run on CRAN. The primary gate is
+>    `testthat::skip_on_cran()` (CRAN sets `NOT_CRAN`; testthat reads it), backed
+>    by the prerequisite skips in §4 (`chromote`/`callr` installed, a browser
+>    found). A separate `make e2e` tree is *not* used — the suite stays a
+>    first-class `tests/testthat/` citizen and earns its keep by skipping.
+>    Optionally layer a *local* opt-out (`skip_if(Sys.getenv("IRID_E2E") != "1")`)
+>    so a routine `devtools::test()` on a laptop doesn't boot Chrome — but that's
+>    convenience, not the CRAN guard.
+
 ---
 
 ## 1. Why e2e at all
@@ -71,15 +96,16 @@ the bugs, only the transport changes.
    the app's reactive loop runs in a real, separate Shiny session while the test
    process drives the browser:
    ```r
-   app_proc <- callr::r_bg(function(port) {
-     app <- source("dev/e2e/fixtures/kitchen-sink.R")$value
+   app_proc <- callr::r_bg(function(path) {
+     app <- source(path)$value
      shiny::runApp(irid::iridApp(app), port = port,
                    launch.browser = FALSE, host = "127.0.0.1")
-   }, args = list(port = port))
+   }, args = list(path = testthat::test_path("fixtures/kitchen-sink.R")))
    ```
-   The fixture is `examples/plotly.R` with the trailing `iridApp(App)` stripped,
-   so the same file that ships as the demo is the fixture. `app_proc$is_alive()`
-   and `app_proc$read_error()` give lifecycle + the stderr stream (R errors).
+   The fixture is a **test-owned** app modeled on `examples/plotly.R` (the
+   trailing `iridApp(App)` stripped), living in `tests/testthat/fixtures/` — the
+   suite never sources `examples/*` (see §4). `app_proc$is_alive()` and
+   `app_proc$read_error()` give lifecycle + the stderr stream (R errors).
 
 2. **Headless Chrome** — `chromote` finds and launches the browser itself
    (`chromote::find_chrome()`), on an isolated profile, and owns the process
@@ -284,24 +310,30 @@ is itself worth a row.
 
 ### Layout
 
+The suite lives in `tests/testthat/` like every other test — **nothing goes
+under `dev/`, which holds design/plan docs only**:
+
 ```
-dev/e2e/
-  helpers.R         e2e_app() (callr boot + port), e2e_session() (ChromoteSession),
-                    eval_js(), drag(), console/exception + websocket capture,
-                    teardown — the §2 boilerplate as reusable R helpers
-  test-plotly.R     the §3 matrix as named testthat cases; expect_*() on the
-                    readout/gd state; sources helpers.R
+tests/testthat/
+  helper-e2e.R         e2e_app() (callr boot + port), e2e_session() (ChromoteSession),
+                       eval_js(), drag(), console/exception + websocket capture,
+                       teardown — the §2 boilerplate as reusable R helpers
+  test-plotly-e2e.R    the §3 matrix as named testthat cases; expect_*() on the
+                       readout/gd state; uses helper-e2e.R
   fixtures/
-    kitchen-sink.R  examples/plotly.R minus the iridApp() launch (rows 1–17, 22–26)
-    subplot.R       row 18
-    ggplotly.R      row 19
-    gated.R         rows 20–21
+    kitchen-sink.R     test-owned app modeled on examples/plotly.R (rows 1–17, 22–26)
+    subplot.R          row 18
+    ggplotly.R         row 19
+    gated.R            rows 20–21
 ```
 
-Everything is R now — no Node, no shell orchestration. `helpers.R` factors the §2
-connection boilerplate (boot the app under `callr`, open a `ChromoteSession`,
-`eval_js`, console/exception/websocket capture, drag) into reusable helpers;
-`test-plotly.R` runs the §3 matrix as named `test_that()` cases with ordinary
+`testthat::test_path("fixtures/...")` resolves the fixtures regardless of the
+working directory, and `helper-*.R` files are auto-sourced by testthat before the
+tests run. Everything is R now — no Node, no shell orchestration. `helper-e2e.R`
+factors the §2 connection boilerplate (boot the app under `callr`, open a
+`ChromoteSession`, `eval_js`, console/exception/websocket capture, drag) into
+reusable helpers; `test-plotly-e2e.R` runs the §3 matrix as named `test_that()`
+cases with ordinary
 `expect_*()` assertions, so a failure reports the case name and the offending
 value. The whole suite tears down its app and browser processes in a single
 `withr::defer` / `on.exit` block.
@@ -325,13 +357,26 @@ server flush want ~1.5–2.5 s. Two robustness rules learned the hard way:
 
 ### CI gating
 
-This is a heavyweight, browser-dependent suite — keep it out of the default
-`devtools::test()` run (which must stay pure R). Gate it behind an env flag
-(`IRID_E2E=1`) or a separate `make e2e` target, and skip cleanly when the
-prerequisites are absent: `skip_if_not_installed("chromote")`,
-`skip_if_not_installed("callr")`, and `skip_if(is.null(chromote::find_chrome()))`
-(no browser) — the same way DT-dependent tests skip when DT is absent. `chromote`
-and `callr` are `Suggests`, not hard deps, so the default install stays lean.
+This is a heavyweight, browser-dependent suite, but it stays a first-class
+`tests/testthat/` citizen — the same place `shinytest2` and every other R e2e
+suite lives — and earns its keep by **skipping**, not by hiding in a separate
+tree. Each case opens with, in order:
+
+```r
+skip_on_cran()                                   # CRAN never boots a browser
+skip_if_not_installed("chromote")
+skip_if_not_installed("callr")
+skip_if(is.null(chromote::find_chrome()))        # no browser present
+```
+
+`skip_on_cran()` is the load-bearing gate: CRAN sets `NOT_CRAN`, `testthat`
+reads it, and the suite skips cleanly with nothing launched — the idiomatic R
+mechanism, not a home-grown flag. The `skip_if_not_installed()` lines cover
+machines without the browser stack; `chromote` and `callr` are `Suggests`, not
+hard deps, so the default install stays lean. Optionally add a **local** opt-out
+on top — `skip_if(Sys.getenv("IRID_E2E") != "1")` — so a routine
+`devtools::test()` on a dev laptop doesn't spend ~30 s booting Chrome; this is a
+convenience layer, not the CRAN guard (`skip_on_cran()` already is).
 
 ---
 
