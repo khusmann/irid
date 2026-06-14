@@ -513,3 +513,48 @@ test_that("dom_opts is per-slot, not broadcast across events", {
   expect_true(submit_e$prevent_default)
   expect_false(click_e$prevent_default)
 })
+
+# --- htmltools render hooks (GH #27) ------------------------------------------
+#
+# bslib defers structure to render-time `.renderHooks` (and `tagFunction`s).
+# `process_tags` must materialize those before walking, or the deferred
+# wrapper is dropped: `layout_sidebar()`'s grid never appears, `card()` loses
+# its fill plumbing. Resolving hooks also surfaces duplicate `class` attribs
+# (htmltools renders them space-joined), which the walker must preserve.
+
+test_that("layout_sidebar round-trips with its grid wrapper intact", {
+  skip_if_not_installed("bslib")
+  ui <- bslib::layout_sidebar(sidebar = bslib::sidebar("hi"), "main")
+  out <- as.character(process_tags(ui)$tag)
+  expect_match(out, "bslib-sidebar-layout")
+  expect_match(out, "html-fill-item")
+})
+
+test_that("page_sidebar round-trips with its grid wrapper intact", {
+  skip_if_not_installed("bslib")
+  ui <- bslib::page_sidebar(sidebar = bslib::sidebar("hi"), "main")
+  expect_match(as.character(process_tags(ui)$tag), "bslib-sidebar-layout")
+})
+
+test_that("card keeps its fill structure through process_tags", {
+  skip_if_not_installed("bslib")
+  ui <- bslib::card(bslib::card_body("x"))
+  out <- as.character(process_tags(ui)$tag)
+  expect_match(out, "bslib-card")
+  expect_match(out, "html-fill-item")
+})
+
+test_that("a bare tagFunction child is resolved before walking", {
+  fn <- htmltools::tagFunction(function() htmltools::tags$span("deferred"))
+  out <- as.character(process_tags(htmltools::tags$div(fn))$tag)
+  expect_match(out, "<span>deferred</span>")
+})
+
+test_that("duplicate attribute names are preserved (rendered space-joined)", {
+  ui <- htmltools::tagAppendAttributes(
+    htmltools::tags$div(class = "a", "x"),
+    class = "b"
+  )
+  out <- as.character(process_tags(ui)$tag)
+  expect_match(out, 'class="a b"')
+})

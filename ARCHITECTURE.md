@@ -103,6 +103,23 @@ Walks the tag tree recursively and produces:
   payload); `static_props` is the named list of non-callable values
   shipped verbatim. See the *Widgets* section below.
 
+**htmltools render hooks.** Before inspecting any node, the walker runs that
+node's own deferred render machinery (`resolve_render_hooks`): a
+`shiny.tag.function` is called, and a `shiny.tag` carrying `.renderHooks` has
+its hooks run one level at a time. This materializes structure that
+bslib/htmltools build only at render time — `layout_sidebar()`'s
+`bslib-sidebar-layout` grid, `card()`'s fill plumbing — so the walker rebuilds
+the *resolved* tree rather than silently dropping the wrapper. Unlike
+`htmltools::as.tags()`, resolution is one level deep, not recursive: the walk
+descends into children itself and resolves each as it arrives, which is what
+lets irid's own children (reactive functions, `irid_output`, `irid_widget`,
+control-flow nodes — none of which carry render hooks) survive intact. A
+side-effect of resolving hooks is that a tag may end up with duplicate `class`
+attributes (htmltools renders these space-joined; bslib stacks
+`bslib-sidebar-layout` and `html-fill-item` this way), so the walker preserves
+duplicate attribute names positionally rather than collapsing them to the last
+value.
+
 When a state-binding prop (`value`, `checked`) holds a callable, process_tags
 emits both a binding (server → client read) and a synthetic event entry
 (client → server write). The synthetic handler is arity-dispatched: 0-arg
