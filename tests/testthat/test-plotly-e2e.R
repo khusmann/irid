@@ -309,6 +309,31 @@ test_that("name-keyed visibility survives recomposition; legend toggle writes ba
   e2e_expect_no_error(app)
 })
 
+# --- Multiple graphs: the `gd =` selector targets one independently ---------
+
+test_that("gd selector drives one of several plotly graphs independently", {
+  app <- e2e_app("plotly/two-plots.R")
+  e2e_plt_await(app, 1L, gd = "#plot-a")
+  e2e_plt_await(app, 1L, gd = "#plot-b")
+
+  # Zoom plot-a only.
+  e2e_plt_relayout(app, list(`xaxis.range[0]` = 2, `xaxis.range[1]` = 5), gd = "#plot-a")
+  ra <- e2e_poll(\() e2e_plt_range(app, "xaxis", gd = "#plot-a"),
+                 \(v) !is.null(v) && abs(as.numeric(v[[2]]) - 5) < 1)
+  expect_approx_range(ra, c(2, 5), tol = 1)
+  # plot-b untouched.
+  expect_true(isTRUE(e2e_plt_autorange(app, "xaxis", gd = "#plot-b")) ||
+                is.null(e2e_plt_range(app, "xaxis", gd = "#plot-b")))
+
+  # Now zoom plot-b; plot-a keeps its range.
+  e2e_plt_relayout(app, list(`xaxis.range[0]` = 6, `xaxis.range[1]` = 9), gd = "#plot-b")
+  rb <- e2e_poll(\() e2e_plt_range(app, "xaxis", gd = "#plot-b"),
+                 \(v) !is.null(v) && abs(as.numeric(v[[2]]) - 9) < 1)
+  expect_approx_range(rb, c(6, 9), tol = 1)
+  expect_approx_range(e2e_plt_range(app, "xaxis", gd = "#plot-a"), c(2, 5), tol = 1)
+  e2e_expect_no_error(app)
+})
+
 # --- Row 18: subplot axes route independently -------------------------------
 
 test_that("subplot axes route independently (18)", {

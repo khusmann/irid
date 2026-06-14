@@ -334,7 +334,13 @@ tests/testthat/
     subplot.R          row 18
     ggplotly.R         row 19
     gated.R            rows 20–21
+    two-plots.R        multi-graph `gd =` routing
 ```
+
+The `e2e_plt_*` helpers take a `gd =` selector (default `PLOTLY_GD`, the sole
+plotly widget on the page); pass a container id (`gd = "#plot-b"`) to target one
+of several graphs. Give each `PlotlyOutput` a stable `container = tags$div(id =
+…)` so the selector is a plain `#id`.
 
 `testthat::test_path("fixtures/...")` resolves the fixtures regardless of the
 working directory, and `helper-*.R` files are auto-sourced by testthat before the
