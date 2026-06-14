@@ -18,7 +18,10 @@ Imports:
     rlang (>= 1.2.0),
     shiny
 Suggests:
+    callr,
+    chromote,
     DT,
+    ggplot2,
     knitr,
     plotly,
     purrr,

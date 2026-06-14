@@ -1,6 +1,10 @@
 # PlotlyOutput end-to-end testing — design
 
-**Status:** Proposed — spec only, **no suite built yet**
+**Status:** Implemented — `chromote`/`callr` suite live in `tests/testthat/`
+(`helper-e2e.R`, `test-plotly-e2e.R`, `fixtures/{kitchen-sink,subplot,ggplotly,gated}.R`),
+covering all 26 §3 rows. Gated behind `skip_on_cran()` + prerequisite skips +
+a local `IRID_E2E=1` opt-out; run with
+`IRID_E2E=1 Rscript -e 'devtools::test(filter = "plotly-e2e")'`.
 **Date:** June 2026
 
 > **Implementation status / handoff.** Everything marked ✓ in the §3 matrix was
