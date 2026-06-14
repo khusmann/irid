@@ -62,6 +62,9 @@ App <- function() {
     title = "PlotlyOutput e2e kitchen sink",
 
     sidebar = sidebar(
+      # `id` lands on the sidebar `<aside>` — a render-hook element (#27) — so
+      # the e2e suite can assert it resolved to a non-zero-width element.
+      id = "control-panel",
       title = "Controls",
       tags$label(\() paste0("Min horsepower: ", hp_min())),
       tags$input(
