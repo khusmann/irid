@@ -28,9 +28,12 @@ mount-level unit tests, because each was a property of that full loop:
 | `sendEvent("relayout")` bumped the shared sequence past the prop write, gating the snap-back echo as stale | the optimistic-update sequence counter, live | needs two real round-trips in order to observe the gate |
 | `setProp(key, null)` arrives as `NA` (mount maps null→NA), breaking deselect / autorange-reset clears | the mount event-payload boundary | only a live `null` write through the wire produces the `NA` |
 | `Plotly.restyle` array-wrapping for `selectedpoints` | plotly.js API contract | needs a real plotly graph to apply against |
+| Clearing a selection needs **layout.selections cleared FIRST, then a `selectedpoints` restyle** — while a drag selection is active plotly owns `selectedpoints`, so restyle is a silent no-op, and clearing only the dimming leaves the outline rectangle on screen | plotly's two-layer selection state | only a **real drag** populates `layout.selections`; `gd.emit('plotly_selected')` does not, so the emit shortcut never reproduces the outline and the bug stays hidden |
+| bslib `layout_sidebar`/`page_sidebar` render blank through irid — `process_tags` drops the tag's `.renderHooks`, so the sidebar grid wrapper never materializes (issue #27) | irid×bslib boundary, render-time hooks | a *layout* bug, not a round-trip one — the DOM exists but renders at 0×0; caught only by screenshot / bounding-box inspection |
 
-The lesson: **PlotlyOutput needs a browser in the loop.** The harness below is
-the one used to find and fix all seven; this doc makes it repeatable.
+The lesson: **PlotlyOutput needs a browser in the loop** — and for selection,
+**a real mouse drag, not an emitted event.** The harness below is the one used
+to find and fix all of these; this doc makes it repeatable.
 
 ---
 
@@ -82,13 +85,31 @@ two directions of the round-trip:
     real `plotly_relayout` (split-key form, exactly what a drag emits) — this
     exercises `fromRelayout → setProp → writeback → snap-back`.
   - `gd.emit('plotly_selected', {points:[…]})` / `gd.emit('plotly_click', …)` /
-    `gd.emit('plotly_deselect')` drive the discrete + selection listeners
-    without needing pixel-accurate mouse choreography over the SVG.
+    `gd.emit('plotly_deselect')` drive the discrete + selection *listeners*
+    without pixel-accurate mouse choreography over the SVG.
 
-  Emitting through plotly's own emitter is the key trick: it runs the factory's
-  real listener (`el.on(...)`), so `slimPoints`, `pointsToFrame`, the
-  `applying` guard, and the sequence plumbing are all genuinely exercised — only
-  the *physical* mouse event is faked.
+  Emitting through plotly's own emitter runs the factory's real listener
+  (`el.on(...)`), so `slimPoints`, `pointsToFrame`, the `applying` guard, and the
+  sequence plumbing are genuinely exercised — only the *physical* mouse event is
+  faked.
+
+- **Client → server: a *real* mouse drag (when emit is not enough).**
+  `gd.emit('plotly_selected', …)` is a **trap for selection-clearing tests**: it
+  fires the listener but does **not** create plotly's internal selection — no
+  outline, nothing in `layout.selections`. So the "Clear selection leaves the
+  outline rectangle" bug is *invisible* to emit and only surfaces under a genuine
+  drag. Drive one via CDP `Input.dispatchMouseEvent`:
+  ```js
+  // dragmode must be a select tool; aim at gd's .nsewdrag rect
+  await mouse('mousePressed',  x1, y1);
+  for (let i = 1; i <= 6; i++) await mouse('mouseMoved', lerp(x1,x2,i/6), lerp(y1,y2,i/6));
+  await mouse('mouseReleased', x2, y2);
+  ```
+  A real drag populates **both** layers of selection state — `layout.selections`
+  (the outline rectangle) and per-trace `data[*].selectedpoints` (the dimming) —
+  which is exactly what the clear path must tear down (see §3.1). Use a real drag
+  for any test that asserts on the outline; emit is fine only for the
+  point→`setProp`→readout path.
 
 ### Observability
 
@@ -103,6 +124,17 @@ two directions of the round-trip:
   server-write bug. This split was decisive — e.g. snap-back showed
   `hp: [50,160]` in the readout (server correct) while the plot showed the
   rejected `[100,118]` (client apply missing).
+- **Capture the websocket frames** (`Network.enable` +
+  `Network.webSocketFrameReceived`, filter for `irid-attr`) when the readout and
+  the plot disagree and you can't tell whether the server even sent the update.
+  This is what proved the clear *was* sent as
+  `{values:{selected_points:null}}` — moving the hunt from "is the message sent?"
+  to "why didn't the client apply it?", which localized the bug to the
+  `relayout`/`restyle` order rather than the wire.
+- **Screenshot** (`Page.captureScreenshot`) for anything *layout*-shaped — the
+  bslib sidebar (#27) rendered with all its content present in the DOM but at
+  `0×0`, so only a screenshot (or a `getBoundingClientRect()` check) reveals it.
+  State assertions on `gd.layout`/`gd.data` are blind to "present but invisible."
 
 ---
 
@@ -126,15 +158,48 @@ build; the rest are the same shape and should be filled in.
 | 11 | `reactiveProxy` gate | reject narrow zoom | server reactiveVal unchanged (readout `auto`/prior) ✓ |
 | 12 | `onClick` (`slimPoints`) | `gd.emit('plotly_click', …)` | readout shows clicked point's `customdata`/`x`/`y` ✓ |
 | 13 | `selected_points` (`pointsToFrame` → restyle) | `gd.emit('plotly_selected', …)` | readout point count + traces; `gd.data[i].selectedpoints` per-trace ✓ |
-| 14 | Deselect clears | `gd.emit('plotly_deselect')` | readout "none"; `selectedpoints` unset ✓ |
+| 14 | Deselect clears (emit path) | `gd.emit('plotly_deselect')` | readout "none"; `selectedpoints` unset ✓ |
 | 15 | Autorange-reset null clear | `gd.emit('plotly_relayout', {'yaxis.autorange':true})` | readout `hp: auto`, no R error ✓ |
-| 16 | Subplot axes (`xaxis2_range`, …) | a `subplot()` fixture | each axis routes independently |
-| 17 | `ggplotly()` parity | a `ggplotly` fixture | renders + the same range bindings work |
-| 18 | Per-flush coalescing (one redraw) | a button writing spec + range together | a single `Plotly.react` (no flash); count redraws via a `plotly_afterplot` counter |
-| 19 | Destroy on `When`/`Match` flip | toggle a gate hiding the plot | `Plotly.purge` ran; widget id removed from the registry |
+| 16 | **Real drag-select** populates both layers | `Input.dispatchMouseEvent` drag over `.nsewdrag` | readout shows N points; `gd.layout.selections.length === 1`; outline DOM present ✓ |
+| 17 | **Clear selection (button) tears down both layers** | real drag, then click "Clear selection" | readout "none"; `gd.layout.selections.length === 0`; every `selectedpoints` unset; `.selectionlayer path` gone ✓ |
+| 18 | Subplot axes (`xaxis2_range`, …) | a `subplot()` fixture | each axis routes independently |
+| 19 | `ggplotly()` parity | a `ggplotly` fixture | renders + the same range bindings work |
+| 20 | Per-flush coalescing (one redraw) | a button writing spec + range together | a single `Plotly.react` (no flash); count redraws via a `plotly_afterplot` counter |
+| 21 | Destroy on `When`/`Match` flip | toggle a gate hiding the plot | `Plotly.purge` ran; widget id removed from the registry |
+| 22 | Sidebar/layout renders (regression for #27) | navigate, screenshot | control panel has non-zero width; `getBoundingClientRect().width > 0` |
 
-Rows 16–19 need small dedicated fixtures (a subplot app, a ggplotly app, a
-gated app); the kitchen-sink `examples/plotly.R` covers 1–15.
+Rows 18–21 need small dedicated fixtures (a subplot app, a ggplotly app, a
+gated app); the kitchen-sink `examples/plotly.R` covers 1–17 and 22. **Rows 13/14
+use emit and are necessary but not sufficient — they must be paired with the
+real-drag rows 16/17, or the outline-clearing class of bug slips through.**
+
+### 3.1 Selection is two-layer state — test (and clear) both
+
+A box/lasso selection in plotly is **not one thing**. A real drag writes two
+independent pieces of state:
+
+| Layer | Where | What it is | Cleared by |
+|-------|-------|-----------|------------|
+| Outline | `layout.selections` (a `rect`/`path`) + `.selectionlayer path` in the DOM | the gray selection rectangle | `Plotly.relayout(gd, {selections: null})` |
+| Dimming | `data[*].selectedpoints` (per-trace index arrays) | which points are highlighted; everything else dims | `Plotly.restyle(gd, {selectedpoints: [null, …]})` |
+
+`PlotlyOutput`'s `selected_points` prop is the **dimming** layer (canonical
+`(curve, point)`); the outline is treated as transient geometry that is not
+persisted. The clear path (`selected_points → NULL`) must tear down **both**, in
+this order, because of two plotly quirks the harness must encode as assertions:
+
+1. **While a drag selection is active, plotly owns `selectedpoints`** — a
+   `restyle` to clear it is a *silent no-op*. So `relayout({selections: null})`
+   must run **first** to deactivate the selection, *then* the `restyle` clears
+   the dimming.
+2. **Clearing the outline alone leaves the points dimmed** — `relayout` does not
+   touch `selectedpoints`. Clearing the points alone leaves the rectangle on
+   screen (the user has to double-click the plot to dismiss it).
+
+So a clear-selection test must assert on **all three** signals — readout `none`,
+`layout.selections.length === 0`, *and* every trace's `selectedpoints` unset —
+driven from a **real drag** (row 17). An emit-only test passes while the live
+plot still shows a stuck rectangle.
 
 ---
 
@@ -148,10 +213,10 @@ dev/e2e/
                     chrome (tracked PID), run the node driver, tear down PIDs
   driver.mjs        CDP client + the assertion list; exits non-zero on any fail
   fixtures/
-    kitchen-sink.R  examples/plotly.R minus the iridApp() launch
-    subplot.R       row 16
-    ggplotly.R      row 17
-    gated.R         rows 18–19
+    kitchen-sink.R  examples/plotly.R minus the iridApp() launch (rows 1–17, 22)
+    subplot.R       row 18
+    ggplotly.R      row 19
+    gated.R         rows 20–21
 ```
 
 `driver.mjs` factors the connection boilerplate (`connectPage`, `evalJs`,
@@ -169,6 +234,11 @@ server flush want ~1.5–2.5 s. Two robustness rules learned the hard way:
 - **One gesture per assertion window** — batching gestures lets a later one's
   sequence bump mask an earlier one's echo (exactly the snap-back gate bug).
   Settle and assert between gestures.
+- **A real drag needs intermediate `mouseMoved` steps**, not just press→release —
+  plotly's select tool builds the outline from the move stream, so a single jump
+  produces no selection. Step the cursor (~6 moves) between press and release,
+  and aim at the `.nsewdrag` rect's interior (offset in from the edges) so the
+  drag lands on the plot area, not an axis.
 
 ### CI gating
 
@@ -192,11 +262,18 @@ are the asset, not the transport:
 - **`shinytest2`** — gives app lifecycle + screenshot diffing for free, but its
   `get_value`/`set_inputs` model is DOM/input-centric; the plotly gestures still
   need raw `AppDriver$run_js(...)` calls equivalent to the `gd.emit` /
-  `Plotly.relayout` primitives here. The §2 drive primitives transfer verbatim.
+  `Plotly.relayout` primitives here. The §2 drive primitives transfer verbatim —
+  except the **real mouse drag**, which needs CDP `Input.dispatchMouseEvent`
+  directly (`AppDriver` has no native drag); both chromote and shinytest2 expose
+  the underlying CDP session to send it.
 
-In all three, the two drive primitives (click-the-control; emit-the-plotly-event)
-and the server-vs-client readout split are unchanged — they are the design, not
-an artifact of CDP.
+In all three, the three drive primitives (click-the-control; emit-the-plotly-event;
+real mouse drag), the server-vs-client readout split, and the websocket-frame /
+screenshot observability are unchanged — they are the design, not an artifact of
+CDP. The one assertion that does *not* port is screenshot **pixel-diffing** for
+plot content (SVG/canvas renders vary by machine); keep plot assertions on
+`gd.layout`/`gd.data` state and reserve screenshots for layout/visibility checks
+(row 22).
 
 ---
 
