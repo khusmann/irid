@@ -844,8 +844,9 @@ by its echo.
 **Wire-boundary coercion.** Shiny decodes client messages with
 `simplifyVector = FALSE`, so a range arrives as `list(40, 200)` and a
 `setProp(key, null)` as `NA`; `coerce_plotly_value` normalizes each field back to
-its documented R shape (ranges → numeric, the keyed maps → character, `NA`/`null`
-→ `NULL`). `coerce_state_prop` `force()`s its captured name/callable so proxies
+its documented R shape (numeric ranges → numeric, but a date-axis range stays
+character since plotly reports it as ISO strings; the keyed maps → character;
+`NA`/`null` → `NULL`). `coerce_state_prop` `force()`s its captured name/callable so proxies
 built in a construction loop don't all resolve to the last one.
 
 ## Remaining Work

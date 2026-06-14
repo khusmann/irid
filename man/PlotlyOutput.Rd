@@ -34,6 +34,11 @@ leaf, \code{reactiveProxy}) or constant. Recognized: \code{xaxis_range},
 override the spec". Unknown names error — use \code{onRelayout} for fields
 outside the table.
 
+A \verb{*_range} value is a length-2 vector of the axis's own units: numeric for
+a continuous, log, or category axis; ISO date-time \strong{strings}
+(\code{c("2020-04-01", "2020-06-30")}) for a date axis, matching how plotly
+reports and accepts them.
+
 \code{selected_ids} is the box/lasso selection, keyed on plotly's per-point
 \code{ids} (a character vector of id values). Binding it requires the plot to
 supply \code{ids} (\code{plot_ly(ids = ~key)} / \code{aes(ids = key)}); because the value

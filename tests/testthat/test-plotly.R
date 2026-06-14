@@ -27,6 +27,25 @@ test_that("coerce_plotly_value normalizes each field to its R shape", {
   expect_identical(coerce_plotly_value("dragmode", "pan"), "pan")
 })
 
+test_that("coerce_plotly_value keeps date-axis ranges as strings (not NA)", {
+  # A date-time axis reports its range as ISO date-time *strings*; forcing
+  # as.numeric would turn each bound into NA. The strings must survive verbatim
+  # so the value round-trips back to plotly.
+  expect_identical(
+    coerce_plotly_value("xaxis_range", list("2020-04-01", "2020-06-30")),
+    c("2020-04-01", "2020-06-30")
+  )
+  expect_identical(
+    coerce_plotly_value(
+      "xaxis2_range",
+      list("2020-02-01 00:00:00", "2020-11-01 12:30:00")
+    ),
+    c("2020-02-01 00:00:00", "2020-11-01 12:30:00")
+  )
+  # Numeric ranges are unchanged by the same path.
+  expect_identical(coerce_plotly_value("yaxis_range", list(40, 200)), c(40, 200))
+})
+
 test_that("coerce_plotly_value maps the null->NA clear back to NULL", {
   # A setProp(key, null) arrives as a scalar NA (mount maps JS null -> NA); every
   # real value is a length>=2 vector, so a scalar NA unambiguously means "clear".

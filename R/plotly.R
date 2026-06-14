@@ -53,16 +53,25 @@ validate_plotly_state_args <- function(state) {
 # JS factory pushes via `setProp` arrives in R as a nested list — a range
 # `[40, 200]` becomes `list(40, 200)`, on which `v[2] - v[1]` (a natural thing
 # for a user proxy to write) errors. The wrapper coerces each field back to its
-# documented R shape at the boundary so user code sees a clean value: ranges as
-# numeric vectors, `trace_visibility` / `selected_ids` as character vectors.
-# Scalars (`dragmode`, `hovermode`) need no coercion.
+# documented R shape at the boundary so user code sees a clean value: numeric
+# ranges as numeric vectors (date-axis ranges stay character — see below),
+# `trace_visibility` / `selected_ids` as character vectors. Scalars
+# (`dragmode`, `hovermode`) need no coercion.
 coerce_plotly_value <- function(name, v) {
   # A `setProp(key, null)` (deselect, autorange-reset) arrives here as a scalar
   # `NA`, because mount's event payload maps a JS `null` field to `NA`. Every
   # real value is a length>=2 vector or a structured list, so a scalar `NA`
   # unambiguously means "clear" — normalize it back to `NULL`.
   if (is.null(v) || (length(v) == 1L && is.atomic(v) && is.na(v))) return(NULL)
-  if (grepl("_range$", name)) return(as.numeric(unlist(v)))
+  if (grepl("_range$", name)) {
+    # A continuous / log / category axis reports numeric bounds, but a
+    # date-time axis reports ISO date-time *strings* ("2013-10-04 22:23:00").
+    # `unlist` keeps each as the client sent it (numbers stay numeric, dates
+    # stay character); forcing `as.numeric` would silently turn every date
+    # bound into `NA`. A date range round-trips as the character vector the
+    # client (and plotly) speak, so a re-send re-applies cleanly.
+    return(unlist(v, use.names = FALSE))
+  }
   if (identical(name, "selected_ids")) return(as.character(unlist(v)))
   if (identical(name, "trace_visibility")) {
     # named map: trace name -> tri-state; preserve the names, values to character
@@ -270,6 +279,11 @@ plotly_dependency <- function() {
 #'   `hovermode`, `selected_ids`, `trace_visibility`. `NULL` means "don't
 #'   override the spec". Unknown names error — use `onRelayout` for fields
 #'   outside the table.
+#'
+#'   A `*_range` value is a length-2 vector of the axis's own units: numeric for
+#'   a continuous, log, or category axis; ISO date-time **strings**
+#'   (`c("2020-04-01", "2020-06-30")`) for a date axis, matching how plotly
+#'   reports and accepts them.
 #'
 #'   `selected_ids` is the box/lasso selection, keyed on plotly's per-point
 #'   `ids` (a character vector of id values). Binding it requires the plot to

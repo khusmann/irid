@@ -367,6 +367,52 @@ test_that("ggplotly renders and the same range bindings work (19)", {
   e2e_expect_no_error(app)
 })
 
+# --- Date axis: a range is ISO strings, not numbers, and round-trips ---------
+# A date-time axis reports its range as date *strings*; the wire-boundary
+# coercion must keep them character (the old `as.numeric` turned each bound into
+# NA). Covers both directions + a rejecting proxy (snap-back) over a date axis.
+
+test_that("date-axis range round-trips as strings (server<->client, snap-back)", {
+  app <- e2e_app("plotly/dates.R")
+  e2e_plt_await(app, 1L)
+
+  # The plot's x values are date strings (date axis, not numeric).
+  expect_match(e2e_plt_eval(app, "return String(gd.data[0].x[0]);"), "^2020-01-01")
+
+  # server -> client: a button sets a Q2 date window; gd follows.
+  e2e_click(app, "#btn-q2")
+  xr <- e2e_poll(\() e2e_plt_range(app, "xaxis"),
+                 \(v) !is.null(v) && grepl("^2020-04", as.character(v[[1]])))
+  expect_match(as.character(xr[[1]]), "^2020-04-01")
+  expect_match(as.character(xr[[2]]), "^2020-06-30")
+  # The readout reflects the server reactiveVal: real date strings, not "NA".
+  expect_equal(e2e_readout(app, "#ro-xrange"), "x: 2020-04-01 .. 2020-06-30")
+
+  # client -> server: a wide relayout (date strings) writes back verbatim.
+  e2e_plt_relayout(app, list(`xaxis.range[0]` = "2020-02-01",
+                             `xaxis.range[1]` = "2020-11-01"))
+  ro <- e2e_poll(\() e2e_readout(app, "#ro-xrange"), \(t) grepl("2020-02-01", t))
+  expect_equal(ro, "x: 2020-02-01 .. 2020-11-01")
+  expect_no_match(e2e_readout(app, "#ro-xrange"), "NA")
+
+  # snap-back: a too-narrow (<30d) zoom is rejected; the plot reverts to the
+  # prior wide window and the server value is unchanged.
+  e2e_plt_relayout(app, list(`xaxis.range[0]` = "2020-05-01",
+                             `xaxis.range[1]` = "2020-05-10"))
+  back <- e2e_poll(\() e2e_plt_range(app, "xaxis"),
+                   \(v) !is.null(v) && grepl("^2020-02", as.character(v[[1]])))
+  expect_match(as.character(back[[1]]), "^2020-02-01")
+  expect_match(as.character(back[[2]]), "^2020-11-01")
+  expect_equal(e2e_readout(app, "#ro-xrange"), "x: 2020-02-01 .. 2020-11-01")
+
+  # reset -> autorange (null clears the date range with no error).
+  e2e_click(app, "#btn-reset")
+  e2e_poll(\() e2e_plt_autorange(app, "xaxis"), isTRUE)
+  expect_true(isTRUE(e2e_plt_autorange(app, "xaxis")))
+  expect_equal(e2e_readout(app, "#ro-xrange"), "x: auto")
+  e2e_expect_no_error(app)
+})
+
 # --- Row 20: per-flush coalescing — one redraw ------------------------------
 
 test_that("a same-flush spec + range write redraws once (20)", {
