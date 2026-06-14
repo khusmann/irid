@@ -22,7 +22,7 @@
 # side keeps the authoritative mirror that maps each name to a spec path and a
 # source event; the R side only needs to reject unknown names at construction.
 plotly_state_arg_ok <- function(name) {
-  name %in% c("dragmode", "hovermode", "selected_points", "trace_visibility") ||
+  name %in% c("dragmode", "hovermode", "selected_ids", "trace_visibility") ||
     grepl("^[xy]axis[0-9]*_range$", name)
 }
 
@@ -42,7 +42,7 @@ validate_plotly_state_args <- function(state) {
       "i" = "Known fields: {.field xaxis_range}, {.field yaxis_range}, \\
              {.field xaxis<n>_range}, {.field yaxis<n>_range}, \\
              {.field dragmode}, {.field hovermode}, \\
-             {.field selected_points}, {.field trace_visibility}.",
+             {.field selected_ids}, {.field trace_visibility}.",
       "i" = "Anything outside the table can be handled via {.arg onRelayout}."
     ))
   }
@@ -54,8 +54,8 @@ validate_plotly_state_args <- function(state) {
 # `[40, 200]` becomes `list(40, 200)`, on which `v[2] - v[1]` (a natural thing
 # for a user proxy to write) errors. The wrapper coerces each field back to its
 # documented R shape at the boundary so user code sees a clean value: ranges as
-# numeric vectors, `trace_visibility` as a character vector, `selected_points`
-# as integer columns. Scalars (`dragmode`, `hovermode`) need no coercion.
+# numeric vectors, `trace_visibility` / `selected_ids` as character vectors.
+# Scalars (`dragmode`, `hovermode`) need no coercion.
 coerce_plotly_value <- function(name, v) {
   # A `setProp(key, null)` (deselect, autorange-reset) arrives here as a scalar
   # `NA`, because mount's event payload maps a JS `null` field to `NA`. Every
@@ -63,15 +63,8 @@ coerce_plotly_value <- function(name, v) {
   # unambiguously means "clear" — normalize it back to `NULL`.
   if (is.null(v) || (length(v) == 1L && is.atomic(v) && is.na(v))) return(NULL)
   if (grepl("_range$", name)) return(as.numeric(unlist(v)))
-  if (identical(name, "trace_visibility")) return(as.character(unlist(v)))
-  if (identical(name, "selected_points")) {
-    if (is.list(v) && !is.null(v$curve)) {
-      return(list(
-        curve = as.integer(unlist(v$curve)),
-        point = as.integer(unlist(v$point))
-      ))
-    }
-    return(v)
+  if (name %in% c("trace_visibility", "selected_ids")) {
+    return(as.character(unlist(v)))
   }
   v
 }
@@ -134,10 +127,15 @@ prepare_state_props <- function(state) {
 #' to the same structure.
 #'
 #' @param p A plotly or ggplotly object.
+#' @param require_ids When `TRUE` (the `selected_ids` binding is in use),
+#'   validate that the built traces carry `ids`: error on absence, warn on
+#'   duplicates. Identity-keyed selection resolves against `data[*].ids`, so a
+#'   missing key is a hard, fixable error and a non-unique key is advisory.
 #' @return A length-1 character vector of JSON.
 #' @keywords internal
-to_plotly_spec <- function(p) {
+to_plotly_spec <- function(p, require_ids = FALSE) {
   b <- plotly::plotly_build(p)
+  if (require_ids) validate_plotly_ids(b$x$data)
   # plotly:::to_JSON is unexported; getFromNamespace avoids the R CMD check
   # `:::` note while still reproducing plotly's exact encoding.
   to_JSON <- utils::getFromNamespace("to_JSON", "plotly")
@@ -146,6 +144,33 @@ to_plotly_spec <- function(p) {
     layout = b$x$layout,
     config = b$x$config
   )))
+}
+
+# `selected_ids` keys the selection on plotly's per-point `ids`, so the spec
+# must supply them. Presence is structural -> a hard, actionable error;
+# uniqueness is a data property -> a once-per-session warning (selecting one of
+# several points sharing an id selects them all, which is sometimes intended).
+validate_plotly_ids <- function(data) {
+  has_ids <- vapply(data, function(tr) !is.null(tr$ids), logical(1L))
+  if (!any(has_ids)) {
+    cli::cli_abort(c(
+      "{.arg selected_ids} needs a per-point key, but the plot has no \\
+       {.field ids}.",
+      "i" = "Add {.code ids = ~yourkey} to {.fn plot_ly}, or \\
+             {.code aes(ids = yourkey)} for {.fn ggplotly}."
+    ))
+  }
+  all_ids <- unlist(lapply(data, function(tr) tr$ids), use.names = FALSE)
+  if (anyDuplicated(all_ids)) {
+    rlang::warn(
+      paste0(
+        "`selected_ids`: the plot's `ids` are not unique. Selecting one of ",
+        "several points sharing an id will select them all."
+      ),
+      .frequency = "once",
+      .frequency_id = "irid_plotly_ids_unique"
+    )
+  }
 }
 
 # --- Dependencies -----------------------------------------------------------
@@ -210,13 +235,19 @@ plotly_dependency <- function() {
 #' @param ... Named state arguments, each a callable (`reactiveVal`, store
 #'   leaf, `reactiveProxy`) or constant. Recognized: `xaxis_range`,
 #'   `yaxis_range`, `xaxis<n>_range`, `yaxis<n>_range`, `dragmode`,
-#'   `hovermode`, `selected_points`, `trace_visibility`. `NULL` means "don't
+#'   `hovermode`, `selected_ids`, `trace_visibility`. `NULL` means "don't
 #'   override the spec". Unknown names error — use `onRelayout` for fields
 #'   outside the table.
+#'
+#'   `selected_ids` is the box/lasso selection, keyed on plotly's per-point
+#'   `ids` (a character vector of id values). Binding it requires the plot to
+#'   supply `ids` (`plot_ly(ids = ~key)` / `aes(ids = key)`); because the value
+#'   is keyed on identity rather than position, the selection survives data
+#'   changes that renumber points (filtering, sorting, trace recomposition).
 #' @param onClick,onHover,onUnhover,onDoubleclick Discrete pointer callbacks.
 #'   Each receives the (slimmed) plotly event payload.
 #' @param onDeselect,onSelecting,onBrushing Selection-lifecycle notifications.
-#'   `onDeselect` is a side-effect notification only — when `selected_points`
+#'   `onDeselect` is a side-effect notification only — when `selected_ids`
 #'   is bound, the clear already flows through its prop channel.
 #' @param onLegendClick,onLegendDoubleclick,onClickAnnotation,onSunburstClick
 #'   Discrete interaction callbacks.
@@ -261,8 +292,10 @@ PlotlyOutput <- function(
 
   # The spec is always a function; wrap it as a callable prop that serializes
   # to the plotly JSON string each time its deps change. Two-way-capable like
-  # any callable prop, but the client never writes the spec back.
-  spec_prop <- function() to_plotly_spec(spec())
+  # any callable prop, but the client never writes the spec back. When the
+  # `selected_ids` binding is in use, each build also validates the plot's ids.
+  require_ids <- "selected_ids" %in% names(state)
+  spec_prop <- function() to_plotly_spec(spec(), require_ids = require_ids)
 
   # Throttled relayout/hover events; immediate clicks/selection. NULL handlers
   # resolve to subject-less wires and drop out in normalize_widget_events.

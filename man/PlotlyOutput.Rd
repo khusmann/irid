@@ -30,15 +30,21 @@ PlotlyOutput(
 \item{...}{Named state arguments, each a callable (\code{reactiveVal}, store
 leaf, \code{reactiveProxy}) or constant. Recognized: \code{xaxis_range},
 \code{yaxis_range}, \verb{xaxis<n>_range}, \verb{yaxis<n>_range}, \code{dragmode},
-\code{hovermode}, \code{selected_points}, \code{trace_visibility}. \code{NULL} means "don't
+\code{hovermode}, \code{selected_ids}, \code{trace_visibility}. \code{NULL} means "don't
 override the spec". Unknown names error — use \code{onRelayout} for fields
-outside the table.}
+outside the table.
+
+\code{selected_ids} is the box/lasso selection, keyed on plotly's per-point
+\code{ids} (a character vector of id values). Binding it requires the plot to
+supply \code{ids} (\code{plot_ly(ids = ~key)} / \code{aes(ids = key)}); because the value
+is keyed on identity rather than position, the selection survives data
+changes that renumber points (filtering, sorting, trace recomposition).}
 
 \item{onClick, onHover, onUnhover, onDoubleclick}{Discrete pointer callbacks.
 Each receives the (slimmed) plotly event payload.}
 
 \item{onDeselect, onSelecting, onBrushing}{Selection-lifecycle notifications.
-\code{onDeselect} is a side-effect notification only — when \code{selected_points}
+\code{onDeselect} is a side-effect notification only — when \code{selected_ids}
 is bound, the clear already flows through its prop channel.}
 
 \item{onLegendClick, onLegendDoubleclick, onClickAnnotation, onSunburstClick}{Discrete interaction callbacks.}

@@ -39,28 +39,34 @@
     };
   }
 
-  // selection canonical value: columnar { curve:[...], point:[...] }, 1-based.
-  function pointsToFrame(points) {
+  // Selection canonical value: a flat array of `ids` (the per-point identity
+  // plotly carries in data[*].ids). Identity-keyed selection is layout-agnostic
+  // — resolution scans current ids, so it survives data changes that renumber
+  // points and works the same across plot_ly traces and grouped ggplotly.
+
+  // event points -> their id values, read off the graph (the point object does
+  // not carry the id, but the listener has curve/point and gd.data[*].ids does).
+  function idsFromPoints(el, points) {
     if (!points || !points.length) return null;
-    var curve = [], point = [];
+    var out = [];
     points.forEach(function (p) {
-      curve.push(p.curveNumber + 1);
-      point.push(p.pointNumber + 1);
+      var ids = el.data[p.curveNumber] && el.data[p.curveNumber].ids;
+      if (ids && ids[p.pointNumber] != null) out.push(ids[p.pointNumber]);
     });
-    return { curve: curve, point: point };
+    return out.length ? out : null;
   }
 
-  // 1-based columnar { curve, point } -> { traceIndex -> [0-based points] }.
-  // Tolerates scalars (jsonlite auto_unbox collapses length-1 arrays).
-  function groupSelection(v) {
+  // ids -> { traceIndex -> [0-based point indices] } against the given data.
+  // Scans each trace's ids for membership in the wanted set.
+  function idsToIndices(data, ids) {
+    var want = {};
+    [].concat(ids).forEach(function (k) { want[k] = true; });
     var g = {};
-    if (!v || v.curve == null || v.point == null) return g;
-    var curves = [].concat(v.curve), points = [].concat(v.point);
-    for (var i = 0; i < curves.length; i++) {
-      var c = curves[i] - 1;
-      if (!g[c]) g[c] = [];
-      g[c].push(points[i] - 1);
-    }
+    data.forEach(function (tr, i) {
+      (tr.ids || []).forEach(function (id, j) {
+        if (want[id]) { if (!g[i]) g[i] = []; g[i].push(j); }
+      });
+    });
     return g;
   }
 
@@ -173,9 +179,9 @@
 
     function selectionEntry() {
       return {
-        name: "selected_points", source: "selected",
+        name: "selected_ids", source: "selected",
         writeSpec: function (s, v) {
-          var g = groupSelection(v);
+          var g = idsToIndices(s.data, v);
           s.data.forEach(function (tr, i) { if (g[i]) tr.selectedpoints = g[i]; });
         },
         // Both set and clear must drop the active drag selection FIRST: while
@@ -187,8 +193,14 @@
         // state and is skipped, so only a *different* (programmatic) selection
         // reaches here and clears the stale outline.
         apply: function (el, v) {
-          var g = groupSelection(v);
-          var sel = el.data.map(function (_, i) { return g[i] || []; });
+          var ids = (v == null) ? [] : [].concat(v);
+          var g = idsToIndices(el.data, ids);
+          // An EMPTY selection is a clear: every trace gets `null` (full
+          // opacity). A non-empty selection dims the rest, so an unmatched
+          // trace gets `[]` ("part of the selection, nothing selected" — plotly
+          // dims it). Using `[]` for an empty selection would dim everything.
+          var empty = ids.length === 0;
+          var sel = el.data.map(function (_, i) { return empty ? null : (g[i] || []); });
           return mutate(function () {
             return Plotly.relayout(el, { selections: null }).then(function () {
               return Plotly.restyle(el, { selectedpoints: sel });
@@ -208,7 +220,7 @@
         // leaves their marquee intact; a mismatch (programmatic set) falls
         // through to apply, which clears the stale outline first.
         matchesCurrent: function (el, v) {
-          var g = groupSelection(v);
+          var g = idsToIndices(el.data, v);
           return el.data.every(function (tr, i) {
             var want = g[i] || [];
             var have = tr.selectedpoints || [];
@@ -248,7 +260,7 @@
       var m = name.match(/^([xy]axis\d*)_range$/);
       if (m) return rangeEntry(name, m[1]);
       if (name === "dragmode" || name === "hovermode") return scalarEntry(name);
-      if (name === "selected_points") return selectionEntry();
+      if (name === "selected_ids") return selectionEntry();
       if (name === "trace_visibility") return visibilityEntry();
       return null; // unknown — R side already rejected these; ignore defensively
     }
@@ -292,6 +304,14 @@
     function attachListeners() {
       el.on("plotly_relayout", function (payload) {
         if (applying) return;            // our own relayout/restyle echo
+        // A box/lasso select also fires a relayout carrying only `selections`
+        // (the outline geometry). That is not a layout change onRelayout means,
+        // and its sendEvent would bump the shared per-element sequence past the
+        // `selected_ids` setProp from the SAME gesture — gating the selection
+        // echo as stale so it never reaches the widget's state. Ignore
+        // selection-only relayouts; `selected_ids` owns that gesture.
+        var keys = Object.keys(payload);
+        if (keys.length && keys.every(function (k) { return /^selections/.test(k); })) return;
         // Emit the raw escape-hatch notification FIRST, then the prop writes.
         // setProp and sendEvent share one per-element sequence counter; if the
         // notification went last it would bump the sequence past the prop
@@ -309,7 +329,7 @@
       });
       el.on("plotly_selected", function (e) {
         if (applying) return;            // echo from our own react/restyle
-        setProp("selected_points", pointsToFrame(e && e.points));
+        setProp("selected_ids", idsFromPoints(el, e && e.points));
       });
       el.on("plotly_selecting", function (e) {
         if (applying) return;
@@ -318,7 +338,7 @@
       el.on("plotly_deselect", function () {
         if (applying) return;            // a data-change react() deselects —
         // that is our mutation, not the user clearing; do not write back.
-        setProp("selected_points", null);
+        setProp("selected_ids", null);
         sendEvent("deselect", {});
       });
       el.on("plotly_restyle", function () {

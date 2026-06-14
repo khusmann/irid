@@ -13,12 +13,12 @@
 #     units — try to zoom in tight and the plot snaps back to the last range.
 #   - `dragmode` two-way: the <select> sets it; picking a tool on plotly's own
 #     modebar writes it back and the <select> follows.
-#   - `selected_points` routed through a translating reactiveProxy so the
-#     selection is **identity-based** (keyed on car name), not positional. It
-#     SURVIVES filtering — points that scroll out come back highlighted — and
-#     can be set/cleared from anywhere ("Select sports cars" / "Clear"), all
-#     while still using plotly's native dimming. The proxy converts between
-#     plotly's (curve, point) frame and names against the currently-shown data.
+#   - `selected_ids`: identity-keyed box/lasso selection. The plot supplies a
+#     per-point key (`ids = ~name`), and the selection is a character vector of
+#     those names — so it SURVIVES filtering (points that scroll out come back
+#     highlighted) and can be set/cleared from anywhere ("Select sports cars" /
+#     "Clear"), all via plotly's native dimming. No index bookkeeping: the value
+#     is just the names, bound to a plain reactiveVal.
 #   - `trace_visibility`: clicking the legend writes the tri-state vector back;
 #     "Hide 8-cyl" sets it programmatically (server -> client).
 #   - Discrete callbacks: onClick inspects a point, onDoubleclick logs a reset,
@@ -33,35 +33,6 @@ library(plotly)
 # mtcars with a factor color split -> three scatter traces (4/6/8 cylinders),
 # which gives us multiple traces for selection, legend visibility, and color.
 cars <- transform(mtcars, cyl = factor(cyl), name = rownames(mtcars))
-
-# `plot_ly(color = ~cyl)` makes one trace per cyl level PRESENT, in level order.
-# These helpers translate between plotly's positional (curve, point) frame and
-# the stable car-name keys, both resolved against the currently-shown `df` — so
-# the selection re-binds to whatever rows exist after a filter.
-trace_levels <- function(df) levels(droplevels(df$cyl))
-
-names_from_frame <- function(df, frame) {
-  if (is.null(frame)) return(character())
-  levs   <- trace_levels(df)
-  curves <- as.integer(unlist(frame$curve))
-  points <- as.integer(unlist(frame$point))
-  out <- vapply(seq_along(curves), function(k) {
-    rows <- which(df$cyl == levs[curves[k]])   # this trace's rows, in df order
-    df$name[rows[points[k]]]
-  }, character(1))
-  unique(out)
-}
-
-frame_from_names <- function(df, names) {
-  levs  <- trace_levels(df)
-  curve <- integer(0); point <- integer(0)
-  for (ti in seq_along(levs)) {
-    rows <- which(df$cyl == levs[ti])          # this trace's rows, in df order
-    pos  <- which(df$name[rows] %in% names)    # 1-based positions within trace
-    if (length(pos)) { curve <- c(curve, rep(ti, length(pos))); point <- c(point, pos) }
-  }
-  if (!length(curve)) NULL else list(curve = curve, point = point)
-}
 
 App <- function() {
   hp_min   <- reactiveVal(0L)             # data filter (drives the spec)
@@ -83,15 +54,6 @@ App <- function() {
   ygate <- reactiveProxy(
     get = yrange,
     set = \(v) if (is.null(v) || (v[2] - v[1]) >= 40) yrange(v)
-  )
-
-  # The bound selection value: a reactiveProxy adapting plotly's (curve, point)
-  # frame <-> stable names, both against the current data. Because `get()`
-  # re-resolves names -> indices every time the binding fires, the selection
-  # follows the data instead of breaking when filtering renumbers the points.
-  selected <- reactiveProxy(
-    get = \() frame_from_names(filtered(), sel_cars()),
-    set = \(frame) sel_cars(names_from_frame(filtered(), frame))
   )
 
   # A plain Bootstrap grid, not bslib's `layout_sidebar`/`page_sidebar`: those
@@ -116,9 +78,8 @@ App <- function() {
           tags$input(
             type = "range", class = "form-range",
             min = "0", max = "300", step = "10",
-            # No clear-on-filter: the selection is keyed on car name and the
-            # proxy re-resolves it against the current data, so filtering
-            # preserves it (filtered-out cars come back highlighted).
+            # No clear-on-filter: the selection is keyed on car name (ids), so
+            # filtering preserves it — filtered-out cars come back highlighted.
             value = reactiveProxy(get = hp_min, set = \(v) hp_min(as.integer(v)))
           ),
           tags$label(class = "mt-2", "Drag mode"),
@@ -178,7 +139,9 @@ App <- function() {
             df,
             x = ~mpg, y = ~hp, color = ~cyl,
             type = "scatter", mode = "markers",
-            text = ~name, customdata = ~name,
+            # `ids` keys the selection (stable per-point identity); `customdata`
+            # stays free for the onClick readout below — two distinct jobs.
+            ids = ~name, text = ~name, customdata = ~name,
             marker = list(size = 11)
           ) |>
             layout(
@@ -191,7 +154,7 @@ App <- function() {
         xaxis_range     = xrange,
         yaxis_range     = ygate,
         dragmode        = dragmode,
-        selected_points = selected,
+        selected_ids    = sel_cars,
         trace_visibility = visible,
         onClick      = \(e) clicked(e$points[[1]]),
         onDoubleclick = \() last_evt("double-click (autoscale)"),
