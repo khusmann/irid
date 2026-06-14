@@ -310,6 +310,9 @@
         // `selected_ids` setProp from the SAME gesture — gating the selection
         // echo as stale so it never reaches the widget's state. Ignore
         // selection-only relayouts; `selected_ids` owns that gesture.
+        // TODO(#28): once the stale-echo gate is per-channel, this skip is no
+        // longer load-bearing for correctness (could drop, or keep purely to
+        // spare onRelayout the transient selection geometry).
         var keys = Object.keys(payload);
         if (keys.length && keys.every(function (k) { return /^selections/.test(k); })) return;
         // Emit the raw escape-hatch notification FIRST, then the prop writes.
@@ -320,6 +323,8 @@
         // prop carry the gesture's highest sequence, so a rejected write snaps
         // back. (When onRelayout is unbound, sendEvent is a no-op that does not
         // touch the sequence.)
+        // TODO(#28): per-channel sequencing makes emit order irrelevant — this
+        // "notification first" constraint can be dropped once that lands.
         sendEvent("relayout", payload);  // raw escape hatch (no-op if unbound)
         entries.forEach(function (entry) {
           if (entry.source !== "relayout") return;
