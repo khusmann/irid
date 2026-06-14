@@ -1,7 +1,7 @@
 # Browser end-to-end tests (chromote + headless Chrome), kept out of the main
 # R-CMD-check matrix: that job leaves IRID_E2E unset so the e2e cases skip there,
 # while this dedicated job opts in and installs a browser. See
-# tests/testthat/helper-e2e.R and dev/plotly-e2e-testing-design.md.
+# tests/testthat/helper-e2e.R and TESTING.md (End-to-end tests).
 on:
   push:
     branches: [main, master]

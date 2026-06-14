@@ -108,23 +108,32 @@
   }
 
   window.irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
-    var applying = false;              // raised around our own graph mutations
+    var applyDepth = 0;                // >0 while our own graph mutations run
     var listenersAttached = false;
     var ready = false;                 // first render committed?
     var spec = JSON.parse(props.spec);
     var state = {};
 
+    function applying() { return applyDepth > 0; }
+
     // every programmatic mutation runs through this guard. react() is silent
     // (no plotly_relayout); relayout()/restyle() echo a synchronous
     // plotly_relayout that the listener must ignore. The echo fires before the
     // returned promise resolves, so clearing in .then() is always in time.
+    //
+    // A depth COUNTER, not a boolean: a single batch can fire two async
+    // mutations at once (e.g. selected_ids' relayout().then(restyle()) running
+    // alongside trace_visibility's restyle()). With a boolean the first to
+    // resolve clears the guard while the other's deferred echo is still
+    // pending, leaking that echo back as a spurious user write. The counter
+    // stays raised until every in-flight mutation has settled.
     function mutate(fn) {
-      applying = true;
+      applyDepth++;
       var p;
-      try { p = fn(); } catch (err) { applying = false; throw err; }
+      try { p = fn(); } catch (err) { applyDepth--; throw err; }
       return Promise.resolve(p).then(
-        function (r) { applying = false; return r; },
-        function (err) { applying = false; throw err; }
+        function (r) { applyDepth--; return r; },
+        function (err) { applyDepth--; throw err; }
       );
     }
 
@@ -323,7 +332,7 @@
 
     function attachListeners() {
       el.on("plotly_relayout", function (payload) {
-        if (applying) return;            // our own relayout/restyle echo
+        if (applying()) return;            // our own relayout/restyle echo
         // A box/lasso select also fires a relayout carrying only `selections`
         // (the outline geometry). That is not a layout change onRelayout means,
         // and its sendEvent would bump the shared per-element sequence past the
@@ -357,21 +366,21 @@
         });
       });
       el.on("plotly_selected", function (e) {
-        if (applying) return;            // echo from our own react/restyle
+        if (applying()) return;            // echo from our own react/restyle
         setProp("selected_ids", idsFromPoints(el, e && e.points));
       });
       el.on("plotly_selecting", function (e) {
-        if (applying) return;
+        if (applying()) return;
         sendEvent("selecting", slimPoints(e));
       });
       el.on("plotly_deselect", function () {
-        if (applying) return;            // a data-change react() deselects —
+        if (applying()) return;            // a data-change react() deselects —
         // that is our mutation, not the user clearing; do not write back.
         setProp("selected_ids", null);
         sendEvent("deselect", {});
       });
       el.on("plotly_restyle", function () {
-        if (applying) return;
+        if (applying()) return;
         setProp("trace_visibility", readVisibility(el));
       });
       el.on("plotly_click", function (e) { sendEvent("click", slimPoints(e)); });
