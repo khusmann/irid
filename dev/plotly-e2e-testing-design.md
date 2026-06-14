@@ -1,7 +1,18 @@
 # PlotlyOutput end-to-end testing — design
 
-**Status:** Proposed
+**Status:** Proposed — spec only, **no suite built yet**
 **Date:** June 2026
+
+> **Implementation status / handoff.** Everything marked ✓ in the §3 matrix was
+> verified *live* during development, but only through throwaway Node/CDP scripts
+> that were not kept. **There is currently no automated e2e suite, and the
+> package's 706 pure-R tests cover none of this round-trip behavior** — so every
+> bug listed in §1 is, right now, protected by nothing. This document is the
+> implementation spec for the suite that closes that gap. The intended starting
+> point is §4 (layout, the `chromote` port in §5, CI gating) building the §3
+> matrix as named cases; the kitchen-sink fixture (`examples/plotly.R`) already
+> exercises rows 1–17 and 22–25. Treat the ✓ marks as "known-good behavior to
+> assert," not "already under test."
 
 ---
 

@@ -309,13 +309,7 @@
       });
       el.on("plotly_selected", function (e) {
         if (applying) return;            // echo from our own react/restyle
-        // Two parallel channels for one gesture: the `selected_points` prop
-        // (index-based, two-way, snap-back-capable) AND a discrete `selected`
-        // notification carrying the raw points (incl. customdata) for apps that
-        // prefer to capture the selection as data-domain keys. setProp/sendEvent
-        // are silent no-ops when their channel has no R subscriber.
         setProp("selected_points", pointsToFrame(e && e.points));
-        sendEvent("selected", slimPoints(e));
       });
       el.on("plotly_selecting", function (e) {
         if (applying) return;

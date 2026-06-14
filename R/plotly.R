@@ -215,11 +215,6 @@ plotly_dependency <- function() {
 #'   outside the table.
 #' @param onClick,onHover,onUnhover,onDoubleclick Discrete pointer callbacks.
 #'   Each receives the (slimmed) plotly event payload.
-#' @param onSelected Discrete callback fired when a box/lasso selection
-#'   completes, receiving the raw selected points (incl. `customdata`). Use this
-#'   to capture a selection as data-domain keys — e.g. store `customdata`
-#'   values and re-derive the highlight in the spec — so the selection survives
-#'   data changes that invalidate `selected_points`' positional indices.
 #' @param onDeselect,onSelecting,onBrushing Selection-lifecycle notifications.
 #'   `onDeselect` is a side-effect notification only — when `selected_points`
 #'   is bound, the clear already flows through its prop channel.
@@ -238,7 +233,6 @@ PlotlyOutput <- function(
   onHover             = NULL,
   onUnhover           = NULL,
   onDoubleclick       = NULL,
-  onSelected          = NULL,
   onDeselect          = NULL,
   onSelecting         = NULL,
   onBrushing          = NULL,
@@ -286,7 +280,6 @@ PlotlyOutput <- function(
       hover                = throttled(onHover),
       unhover              = onUnhover,
       doubleclick          = onDoubleclick,
-      selected             = onSelected,
       deselect             = onDeselect,
       selecting            = throttled(onSelecting),
       brushing             = throttled(onBrushing),
