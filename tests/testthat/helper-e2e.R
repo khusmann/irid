@@ -1,37 +1,15 @@
-# helper-e2e.R — a small e2e driver for irid apps (and a plotly layer on top).
-#
-# See dev/plotly-e2e-testing-design.md. The harness boots a test-owned fixture
-# app in a background `callr` process (a real, separate Shiny session) and drives
-# a headless Chrome via `chromote` (a CDP client).
-#
-# Naming: everything is scoped under `e2e_`. The generic app/browser driver is
-# `e2e_*` (reusable for any irid app/widget); the PlotlyOutput-specific layer is
-# `e2e_plt_*`. The driver is a PLAIN STATE OBJECT (`e2e_app()` returns a list:
-# $session, $proc, $url, $caps) plus FREE FUNCTIONS taking it first — NOT R6 and
-# not a `$`-method closure object. A free-function call site is a real symbol, so
-# `codetools`/`lintr` flags a misspelled or removed helper (`e2e_plt_rnge(app, …)`
-# -> "no visible global function definition"); a `$`-method call (`app$rng()`) is
-# dynamic and invisible to static analysis whether the object is R6 or a closure.
+# helper-e2e.R — e2e driver for irid apps, with a plotly layer (e2e_plt_*).
+# Design + rationale: dev/plotly-e2e-testing-design.md. Boots a fixture app in a
+# background callr process and drives headless Chrome via chromote.
 #
 #   app <- e2e_app("plotly/kitchen-sink.R")
 #   e2e_plt_await(app, 3)
 #   e2e_click(app, "#btn-economy")
-#   e2e_wait_idle(app)
-#   e2e_plt_range(app, "xaxis")          # c(20, 35)
-#   e2e_readout(app, "#ro-selection")
-#   e2e_plt_drag_select(app)
-#
-# Three drive primitives mirror the round-trip directions: click the real DOM
-# controls (server <- client), synthesize a plotly gesture (client -> server via
-# relayout/emit), and a *real* mouse drag (selection). Assertions read back
-# gd.layout / gd.data state and the app's own readout <div>s (the server-side
-# reactiveVals), separating a client-apply bug from a server-write bug.
+#   e2e_plt_range(app, "xaxis")
 
 # --- prerequisites / skip gate ----------------------------------------------
 
-# Every e2e case opens with this. skip_on_cran() is the load-bearing CRAN guard;
-# the rest cover machines without the browser stack, and IRID_E2E is a *local*
-# opt-out so a routine devtools::test() does not boot Chrome (~30s/case).
+# Skip unless this is an opted-in e2e run with the browser stack present.
 skip_unless_e2e <- function() {
   testthat::skip_on_cran()
   testthat::skip_if_not_installed("chromote")
@@ -56,10 +34,8 @@ e2e_pkg_root <- function() {
   normalizePath(testthat::test_path("..", ".."), mustWork = FALSE)
 }
 
-# Self-contained boot function shipped to the callr process (must reference only
-# its args + base/loaded-pkg functions — callr strips its environment). Loads the
-# dev package, sources the fixture (whose last expression is the bare `App`
-# function), and runs it.
+# Runs in the callr child (must be self-contained — callr strips its env). Loads
+# the dev package, sources the fixture (last expr is the bare App fn), runs it.
 e2e_boot_fn <- function(fixture_path, pkg_root, port) {
   loaded <- FALSE
   if (requireNamespace("pkgload", quietly = TRUE) &&
@@ -78,14 +54,10 @@ e2e_boot_fn <- function(fixture_path, pkg_root, port) {
   )
 }
 
-# Block until the app reports it is listening (or the process dies), by watching
-# the child's stderr for Shiny's "Listening on ..." banner. This deliberately
-# does NOT poll the port with socketConnection(): each refused probe while the
-# app boots leaks an R connection slot, and across the suite's ~17 boots that
-# exhausts R's ~128-connection table ("all connections are in use").
-# read_error_lines() reads processx pipes, which are not R connections. The
-# timeout is generous because the child runs pkgload::load_all(), slow when the
-# machine is already loaded.
+# Wait for Shiny's "Listening on ..." banner on the child's stderr. Not a
+# socketConnection port poll: refused probes leak R connection slots, and ~17
+# boots/suite exhaust R's ~128-connection table. Timeout is generous — the child
+# runs load_all().
 e2e_wait_listening <- function(proc, timeout = 90) {
   deadline <- Sys.time() + timeout
   seen <- character()
@@ -104,14 +76,9 @@ e2e_wait_listening <- function(proc, timeout = 90) {
   }
 }
 
-# Boot the fixture app in a background process, retrying on a fresh port if it
-# fails to come up — across a suite of ~17 sequential boots a just-released port
-# can still be in TIME_WAIT and fail to rebind. Registers teardown on success.
-#
-# supervise = FALSE is deliberate: the callr supervisor opens (and never
-# releases) a pipe connection per process, re-introducing the connection-table
-# exhaustion above. Teardown kills the process explicitly via withr::defer, so
-# the supervisor's crash-cleanup is redundant here.
+# Boot in a background process, retrying on a fresh port (a just-released port can
+# still be in TIME_WAIT). supervise = FALSE: the supervisor leaks a pipe
+# connection per process; teardown kills explicitly via withr::defer.
 e2e_boot_app <- function(fixture, env, attempts = 3) {
   last_err <- NULL
   for (i in seq_len(attempts)) {
@@ -205,11 +172,8 @@ e2e_wait_until <- function(app, js_bool, timeout = 30, interval = 0.2) {
   }
 }
 
-# Install a busy/idle tracker that mirrors Shiny's shiny:busy / shiny:idle (the
-# same events irid's stale indicator listens to). Shiny dispatches these as
-# *jQuery* events, not native ones, so the tracker attaches via jQuery — not yet
-# loaded right after navigate, so the install self-bootstraps once window.jQuery
-# appears. Idempotent. (Internal — called from e2e_app().)
+# Track Shiny's shiny:busy/shiny:idle (jQuery events) so e2e_wait_idle has a real
+# settle signal. Self-bootstraps once jQuery loads. Idempotent. Internal.
 e2e_install_idle <- function(app) {
   e2e_eval(app, "(function () {
     if (window.__iridIdleInstalled) return true;
@@ -232,9 +196,8 @@ e2e_install_idle <- function(app) {
   })()")
 }
 
-# Wait until the server has been idle continuously for `quiet` s — a real settle
-# signal, not a fixed sleep. A reactive chain that flushes more than once briefly
-# toggles busy between flushes; the quiet window bridges that gap.
+# Wait until the server has been idle for `quiet` s (the window bridges the brief
+# busy toggle between flushes of a multi-flush reactive chain).
 e2e_wait_idle <- function(app, quiet = 0.25, timeout = 15, interval = 0.1) {
   deadline <- Sys.time() + timeout
   repeat {
@@ -267,9 +230,8 @@ e2e_readout <- function(app, sel) {
   ))
 }
 
-# A real left-button drag with intermediate moves (plotly's select tool builds
-# the outline from the move stream — a single jump produces no selection).
-# (Internal — used by e2e_plt_drag_select().)
+# A real left-button drag with intermediate moves — plotly's select tool builds
+# the outline from the move stream, so a single jump produces no selection.
 e2e_drag <- function(app, x1, y1, x2, y2, steps = 6) {
   b <- app$session
   b$Input$dispatchMouseEvent(type = "mousePressed", x = x1, y = y1,
@@ -293,8 +255,7 @@ e2e_settle <- function(sec = 2) Sys.sleep(sec)
 e2e_exceptions <- function(app) app$caps$exceptions
 e2e_console <- function(app) app$caps$console
 
-# Fail if the app's stderr emitted an R error since the last drain — the
-# count-around-a-gesture pattern that localizes a bug to an exact action.
+# Fail if the app's stderr emitted an R error since the last drain.
 e2e_expect_no_error <- function(app) {
   lines <- tryCatch(app$proc$read_error_lines(), error = function(e) character())
   errs <- grep("Error", lines, value = TRUE)
@@ -302,14 +263,8 @@ e2e_expect_no_error <- function(app) {
     info = paste("app stderr errors:", paste(errs, collapse = " | ")))
 }
 
-e2e_stop <- function(app) {
-  tryCatch(app$session$close(), error = function(e) NULL)
-  tryCatch(app$proc$kill(), error = function(e) NULL)
-}
-
 # Poll an R-side reader until a predicate holds (or timeout), returning the last
-# value so the caller can assert on it. Robust alternative to a blind sleep when
-# the settled value is known.
+# value so the caller can assert on it.
 e2e_poll <- function(reader, pred, timeout = 15, interval = 0.3) {
   deadline <- Sys.time() + timeout
   repeat {
