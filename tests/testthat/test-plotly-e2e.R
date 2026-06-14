@@ -82,6 +82,37 @@ test_that("dragmode is two-way: <select> drives gd, modebar pick writes back (5)
   expect_no_app_error(h)
 })
 
+# --- hovermode two-way + onHover / onLegendClick sendEvent channels ---------
+# Not a numbered §3 row, but the remaining two-way prop and notification channels
+# (hover, legend) share enough distinct plumbing to be worth one smoke case.
+
+test_that("hovermode two-way; onHover and onLegendClick notifications fire", {
+  h <- local_e2e("kitchen-sink.R")
+  e2e_await_plot(h, KS_TRACES)
+
+  # server -> client: a button sets hovermode; the plot follows.
+  click_sel(h$b, "#btn-hover-x")
+  expect_equal(poll_until(\() gd_eval(h$b, "return gd.layout.hovermode;"),
+                          \(v) identical(v, "x")), "x")
+  # client -> server: a relayout writes hovermode back.
+  gd_relayout(h$b, list(hovermode = "closest"))
+  poll_until(\() read_text(h$b, "#ro-hovermode"), \(t) grepl("closest", t))
+  expect_match(read_text(h$b, "#ro-hovermode"), "closest")
+
+  # onHover -> slimPoints -> readout.
+  gd_emit(h$b, "plotly_hover", list(points = list(list(
+    curveNumber = 0, pointNumber = 0, x = 21, y = 110, customdata = "Mazda RX4"
+  ))))
+  poll_until(\() read_text(h$b, "#ro-hover"), \(t) grepl("Mazda RX4", t))
+  expect_match(read_text(h$b, "#ro-hover"), "Mazda RX4")
+
+  # onLegendClick -> readout shows the curve number.
+  gd_emit(h$b, "plotly_legendclick", list(curveNumber = 1))
+  poll_until(\() read_text(h$b, "#ro-legend"), \(t) grepl("legend: 1", t))
+  expect_match(read_text(h$b, "#ro-legend"), "legend: 1")
+  expect_no_app_error(h)
+})
+
 # --- Row 2: uirevision preserves the view across a data update --------------
 
 test_that("uirevision preserves the zoomed view across a data update (2)", {

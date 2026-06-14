@@ -27,7 +27,11 @@ App <- function() {
   xrange   <- reactiveVal(NULL)
   yrange   <- reactiveVal(NULL)
   dragmode <- reactiveVal("select")
+  hovermode <- reactiveVal("closest")
   visible  <- reactiveVal(NULL)
+
+  hovered  <- reactiveVal(NULL)           # last onHover point
+  legend   <- reactiveVal(NULL)           # last onLegendClick curve
 
   # Selection stored as ROW INDICES into the full `cars`; exposed to the plot as
   # a translating proxy (index <-> car name). Index storage survives filtering
@@ -104,6 +108,12 @@ App <- function() {
               "Clear selection"
             ),
             tags$button(
+              id = "btn-hover-x",
+              class = "btn btn-sm btn-outline-info",
+              onClick = \() hovermode("x"),
+              "Hovermode x"
+            ),
+            tags$button(
               id = "btn-reset",
               class = "btn btn-sm btn-outline-danger",
               onClick = \() {
@@ -139,9 +149,12 @@ App <- function() {
           xaxis_range      = xrange,
           yaxis_range      = ygate,
           dragmode         = dragmode,
+          hovermode        = hovermode,
           selected_ids     = sel_proxy,
           trace_visibility = visible,
           onClick       = \(e) clicked(e$points[[1]]),
+          onHover       = \(e) hovered(e$points[[1]]),
+          onLegendClick = \(e) legend(e$curveNumber),
           onDoubleclick = \() last_evt("double-click (autoscale)"),
           onRelayout    = \(e) {
             keys <- names(e)
@@ -160,7 +173,9 @@ App <- function() {
               paste0("mpg: ", fmt(xrange()), " | hp: ", fmt(yrange()))
             }),
             tags$br(),
-            tags$span(id = "ro-dragmode", \() paste0("dragmode: ", dragmode()))
+            tags$span(id = "ro-dragmode", \() paste0("dragmode: ", dragmode())),
+            tags$br(),
+            tags$span(id = "ro-hovermode", \() paste0("hovermode: ", hovermode()))
           ),
           tags$div(
             class = "col-md-4",
@@ -184,7 +199,17 @@ App <- function() {
               if (is.null(p)) "click a point" else paste0("clicked: ", p$customdata, " (", p$x, " mpg, ", p$y, " hp)")
             }),
             tags$br(),
-            tags$span(id = "ro-relayout", \() paste0("last relayout: ", last_evt()))
+            tags$span(id = "ro-relayout", \() paste0("last relayout: ", last_evt())),
+            tags$br(),
+            tags$span(id = "ro-hover", \() {
+              p <- hovered()
+              if (is.null(p)) "hover a point" else paste0("hover: ", p$customdata)
+            }),
+            tags$br(),
+            tags$span(id = "ro-legend", \() {
+              c <- legend()
+              if (is.null(c)) "no legend click" else paste0("legend: ", c)
+            })
           )
         )
       )
