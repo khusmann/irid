@@ -20,6 +20,7 @@ Imports:
 Suggests:
     DT,
     knitr,
+    plotly,
     purrr,
     rmarkdown,
     testthat (>= 3.0.0),

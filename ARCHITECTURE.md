@@ -35,6 +35,9 @@ examples/
   each_nested.R         Nested Each + recursive mini-store fields
   each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
   codemirror.R          CodeMirror editor widget via IridWidget + esm.sh CDN
+  plotly.R              Reactive plotly chart via PlotlyOutput — named state
+                        args (ranges/dragmode/selection/visibility), snap-back,
+                        discrete callbacks, onRelayout escape hatch
 ```
 
 ## Design Principles
