@@ -36,12 +36,10 @@ examples/
   each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
   codemirror.R          CodeMirror editor widget via IridWidget + esm.sh CDN
   plotly.R              Reactive plotly chart via PlotlyOutput — named state
-                        args (ranges/dragmode/selection/visibility), snap-back,
-                        discrete callbacks, onRelayout escape hatch
-  plotly_stable_selection.R
-                        Identity-based selection: capture via onSelected, key on
-                        data (names), derive the highlight in the spec so the
-                        selection survives filtering
+                        args (ranges/dragmode/visibility), snap-back, discrete
+                        callbacks, onRelayout escape hatch, and identity-based
+                        selection (selected_points via a translating
+                        reactiveProxy keyed on names, surviving filtering)
 ```
 
 ## Design Principles

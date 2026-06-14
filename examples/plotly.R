@@ -4,8 +4,8 @@
 # coherently. What it covers:
 #
 #   - Reactive spec: the hp-threshold slider filters the data; Plotly.react()
-#     updates in place and `uirevision` keeps the user's zoom/pan/selection
-#     across the data change (the whole point versus the {plotly} htmlwidget).
+#     updates in place and `uirevision` keeps the user's zoom/pan across the
+#     data change (the whole point versus the {plotly} htmlwidget).
 #   - Two-way `xaxis_range` / `yaxis_range`: a live "viewport" readout updates
 #     as you drag-zoom, and a "Zoom to economy cars" button writes the ranges
 #     back to move the plot programmatically.
@@ -13,8 +13,12 @@
 #     units — try to zoom in tight and the plot snaps back to the last range.
 #   - `dragmode` two-way: the <select> sets it; picking a tool on plotly's own
 #     modebar writes it back and the <select> follows.
-#   - `selected_points`: box/lasso select highlights points; the readout shows
-#     the count and per-trace breakdown. "Clear selection" writes NULL.
+#   - `selected_points` routed through a translating reactiveProxy so the
+#     selection is **identity-based** (keyed on car name), not positional. It
+#     SURVIVES filtering — points that scroll out come back highlighted — and
+#     can be set/cleared from anywhere ("Select sports cars" / "Clear"), all
+#     while still using plotly's native dimming. The proxy converts between
+#     plotly's (curve, point) frame and names against the currently-shown data.
 #   - `trace_visibility`: clicking the legend writes the tri-state vector back;
 #     "Hide 8-cyl" sets it programmatically (server -> client).
 #   - Discrete callbacks: onClick inspects a point, onDoubleclick logs a reset,
@@ -30,6 +34,35 @@ library(plotly)
 # which gives us multiple traces for selection, legend visibility, and color.
 cars <- transform(mtcars, cyl = factor(cyl), name = rownames(mtcars))
 
+# `plot_ly(color = ~cyl)` makes one trace per cyl level PRESENT, in level order.
+# These helpers translate between plotly's positional (curve, point) frame and
+# the stable car-name keys, both resolved against the currently-shown `df` — so
+# the selection re-binds to whatever rows exist after a filter.
+trace_levels <- function(df) levels(droplevels(df$cyl))
+
+names_from_frame <- function(df, frame) {
+  if (is.null(frame)) return(character())
+  levs   <- trace_levels(df)
+  curves <- as.integer(unlist(frame$curve))
+  points <- as.integer(unlist(frame$point))
+  out <- vapply(seq_along(curves), function(k) {
+    rows <- which(df$cyl == levs[curves[k]])   # this trace's rows, in df order
+    df$name[rows[points[k]]]
+  }, character(1))
+  unique(out)
+}
+
+frame_from_names <- function(df, names) {
+  levs  <- trace_levels(df)
+  curve <- integer(0); point <- integer(0)
+  for (ti in seq_along(levs)) {
+    rows <- which(df$cyl == levs[ti])          # this trace's rows, in df order
+    pos  <- which(df$name[rows] %in% names)    # 1-based positions within trace
+    if (length(pos)) { curve <- c(curve, rep(ti, length(pos))); point <- c(point, pos) }
+  }
+  if (!length(curve)) NULL else list(curve = curve, point = point)
+}
+
 App <- function() {
   hp_min   <- reactiveVal(0L)             # data filter (drives the spec)
   revision <- reactiveVal(1L)             # uirevision bump -> reset all UI state
@@ -37,17 +70,28 @@ App <- function() {
   xrange   <- reactiveVal(NULL)           # mpg axis
   yrange   <- reactiveVal(NULL)           # hp axis (gated below)
   dragmode <- reactiveVal("select")
-  selected <- reactiveVal(NULL)           # list(curve, point) | NULL
+  sel_cars <- reactiveVal(character())    # selection: a set of car NAMES
   visible  <- reactiveVal(NULL)           # tri-state char vector | NULL
 
   clicked  <- reactiveVal(NULL)           # last onClick point
   last_evt <- reactiveVal("(none)")       # last onRelayout payload keys
+
+  filtered <- reactive(cars[cars$hp >= hp_min(), ])
 
   # Reject hp-axis zooms narrower than 40 units — a rejected write snaps the
   # plot back to the last accepted range (the per-binding force-send echo).
   ygate <- reactiveProxy(
     get = yrange,
     set = \(v) if (is.null(v) || (v[2] - v[1]) >= 40) yrange(v)
+  )
+
+  # The bound selection value: a reactiveProxy adapting plotly's (curve, point)
+  # frame <-> stable names, both against the current data. Because `get()`
+  # re-resolves names -> indices every time the binding fires, the selection
+  # follows the data instead of breaking when filtering renumbers the points.
+  selected <- reactiveProxy(
+    get = \() frame_from_names(filtered(), sel_cars()),
+    set = \(frame) sel_cars(names_from_frame(filtered(), frame))
   )
 
   # A plain Bootstrap grid, not bslib's `layout_sidebar`/`page_sidebar`: those
@@ -72,15 +116,10 @@ App <- function() {
           tags$input(
             type = "range", class = "form-range",
             min = "0", max = "300", step = "10",
-            # proxy value coerces the slider's string to an integer on write.
-            # Filtering changes the data — and because `color = ~cyl` makes one
-            # trace per cylinder group, it can change the trace COUNT, so the
-            # selection's (curve, point) indices no longer line up. Clear the
-            # selection on filter so it never highlights stale/mismatched points.
-            value = reactiveProxy(
-              get = hp_min,
-              set = \(v) { hp_min(as.integer(v)); selected(NULL) }
-            )
+            # No clear-on-filter: the selection is keyed on car name and the
+            # proxy re-resolves it against the current data, so filtering
+            # preserves it (filtered-out cars come back highlighted).
+            value = reactiveProxy(get = hp_min, set = \(v) hp_min(as.integer(v)))
           ),
           tags$label(class = "mt-2", "Drag mode"),
           tags$select(
@@ -104,18 +143,24 @@ App <- function() {
               "Hide 8-cyl trace"
             ),
             tags$button(
+              class = "btn btn-sm btn-outline-primary",
+              # Set the selection from outside the plot — keyed on names.
+              onClick = \() sel_cars(c("Maserati Bora", "Ferrari Dino")),
+              "Select sports cars"
+            ),
+            tags$button(
               class = "btn btn-sm btn-outline-secondary",
-              onClick = \() selected(NULL),
+              onClick = \() sel_cars(character()),
               "Clear selection"
             ),
             tags$button(
               class = "btn btn-sm btn-outline-danger",
-              # Bump uirevision AND release the bound ranges so the view fully
-              # resets to the spec's autorange.
+              # Bump uirevision AND release the bound ranges/selection so the
+              # view fully resets to the spec's autorange.
               onClick = \() {
                 revision(revision() + 1L)
                 xrange(NULL); yrange(NULL)
-                selected(NULL); visible(NULL)
+                sel_cars(character()); visible(NULL)
               },
               "Reset view"
             )
@@ -128,7 +173,7 @@ App <- function() {
         class = "col-md-9",
         PlotlyOutput(
         \() {
-          df <- cars[cars$hp >= hp_min(), ]
+          df <- filtered()
           plot_ly(
             df,
             x = ~mpg, y = ~hp, color = ~cyl,
@@ -176,11 +221,8 @@ App <- function() {
           class = "col-md-4",
           tags$strong("Selection"), tags$br(),
           \() {
-            s <- selected()
-            if (is.null(s)) return("none")
-            curve <- unlist(s$curve)
-            paste0(length(curve), " point(s); traces ",
-                   paste(sort(unique(curve)), collapse = "/"))
+            s <- sel_cars()
+            if (!length(s)) "none" else paste0(length(s), ": ", paste(s, collapse = ", "))
           },
           tags$br(),
           \() {

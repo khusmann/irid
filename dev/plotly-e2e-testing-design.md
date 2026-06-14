@@ -30,6 +30,8 @@ mount-level unit tests, because each was a property of that full loop:
 | `Plotly.restyle` array-wrapping for `selectedpoints` | plotly.js API contract | needs a real plotly graph to apply against |
 | Clearing a selection needs **layout.selections cleared FIRST, then a `selectedpoints` restyle** — while a drag selection is active plotly owns `selectedpoints`, so restyle is a silent no-op, and clearing only the dimming leaves the outline rectangle on screen | plotly's two-layer selection state | only a **real drag** populates `layout.selections`; `gd.emit('plotly_selected')` does not, so the emit shortcut never reproduces the outline and the bug stays hidden |
 | bslib `layout_sidebar`/`page_sidebar` render blank through irid — `process_tags` drops the tag's `.renderHooks`, so the sidebar grid wrapper never materializes (issue #27) | irid×bslib boundary, render-time hooks | a *layout* bug, not a round-trip one — the DOM exists but renders at 0×0; caught only by screenshot / bounding-box inspection |
+| Selection listeners (`plotly_selected` / `plotly_selecting` / `plotly_deselect`) lacked the `applying` guard, so a data-change `react()` fired a deselect echo that wrote back and **wiped the bound selection on every filter** | the own-mutation echo path | **masked when the binding is a plain `reactiveVal`** (echo re-sets the same value, a harmless no-op); only a *translating* `reactiveProxy` (index↔key) turns the spurious echo into a destructive clear |
+| Setting a selection programmatically over an **active drag selection** is a silent no-op — plotly owns `selectedpoints` until `layout.selections` is cleared; and the *clear-first* fix must NOT fire on the drag's own echo or it wipes the user's fresh marquee | plotly selection ownership + echo vs intent | needs a real drag, *then* a programmatic set, with `matchesCurrent` distinguishing "graph already shows this" (echo → skip) from "different selection" (intent → clear outline, apply) |
 
 The lesson: **PlotlyOutput needs a browser in the loop** — and for selection,
 **a real mouse drag, not an emitted event.** The harness below is the one used
@@ -167,11 +169,24 @@ build; the rest are the same shape and should be filled in.
 | 20 | Per-flush coalescing (one redraw) | a button writing spec + range together | a single `Plotly.react` (no flash); count redraws via a `plotly_afterplot` counter |
 | 21 | Destroy on `When`/`Match` flip | toggle a gate hiding the plot | `Plotly.purge` ran; widget id removed from the registry |
 | 22 | Sidebar/layout renders (regression for #27) | navigate, screenshot | control panel has non-zero width; `getBoundingClientRect().width > 0` |
+| 23 | **Identity-based selection survives filtering** | real drag, then filter (drops a `cyl` group → trace recompose 3→2), then unfilter | selected *names* unchanged across all three; `selectedpoints` re-resolves to survivors after filter and back to the full set after unfilter ✓ |
+| 24 | **Own-mutation echo does not clobber the binding** | real drag (bound via a translating proxy), then filter | the filter's `react()` deselect echo is swallowed by the `applying` guard — selection NOT wiped ✓ |
+| 25 | **Programmatic set over an active drag** | real drag, then click "Select sports cars" | new selection applies; stale `layout.selections` outline cleared (`length === 0`); a re-drag of the *same* points leaves its marquee intact (echo skipped by `matchesCurrent`) ✓ |
 
 Rows 18–21 need small dedicated fixtures (a subplot app, a ggplotly app, a
-gated app); the kitchen-sink `examples/plotly.R` covers 1–17 and 22. **Rows 13/14
-use emit and are necessary but not sufficient — they must be paired with the
-real-drag rows 16/17, or the outline-clearing class of bug slips through.**
+gated app); the kitchen-sink `examples/plotly.R` covers 1–17 and 22–25. **Rows
+13/14 use emit and are necessary but not sufficient — they must be paired with
+the real-drag rows 16/17/23/25, or the outline-clearing and own-echo classes of
+bug slip through.**
+
+> **Test selection bound to a *translating* `reactiveProxy`, not a plain
+> `reactiveVal`.** The own-mutation-echo bug (row 24) is *invisible* when the
+> bound value is a plain `reactiveVal` — the spurious deselect echo just re-sets
+> the same value, a harmless no-op. It only turns destructive when an index↔key
+> proxy sits behind the binding, where the echo's `null` clears the underlying
+> key set. The kitchen-sink fixture binds the proxy precisely so this class of
+> bug is exercised; a fixture that binds a bare `reactiveVal` would pass while
+> shipping the bug.
 
 ### 3.1 Selection is two-layer state — test (and clear) both
 
@@ -200,6 +215,19 @@ So a clear-selection test must assert on **all three** signals — readout `none
 `layout.selections.length === 0`, *and* every trace's `selectedpoints` unset —
 driven from a **real drag** (row 17). An emit-only test passes while the live
 plot still shows a stuck rectangle.
+
+**The same ownership quirk bites *setting*, not just clearing.** Quirk 1 above
+means a programmatic selection set over an *active* drag is also a silent no-op
+until `layout.selections` is cleared — so `apply` (set) and `applyDeferred`
+(clear) both clear the outline first, then restyle (to the value or `null`).
+That raises a second hazard: clearing the outline on *every* apply would wipe a
+user's own fresh marquee, because the drag echoes its selection straight back
+through the binding. The discriminator is `matchesCurrent` — it returns true
+when the graph already shows exactly the incoming selection (the drag's own
+echo → skip, marquee survives) and false for a genuinely different selection
+(programmatic set → clear the stale outline, apply). Row 25 must therefore
+assert *both* directions: a programmatic set clears the outline, and a re-drag
+of the same points keeps its marquee.
 
 ---
 
