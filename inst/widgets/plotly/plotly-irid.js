@@ -188,9 +188,19 @@
           });
         },
         applyDeferred: function (el) {
+          // Clearing a selection has two halves and the ORDER matters. While a
+          // drag selection is active plotly owns selectedpoints, so a restyle
+          // is a silent no-op; and erasing only the dimming leaves the outline
+          // rectangle on screen (the user otherwise has to double-click the
+          // plot to clear it). So: drop the active selection + outline FIRST
+          // (layout.selections), THEN clear the per-point dimming. Only the
+          // clear path touches layout.selections — the set/echo path must not,
+          // or it would erase the outline of the user's own fresh drag.
           var sel = el.data.map(function () { return null; });
           return mutate(function () {
-            return Plotly.restyle(el, { selectedpoints: sel });
+            return Plotly.relayout(el, { selections: null }).then(function () {
+              return Plotly.restyle(el, { selectedpoints: sel });
+            });
           });
         },
         matchesCurrent: function () { return false; }
