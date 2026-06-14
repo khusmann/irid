@@ -212,3 +212,18 @@ test_that("a batch driven by the current event sequence carries that sequence", 
 
   m$handle$destroy()
 })
+
+test_that("irid_jsonify_names converts named vectors to named lists (JSON objects)", {
+  # A named atomic vector would serialize via Shiny's keep_vec_names path and
+  # warn; a named list gives the same JSON object without the deprecation.
+  expect_identical(irid_jsonify_names(c("8" = "legendonly")), list(`8` = "legendonly"))
+  # Unnamed vectors stay vectors (JSON arrays); scalars pass through.
+  expect_identical(irid_jsonify_names(c(40, 200)), c(40, 200))
+  expect_identical(irid_jsonify_names("pan"), "pan")
+  expect_null(irid_jsonify_names(NULL))
+  # Recurses into lists, preserving keys.
+  expect_identical(
+    irid_jsonify_names(list(a = c(x = 1), b = 1:3)),
+    list(a = list(x = 1), b = 1:3)
+  )
+})
