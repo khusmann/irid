@@ -37,6 +37,7 @@ reference:
       - PlotOutput
       - TableOutput
       - DTOutput
+      - PlotlyOutput
 
   - title: Wiring
     desc: Configure per-slot dispatch and two-way widget props
