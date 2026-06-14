@@ -9,15 +9,14 @@
 
 # --- prerequisites / skip gate ----------------------------------------------
 
-# Gate every e2e case. Runs on CI and on CRAN-never; locally it is opt-in
-# (IRID_E2E=1) so a routine devtools::test() doesn't boot Chrome — set it when
-# working on something the e2e suite covers (e.g. plotly).
+# Gate every e2e case on the IRID_E2E=1 opt-in (plus CRAN + browser-present).
+# Set it locally when working on something the suite covers; in CI the dedicated
+# e2e job (.github/workflows/e2e.yaml) sets it, while the main R-CMD-check job
+# leaves it unset so e2e skips there. A bare devtools::test() doesn't boot Chrome.
 skip_unless_e2e <- function() {
   testthat::skip_on_cran()                       # CRAN policy: no browser
-  on_ci <- isTRUE(as.logical(Sys.getenv("CI")))  # what testthat::skip_on_ci uses
-  if (!on_ci && Sys.getenv("IRID_E2E") != "1") {
-    testthat::skip("e2e: opt in with IRID_E2E=1 (auto-runs on CI)")
-  }
+  testthat::skip_if(Sys.getenv("IRID_E2E") != "1",
+                    "e2e: set IRID_E2E=1 to run (see helper-e2e.R)")
   testthat::skip_if_not_installed("chromote")
   testthat::skip_if_not_installed("callr")
   testthat::skip_if(is.null(chromote::find_chrome()), "no Chrome found")
