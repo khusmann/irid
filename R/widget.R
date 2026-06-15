@@ -49,7 +49,12 @@ normalize_widget_events <- function(events) {
 #' control-flow nodes and `Output`). It emits a container element plus an
 #' init record that mount turns into an `irid-widget-init` custom message.
 #' The client's `irid.defineWidget("<name>", factory)` registration is
-#' looked up by `name` and called once per mount.
+#' looked up by `name` and called once per mount. The factory may return its
+#' `{update, destroy}` handle directly or a Promise of it — make it `async`
+#' and `await` whatever its construction needs first (a script-tag library
+#' global, an ESM `import`, a WASM init). irid buffers updates during the
+#' wait and disposes cleanly on a teardown mid-construction. See the JS-side
+#' API in `ARCHITECTURE.md`.
 #'
 #' **Props are two-way-capable by default**, exactly like DOM `value` /
 #' `checked`. A callable prop (`reactiveVal`, store leaf, `reactiveProxy`,

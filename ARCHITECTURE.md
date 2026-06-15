@@ -486,16 +486,26 @@ Sent after the swap/mutate that introduces the widget's container into
 the DOM. The client:
 
 1. Calls `Shiny.renderDependencies(msg.deps)` to inject `<script>` /
-   `<link>` tags. Deps are dedup'd by name across the session.
+   `<link>` tags. Deps are dedup'd by name across the session. Note this
+   injects the tags but does **not** await their execution — see the
+   async-factory contract below and `dev/widget-async-loading-design.md`.
 2. Looks up the factory registered under `msg.name`. If none is
-   registered yet (script still loading), buffers `{id, props}` under
-   `pendingInits[name]` and drains it when `irid.defineWidget(name, ...)`
-   eventually lands.
-3. Once the factory is available, calls
-   `factory(el, props, sendEvent, setProp)` and stores the returned
-   `{update, destroy}` handle in a per-id widget map.
-   The init message is idempotent — a duplicate for an already-mounted
-   id is dropped.
+   registered yet (factory script still loading), buffers `{id, props}`
+   under `pendingInits[name]` and drains it when `irid.defineWidget(name,
+   ...)` eventually lands. (This handles the *factory-not-registered*
+   race; the *library-global-not-loaded* race is the factory's own
+   concern — see below.)
+3. Once the factory is available, `mountWidget` reserves the id
+   synchronously (so a duplicate init is idempotent and an `irid-attr`
+   arriving mid-construction buffers rather than dropping), then calls
+   `factory(el, props, sendEvent, setProp)`. A factory returns its
+   `{update, destroy}` handle directly **or a Promise of it** (an async
+   factory — see the JS-side API). irid awaits the result, then
+   *commits*: stores the handle and flushes any buffered `update`. If the
+   widget was torn down while an async factory was still constructing,
+   the resolved handle is **disposed** (its `destroy` runs) instead of
+   adopted, so no detached zombie survives. The init message is
+   idempotent — a duplicate for an already-mounted id is dropped.
 
 ## Controlled Input: Optimistic Updates
 
@@ -674,8 +684,8 @@ buys full DOM↔widget symmetry with no per-prop two-way marker.
 ### JS-side API
 
 `window.irid` exposes one public method, `defineWidget(name, factory)`,
-where `factory` is `(el, props, sendEvent, setProp) -> { update, destroy }`.
-The factory runs once per mount:
+where `factory` is `(el, props, sendEvent, setProp) -> { update, destroy }`
+**or a Promise of that handle**. The factory runs once per mount:
 
 ```js
 irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
@@ -720,7 +730,40 @@ Contract notes:
 - `destroy` runs before the container is detached. The widget should
   tear down anything that isn't pure DOM under `el` (timers,
   ResizeObservers, web sockets, ...); DOM children of `el` will be
-  GC'd with detachment.
+  GC'd with detachment. Because an `async` factory's handle is committed
+  *after* the await (and a teardown can race it), `destroy` must tolerate
+  partially- or never-constructed state (guard on whatever the await was
+  supposed to produce).
+
+**Async construction (the load race, #26).** A factory may be `async` /
+return a Promise, which is how a widget waits for something its
+construction needs before building. irid awaits the return, **buffers**
+any `update` that arrives during the wait (coalesced, delivered once the
+handle commits), and **disposes** the handle if the widget was torn down
+mid-construction. The motivating case is a **script-tag library global**:
+`irid-widget-init` injects deps via `Shiny.renderDependencies`, which adds
+the `<script>` but does not await its execution — and the element's `load`
+event is unusable because Shiny injects through jQuery, which runs
+`<script src>` via an AJAX `globalEval` (no element load fires). So the
+factory polls for the global itself:
+
+```js
+irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
+  await whenPlotly();                 // poll until window.Plotly exists
+  var graph = Plotly.react(el, /* ... */);
+  return { update, destroy };
+});
+```
+
+The poll lives in the widget, not the substrate — "wait for `window.Plotly`"
+is a Plotly fact, and the transport stays generic (it only knows "the
+factory may be async"). The same shape covers the other async cases without
+any extra API: `await import("...")` for an ESM widget, `await engine.ready()`
+for a WASM library, `await fetch(...)` for construction-time config. A widget
+whose deps are already on the page (e.g. an ESM widget that imports at module
+load, like the CodeMirror example) just returns its handle synchronously — no
+`async`, identical to before. See `dev/widget-async-loading-design.md` for why
+this beats awaiting script `load` events or a substrate-level readiness gate.
 
 ### Lifecycle and dependencies
 

@@ -42,7 +42,12 @@ A irid widget construct with class \code{irid_widget}.
 control-flow nodes and \code{Output}). It emits a container element plus an
 init record that mount turns into an \code{irid-widget-init} custom message.
 The client's \code{irid.defineWidget("<name>", factory)} registration is
-looked up by \code{name} and called once per mount.
+looked up by \code{name} and called once per mount. The factory may return its
+\verb{\{update, destroy\}} handle directly or a Promise of it — make it \code{async}
+and \code{await} whatever its construction needs first (a script-tag library
+global, an ESM \code{import}, a WASM init). irid buffers updates during the
+wait and disposes cleanly on a teardown mid-construction. See the JS-side
+API in \code{ARCHITECTURE.md}.
 }
 \details{
 \strong{Props are two-way-capable by default}, exactly like DOM \code{value} /
