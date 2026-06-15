@@ -7,6 +7,15 @@
 # bundle, no separate JS file, no `inst/widgets/cm6/` — useful as a demo;
 # not viable for offline / air-gapped runs (CDN required).
 #
+# This is also the canonical **synchronous-factory** example. The ES module's
+# `import`s resolve before the `defineWidget` call runs, so EditorView/
+# EditorState are already in scope when the factory executes — it returns its
+# `{update, destroy}` handle directly, no `async`. Contrast PlotlyOutput, which
+# wraps a script-tag library global (`window.Plotly`) delivered by a *separate*
+# dependency with no execution-order guarantee, and so uses an async factory
+# that `await`s the global. Rule of thumb: deps already in scope at
+# registration -> sync; waiting on a separately-loaded global -> async.
+#
 # What the app exercises:
 #   - A `When`-gated editor (mount/teardown via the detach walker).
 #   - A reactive `language` prop — switching the `<select>` reconfigures

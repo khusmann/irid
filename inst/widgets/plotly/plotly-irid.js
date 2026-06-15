@@ -5,9 +5,11 @@
 // the R-side translation table that maps each named state arg to a spec path
 // and a source event.
 //
-// Load order: irid.js (which defines window.irid) is on the page already;
-// this script ships as a widget dep and runs at init time. The pendingInits
-// buffer in irid.js absorbs any factory-vs-init race regardless.
+// Load order: irid.js (which defines window.irid) is on the page already; this
+// script ships as a widget dep and runs at init time. Two races are handled:
+// the factory-vs-init race by irid's pendingInits buffer, and the
+// plotly-main-global-not-loaded race by this factory being `async` and awaiting
+// `waitForPlotly()` before it touches Plotly (see below).
 
 (function () {
   if (!window.irid || typeof window.irid.defineWidget !== "function") return;
@@ -95,19 +97,27 @@
 
   // --- factory ------------------------------------------------------------
 
-  // plotly-main and this factory ship in the same init message, so Plotly
-  // may not have executed yet when the factory first runs. Gate every Plotly
-  // call behind this.
-  function whenPlotly() {
-    if (window.Plotly) return Promise.resolve();
+  // plotly-main is delivered by a Shiny dependency in the same init message, so
+  // its `window.Plotly` global may not have executed yet when this factory
+  // first runs (its `load` event is unusable — Shiny injects deps via jQuery,
+  // which executes <script src> through an AJAX globalEval, so no element load
+  // fires; see the Widgets section of ARCHITECTURE.md). Poll until the global
+  // exists and resolve with it. The factory `await`s this ONCE up front and
+  // captures the result in a local `Plotly`, so every call below is guaranteed
+  // defined — irid's async-factory contract holds back updates until the
+  // returned handle commits.
+  function waitForPlotly() {
+    if (window.Plotly) return Promise.resolve(window.Plotly);
     return new Promise(function (resolve) {
       var t = setInterval(function () {
-        if (window.Plotly) { clearInterval(t); resolve(); }
+        if (window.Plotly) { clearInterval(t); resolve(window.Plotly); }
       }, 30);
     });
   }
 
-  window.irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
+  window.irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
+    var Plotly = await waitForPlotly();   // captured local; defined from here on
+
     var applyDepth = 0;                // >0 while our own graph mutations run
     var listenersAttached = false;
     var ready = false;                 // first render committed?
@@ -319,11 +329,9 @@
     }
 
     function render() {
-      return whenPlotly().then(function () {
-        return mutate(function () {
-          var m = merge();
-          return Plotly.react(el, m.data, m.layout, m.config || {});
-        });
+      return mutate(function () {
+        var m = merge();
+        return Plotly.react(el, m.data, m.layout, m.config || {});
       }).then(function () {
         ready = true;
         if (!listenersAttached) { attachListeners(); listenersAttached = true; }
@@ -420,9 +428,9 @@
         });
         if (reactNeeded || !ready) render(); // one redraw for the whole batch
       },
-      // Guard on Plotly: a widget gated off before plotly.js finished loading
-      // (the whenPlotly race) can be destroyed with Plotly still undefined.
-      destroy: function () { if (window.Plotly) Plotly.purge(el); }
+      // `Plotly` is the captured local — the handle only exists past the
+      // `await`, so it's always defined here. No guard needed.
+      destroy: function () { Plotly.purge(el); }
     };
   });
 })();
