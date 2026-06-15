@@ -95,9 +95,14 @@
 
   // --- factory ------------------------------------------------------------
 
-  // plotly-main and this factory ship in the same init message, so Plotly
-  // may not have executed yet when the factory first runs. Gate every Plotly
-  // call behind this.
+  // plotly-main is delivered by a Shiny dependency in the same init message, so
+  // its `window.Plotly` global may not have executed yet when this factory
+  // first runs (its `load` event is unusable — Shiny injects deps via jQuery,
+  // which executes <script src> through an AJAX globalEval, so no element load
+  // fires; see dev/widget-async-loading-design.md). Poll for the global, then
+  // resolve. The factory `await`s this ONCE up front; irid's async-factory
+  // contract holds back updates until the returned handle commits, so nothing
+  // below ever touches an undefined Plotly.
   function whenPlotly() {
     if (window.Plotly) return Promise.resolve();
     return new Promise(function (resolve) {
@@ -107,7 +112,9 @@
     });
   }
 
-  window.irid.defineWidget("plotly", function (el, props, sendEvent, setProp) {
+  window.irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
+    await whenPlotly();                // Plotly guaranteed below this line
+
     var applyDepth = 0;                // >0 while our own graph mutations run
     var listenersAttached = false;
     var ready = false;                 // first render committed?
@@ -319,11 +326,9 @@
     }
 
     function render() {
-      return whenPlotly().then(function () {
-        return mutate(function () {
-          var m = merge();
-          return Plotly.react(el, m.data, m.layout, m.config || {});
-        });
+      return mutate(function () {
+        var m = merge();
+        return Plotly.react(el, m.data, m.layout, m.config || {});
       }).then(function () {
         ready = true;
         if (!listenersAttached) { attachListeners(); listenersAttached = true; }
@@ -420,8 +425,8 @@
         });
         if (reactNeeded || !ready) render(); // one redraw for the whole batch
       },
-      // Guard on Plotly: a widget gated off before plotly.js finished loading
-      // (the whenPlotly race) can be destroyed with Plotly still undefined.
+      // The handle only commits after `await whenPlotly()`, so Plotly is
+      // loaded by the time destroy can run; the guard is cheap defense.
       destroy: function () { if (window.Plotly) Plotly.purge(el); }
     };
   });
