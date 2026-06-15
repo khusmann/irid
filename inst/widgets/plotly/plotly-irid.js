@@ -116,7 +116,7 @@
   }
 
   window.irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
-    const Plotly = await waitForPlotly();   // captured local; defined from here on
+    var Plotly = await waitForPlotly();   // captured local; defined from here on
 
     var applyDepth = 0;                // >0 while our own graph mutations run
     var listenersAttached = false;
