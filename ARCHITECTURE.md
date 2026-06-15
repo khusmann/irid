@@ -741,11 +741,11 @@ construction needs before building. irid awaits the return, **buffers**
 any `update` that arrives during the wait (coalesced, delivered once the
 handle commits), and **disposes** the handle if the widget was torn down
 mid-construction. The motivating case is a **script-tag library global**:
-`irid-widget-init` injects deps via `Shiny.renderDependencies`, which runs
-the dep's `head` HTML (the inlined `<script>`) but does not await its
-execution — and no usable `load` event fires, because Shiny injects through
-jQuery, which executes inline `<script>` via `globalEval` against no DOM
-element. So the factory polls for the global itself:
+`irid-widget-init` injects deps via `Shiny.renderDependencies`, which adds
+the `<script>` but does not await its execution — and the element's `load`
+event is unusable because Shiny injects through jQuery, which runs
+`<script src>` via an AJAX `globalEval` (no element load fires). So the
+factory polls for the global itself:
 
 ```js
 irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
@@ -800,27 +800,13 @@ Widget deps ride a single channel — the `irid-widget-init` message —
 so both top-level mounts and dynamically-mounted widgets (inside
 `When` / `Each` / `Match`) follow one code path. UI-attached deps are
 auto-registered as Shiny static resources, but custom-message deps are
-not. `register_widget_dep(dep)` runs before each init: it resolves
-`package`-relative `src$file` to an absolute path and then **inlines**
-each file-backed script/stylesheet directly into the dep's `head` HTML
-(`<script>…</script>` / `<style>…</style>`), clearing `src`/`script`/
-`stylesheet`. href-only deps (CDN) and head-only deps have no `src$file`
-and pass through unchanged.
-
-Inlining (rather than registering a resource path via
-`shiny::createWebDependency()` → `addResourcePath`) is what makes widgets
-work under **shinylive**. shinylive serves only deps attached to the page
-at render time; a resource path registered mid-session — which is how
-*every* widget dep ships — 404s there, because its request bridge only
-invokes the Shiny app handler and has no httpuv `staticPaths` layer.
-Inlining carries the bytes in the message itself, needs no resource path,
-and in shinylive is byte-for-byte a wash (webR has no real HTTP layer, so
-a would-be file `GET` crosses the same in-browser bridge as the message).
-The cost is in *server* Shiny, where a resource path would be browser-cached
-across reloads — so `widget_deps_to_send()` tracks each `name@version` it has sent
-on `session$userData` and ships the (often multi-MB) content only once per
-session. `Shiny.renderDependencies` also dedups *rendering* by name, so
-re-firing `irid-widget-init` on a remount is a no-op for the deps step.
+not, so `register_widget_dep(dep)` runs before each init: it resolves
+`package`-relative `src$file` to an absolute path and routes file-backed
+deps through `shiny::createWebDependency()` (which calls
+`addResourcePath` and rewrites `src` to an href). href-only deps and
+head-only deps pass through unchanged. `Shiny.renderDependencies`
+dedups by name across the session, so re-firing `irid-widget-init` on
+a remount is a no-op for the deps step.
 
 ### Force-send is per-binding
 

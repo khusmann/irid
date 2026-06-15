@@ -100,7 +100,7 @@
   // plotly-main is delivered by a Shiny dependency in the same init message, so
   // its `window.Plotly` global may not have executed yet when this factory
   // first runs (its `load` event is unusable — Shiny injects deps via jQuery,
-  // which executes the inlined <script> through globalEval, so no element load
+  // which executes <script src> through an AJAX globalEval, so no element load
   // fires; see the Widgets section of ARCHITECTURE.md). Poll until the global
   // exists and resolve with it. The factory `await`s this ONCE up front and
   // captures the result in a local `Plotly`, so every call below is guaranteed
