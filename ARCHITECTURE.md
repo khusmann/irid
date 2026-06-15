@@ -488,7 +488,7 @@ the DOM. The client:
 1. Calls `Shiny.renderDependencies(msg.deps)` to inject `<script>` /
    `<link>` tags. Deps are dedup'd by name across the session. Note this
    injects the tags but does **not** await their execution — see the
-   async-factory contract below and `dev/widget-async-loading-design.md`.
+   async-factory contract below.
 2. Looks up the factory registered under `msg.name`. If none is
    registered yet (factory script still loading), buffers `{id, props}`
    under `pendingInits[name]` and drains it when `irid.defineWidget(name,
@@ -762,8 +762,21 @@ any extra API: `await import("...")` for an ESM widget, `await engine.ready()`
 for a WASM library, `await fetch(...)` for construction-time config. A widget
 whose deps are already on the page (e.g. an ESM widget that imports at module
 load, like the CodeMirror example) just returns its handle synchronously — no
-`async`, identical to before. See `dev/widget-async-loading-design.md` for why
-this beats awaiting script `load` events or a substrate-level readiness gate.
+`async`, identical to before.
+
+This was chosen over the alternatives — awaiting the script `load` event,
+self-injecting `<script>` tags to obtain a real load event, or a substrate-level
+readiness gate keyed on a declared predicate — because each of those bets on a
+Shiny dependency-injection internal, whereas polling for the global waits on the
+dependency's *outcome* (the global appearing), which is agnostic to *how* Shiny
+loads it. That distinction is not academic: the load-event approach is not merely
+fragile but already broken, because Shiny's jQuery-`globalEval` injection path
+(observed on Shiny 1.7.4 / jQuery 3.6.0) fires no element `load` at all. The
+async-factory contract does not depend on that behavior — only a widget's own
+poll does, and a poll survives any loading mechanism. irid deliberately ships no
+`waitFor`/poll helper: the wait is library-specific (a CDN/ESM widget instead
+`await`s its own `import`), so it stays in the widget, holding irid's public
+surface to the contract alone.
 
 ### Lifecycle and dependencies
 

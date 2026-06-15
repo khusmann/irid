@@ -1,7 +1,7 @@
 # End-to-end tests for the async-factory widget contract (#26). Uses the
 # synthetic `testw` widget (fixtures/widget-async.R) whose factory blocks on
-# `window.__testGo`, making the construction window observable. See
-# dev/widget-async-loading-design.md and helper-e2e.R.
+# `window.__testGo`, making the construction window observable. See the Widgets
+# section of ARCHITECTURE.md (async-factory contract) and helper-e2e.R.
 
 tw <- function(app) e2e_eval(app, "window.__tw || null")
 go <- function(app) e2e_eval(app, "window.__testGo = true")

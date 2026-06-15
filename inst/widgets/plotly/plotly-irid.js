@@ -99,8 +99,8 @@
   // its `window.Plotly` global may not have executed yet when this factory
   // first runs (its `load` event is unusable — Shiny injects deps via jQuery,
   // which executes <script src> through an AJAX globalEval, so no element load
-  // fires; see dev/widget-async-loading-design.md). Poll for the global, then
-  // resolve. The factory `await`s this ONCE up front; irid's async-factory
+  // fires; see the Widgets section of ARCHITECTURE.md). Poll for the global,
+  // then resolve. The factory `await`s this ONCE up front; irid's async-factory
   // contract holds back updates until the returned handle commits, so nothing
   // below ever touches an undefined Plotly.
   function whenPlotly() {
