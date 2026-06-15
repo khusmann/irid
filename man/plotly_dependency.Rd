@@ -11,6 +11,7 @@ A list of \code{html_dependency} objects.
 }
 \description{
 The plotly.js bundle (sourced from the suggested \code{{plotly}} package) plus the
-irid-plotly factory script. Passed to \code{IridWidget(deps = ...)}.
+irid-plotly factory script, carried by \code{\link[=PlotlyOutput]{PlotlyOutput()}} and page-attached via
+its container (see \code{process_tags}' \code{irid_widget} branch).
 }
 \keyword{internal}

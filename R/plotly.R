@@ -245,7 +245,8 @@ plotly_widget_dependency <- function() {
 #' Plotly html dependencies for PlotlyOutput
 #'
 #' The plotly.js bundle (sourced from the suggested `{plotly}` package) plus the
-#' irid-plotly factory script. Passed to `IridWidget(deps = ...)`.
+#' irid-plotly factory script, carried by [PlotlyOutput()] and page-attached via
+#' its container (see `process_tags`' `irid_widget` branch).
 #'
 #' @return A list of `html_dependency` objects.
 #' @keywords internal

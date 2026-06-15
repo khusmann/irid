@@ -339,7 +339,23 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       container$attribs$id <- id
       container$attribs[["data-irid-widget"]] <- node$name
 
-      return(walk(container))
+      # Attach the widget's deps to its container so htmltools collects them
+      # into the page <head> at render. For a statically-placed widget this
+      # page-attaches the library the normal Shiny way — served + cached, and
+      # crucially served under shinylive (whose request bridge has no
+      # static-path layer, so the per-mount resource path the deps also
+      # register would 404). The per-mount copy still ships in the
+      # `irid-widget-init` message; `Shiny.renderDependencies` dedups it by
+      # name against the page-attached one, so there is no double load. A
+      # widget that appears *only* inside control flow (`When`/`Each`/`Match`)
+      # is behind a closure not walked at render, so it is not page-attached;
+      # declare its deps in the static tree (e.g. `plotly_dependency()`) to
+      # preload them there.
+      out <- walk(container)
+      if (length(node$deps) > 0L) {
+        out <- htmltools::attachDependencies(out, node$deps, append = TRUE)
+      }
+      return(out)
     }
 
     if (inherits(node, "irid_each")) {

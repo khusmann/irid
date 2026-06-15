@@ -796,17 +796,49 @@ branch flips, `Each` shape-change rebuilds, removes — those rebuild the
 widget fresh, matching how `<input>` focus/scroll/selection state
 behaves in the same situations.
 
-Widget deps ride a single channel — the `irid-widget-init` message —
+Widget deps travel two complementary ways.
+
+**Per-mount, via the message.** Deps ride the `irid-widget-init` message
 so both top-level mounts and dynamically-mounted widgets (inside
-`When` / `Each` / `Match`) follow one code path. UI-attached deps are
-auto-registered as Shiny static resources, but custom-message deps are
-not, so `register_widget_dep(dep)` runs before each init: it resolves
-`package`-relative `src$file` to an absolute path and routes file-backed
-deps through `shiny::createWebDependency()` (which calls
-`addResourcePath` and rewrites `src` to an href). href-only deps and
-head-only deps pass through unchanged. `Shiny.renderDependencies`
-dedups by name across the session, so re-firing `irid-widget-init` on
-a remount is a no-op for the deps step.
+`When` / `Each` / `Match`) follow one code path. Message deps are not
+auto-registered as Shiny static resources, so `register_widget_dep(dep)`
+runs before each init: it resolves `package`-relative `src$file` to an
+absolute path and routes file-backed deps through
+`shiny::createWebDependency()` (which calls `addResourcePath` and rewrites
+`src` to an href). href-only deps (CDN) and head-only deps pass through
+unchanged. `Shiny.renderDependencies` dedups by name across the session,
+so re-firing `irid-widget-init` on a remount is a no-op for the deps step.
+
+**At render, via the container.** `process_tags` also attaches each
+widget's deps to its container tag, so htmltools collects them into the
+page `<head>` the normal Shiny way — served and browser-cached, and
+critically **served under shinylive**. shinylive's in-browser request
+bridge has no httpuv `staticPaths` layer, so a resource path registered
+mid-session (the `createWebDependency` form above) 404s there; a
+statically-placed widget would otherwise load blank. Page-attaching the
+dep sidesteps that. The two paths coexist without double-loading:
+`Shiny.renderDependencies` dedups the per-mount copy by name against the
+already-rendered page-attached one (verified — see the spikes below).
+
+This page-attachment only reaches widgets present in the **static** tree at
+render. A widget that appears *only* inside control flow (`When` / `Each` /
+`Match`) is behind a closure not walked until the server renders it, so its
+deps are not collected — and under shinylive (only) such a widget loads
+blank, because the per-mount resource path 404s there. This is a **known
+limitation**; the proper fix is shinylive honoring mid-session resource
+paths (issue #34). Until then the public-API workaround is to render one
+instance of the widget statically — hidden if need be — so its container
+page-attaches the library:
+
+```r
+# preload plotly's assets so plots mounted only inside Each/When load under
+# shinylive; drop once shinylive serves mid-session resource paths
+tags$div(style = "display:none", PlotlyOutput(\() plotly::plot_ly()))
+```
+
+(`plotly_dependency()` is the internal dep list behind this; it is
+deliberately unexported — exporting an ergonomic preload handle is a clean
+additive follow-up if the dynamic-only-shinylive case proves common.)
 
 ### Force-send is per-binding
 
