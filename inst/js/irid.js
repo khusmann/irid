@@ -10,11 +10,20 @@
   var STALE_CLEAR_DELAY = 100;  // ms to wait after idle before removing overlay
 
   // --- Widget registry ---
-  // `defined` maps a widget registry name to its factory. Inits that
-  // arrive before the factory is registered (script load race) are
-  // buffered under `pendingInits[name]` and drained in arrival order
-  // when defineWidget(name, ...) lands. `widgets` is the live per-id
-  // table: `{id -> {handle, name}}` where `handle = {update, destroy}`.
+  // `defined` maps a widget registry name to its factory. Inits that arrive
+  // before the factory is registered (factory-script load race) are buffered
+  // under `pendingInits[name]` and drained in arrival order when
+  // defineWidget(name, ...) lands. `widgets` is the live per-id table:
+  // `{id -> {handle, name, pending, destroyed}}`.
+  //
+  // A factory may be SYNCHRONOUS (returns the handle) or ASYNCHRONOUS (returns
+  // a Promise of the handle — e.g. `async function` that awaits a library
+  // global, an ESM import, or a WASM init; see Widgets in ARCHITECTURE.md). The
+  // entry is created synchronously at mount with `handle = null`; for an async
+  // factory it stays that way until the promise resolves and `handle` is filled
+  // in. `pending` buffers any `update` payloads that land during that window
+  // (flushed once the handle commits); `destroyed` records a teardown that
+  // happened mid-construction, so the resolved handle is disposed, not adopted.
   var defined = new Map();
   var pendingInits = {};
   var widgets = {};
@@ -199,11 +208,16 @@
       // (defense in depth; mount sends init before any attr).
       var w = widgets[msg.id];
       if (!w) return;
-      if (typeof w.handle.update === 'function') {
-        // Always a `values: {attr -> value}` map (one or more keys),
-        // coalesced server-side per widget per flush. A single-prop change
-        // is just a one-entry map.
-        w.handle.update(msg.values);
+      // `values` is always a `{attr -> value}` map (one or more keys),
+      // coalesced server-side per widget per flush. A single-prop change is
+      // just a one-entry map.
+      if (w.handle) {
+        if (typeof w.handle.update === 'function') w.handle.update(msg.values);
+      } else {
+        // Async construction still in flight — buffer, coalescing by key
+        // (later wins, same as the server-side per-flush batch). Flushed when
+        // the handle commits in mountWidget.
+        w.pending = Object.assign(w.pending || {}, msg.values);
       }
       return;
     }
@@ -636,7 +650,7 @@
   // --- Widget registry & lifecycle ---
 
   function mountWidget(id, name, props, factory) {
-    if (widgets[id]) return;  // idempotent — duplicate init is a no-op
+    if (widgets[id]) return;  // idempotent — duplicate init (in-flight or live)
     var el = document.getElementById(id);
     if (!el) {
       // The init message is supposed to arrive after the swap/mutate
@@ -652,8 +666,63 @@
     var setProp = function(key, value) {
       setWidgetProp(id, key, value);
     };
-    var handle = factory(el, props, sendEvent, setProp) || {};
-    widgets[id] = { handle: handle, name: name };
+    // Reserve the id synchronously so a duplicate init is idempotent, an attr
+    // arriving mid-construction buffers (see irid-attr), and a teardown
+    // mid-construction is recorded.
+    var entry = { handle: null, name: name, pending: null, destroyed: false };
+    widgets[id] = entry;
+
+    // Adopt the resolved handle — unless the widget was torn down (or its id
+    // re-mounted) while an async factory was still constructing, in which case
+    // dispose the just-built handle instead of registering a zombie.
+    function commit(handle) {
+      handle = handle || {};
+      if (entry.destroyed || widgets[id] !== entry) {
+        if (typeof handle.destroy === 'function') {
+          try { handle.destroy(); } catch (e) { console.error(e); }
+        }
+        return;
+      }
+      entry.handle = handle;
+      if (entry.pending) {
+        if (typeof handle.update === 'function') handle.update(entry.pending);
+        entry.pending = null;
+      }
+    }
+
+    // A factory may return the handle directly (sync) or a Promise of it
+    // (async — e.g. `async function` awaiting a library global / import / WASM
+    // init). Sync factories commit synchronously, preserving today's timing.
+    var result;
+    try {
+      result = factory(el, props, sendEvent, setProp);
+    } catch (e) {
+      console.error('irid: widget factory threw for ' + name, e);
+      if (widgets[id] === entry) delete widgets[id];
+      return;
+    }
+    if (result && typeof result.then === 'function') {
+      result.then(commit, function(err) {
+        console.error('irid: widget factory failed for ' + name, err);
+        if (widgets[id] === entry) delete widgets[id];
+      });
+    } else {
+      commit(result);
+    }
+  }
+
+  // Tear down one widget id: run its destroy hook if the handle has committed,
+  // and flag the entry so an async factory still in flight disposes the handle
+  // it's about to produce (see commit() in mountWidget) instead of leaving a
+  // detached zombie.
+  function destroyWidget(id) {
+    var w = widgets[id];
+    if (!w) return;
+    w.destroyed = true;
+    if (w.handle && typeof w.handle.destroy === 'function') {
+      try { w.handle.destroy(); } catch (e) { console.error(e); }
+    }
+    delete widgets[id];
   }
 
   // Destroy any widget instances inside `root` (an Element, fragment,
@@ -662,25 +731,24 @@
   // while the subtree is still attached / intact.
   function destroyWidgetsIn(root) {
     if (root.nodeType === 1 && root.hasAttribute('data-irid-widget')) {
-      var w = widgets[root.id];
-      if (w && w.handle && typeof w.handle.destroy === 'function') {
-        try { w.handle.destroy(); } catch (e) { console.error(e); }
-      }
-      delete widgets[root.id];
+      destroyWidget(root.id);
     }
     if (typeof root.querySelectorAll === 'function') {
       var els = root.querySelectorAll('[data-irid-widget]');
-      for (var i = 0; i < els.length; i++) {
-        var w2 = widgets[els[i].id];
-        if (w2 && w2.handle && typeof w2.handle.destroy === 'function') {
-          try { w2.handle.destroy(); } catch (e) { console.error(e); }
-        }
-        delete widgets[els[i].id];
-      }
+      for (var i = 0; i < els.length; i++) destroyWidget(els[i].id);
     }
   }
 
   window.irid = {
+    // defineWidget(name, factory) — `factory(el, props, sendEvent, setProp)`
+    // returns the `{update, destroy}` handle, OR a Promise of it. Make the
+    // factory `async` and `await` whatever its construction needs first — a
+    // library global delivered by a Shiny dependency (poll for it; see the
+    // PlotlyOutput factory's `whenPlotly`), an ESM `import(...)`, a WASM init.
+    // irid awaits the return before delivering updates, buffering any that
+    // arrive meanwhile and disposing cleanly if the widget is torn down
+    // mid-construction. A widget whose deps are already present (e.g. an ESM
+    // widget) just returns the handle synchronously.
     defineWidget: function(name, factory) {
       defined.set(name, factory);
       var queue = pendingInits[name];
