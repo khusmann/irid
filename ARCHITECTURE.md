@@ -812,13 +812,19 @@ so re-firing `irid-widget-init` on a remount is a no-op for the deps step.
 **At render, via the container.** `process_tags` also attaches each
 widget's deps to its container tag, so htmltools collects them into the
 page `<head>` the normal Shiny way — served and browser-cached, and
-critically **served under shinylive**. shinylive's in-browser request
-bridge has no httpuv `staticPaths` layer, so a resource path registered
-mid-session (the `createWebDependency` form above) 404s there; a
-statically-placed widget would otherwise load blank. Page-attaching the
-dep sidesteps that. The two paths coexist without double-loading:
-`Shiny.renderDependencies` dedups the per-mount copy by name against the
-already-rendered page-attached one (verified — see the spikes below).
+critically **served under shinylive**. This is what makes file-backed
+widget deps load there. shinylive *does* serve resource paths registered
+mid-session — but only ones that ride Shiny's **native render pipeline**
+(initial UI, `renderUI`, outputs, `insertUI`). The per-mount delivery
+above registers its path with the same `addResourcePath`, but ships it on
+a custom-message side channel loaded by a bare `Shiny.renderDependencies`,
+which shinylive's static serving is *not* wired to — so that path 404s
+under shinylive (independent of the client call: `Shiny.renderContent`
+invoked from a custom message 404s too). Page-attaching routes the dep
+through the native pipeline instead, so it loads. The two paths coexist
+without double-loading: `Shiny.renderDependencies` dedups the per-mount
+copy by name against the already-rendered page-attached one. (All verified
+with throwaway spikes under `dev/spikes/`, build-ignored; see issue #34.)
 
 Page-attaching has one ordering consequence: a widget's factory script
 (`<name>-irid.js`) now lands in the `<head>` **ahead of `irid.js`**, so
@@ -835,11 +841,13 @@ This page-attachment only reaches widgets present in the **static** tree at
 render. A widget that appears *only* inside control flow (`When` / `Each` /
 `Match`) is behind a closure not walked until the server renders it, so its
 deps are not collected — and under shinylive (only) such a widget loads
-blank, because the per-mount resource path 404s there. This is a **known
-limitation**; the proper fix is shinylive honoring mid-session resource
-paths (issue #34). Until then the public-API workaround is to render one
-instance of the widget statically — hidden if need be — so its container
-page-attaches the library:
+blank, because its deps then reach the client solely via the custom-message
+side channel shinylive won't serve. This is a **known limitation**; the
+principled fix is to deliver widget deps through Shiny's native pipeline
+(e.g. `insertUI`/outputs) rather than the custom message (issue #34). Until
+then the public-API workaround is to render one instance of the widget
+statically — hidden if need be — so its container page-attaches the
+library:
 
 ```r
 # preload plotly's assets so plots mounted only inside Each/When load under

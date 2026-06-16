@@ -346,6 +346,12 @@
       }).then(function () {
         ready = true;
         if (!listenersAttached) { attachListeners(); listenersAttached = true; }
+        // Readiness marker: rendered AND event listeners wired. `Plotly.react`
+        // sets `el.data` before this `.then` runs, so data presence alone does
+        // not mean the `plotly_relayout`/`plotly_click` handlers are attached.
+        // An external observer dispatching a gesture (the e2e suite) must wait
+        // for this attribute, or a gesture fired in that window is lost.
+        el.setAttribute("data-irid-plotly-ready", "1");
       });
     }
 
