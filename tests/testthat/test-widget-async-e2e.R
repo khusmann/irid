@@ -12,6 +12,10 @@ test_that("a synchronous factory commits immediately (the commit(result) branch)
 
   # No gate, no __testGo — a sync factory commits synchronously on mount.
   e2e_wait_until(app, "window.__tws && window.__tws.inited")
+  # The widget can commit before irid finishes wiring the PAGE's DOM listeners
+  # (#btn-change); a click dispatched in that cold-boot window is lost. Wait for
+  # irid to settle so the button is bound before clicking it.
+  e2e_wait_idle(app)
   expect_equal(tws(app)$initialLabel, "A")  # seeded from init props
 
   # Updates flow normally through the committed handle. (The binding observer's
