@@ -20,10 +20,23 @@ e2e_plt_eval <- function(app, body, gd = PLOTLY_GD, await = FALSE) {
 
 # Wait for the plot to render N traces (the readiness gate).
 e2e_plt_await <- function(app, n_traces, gd = PLOTLY_GD, timeout = 40) {
+  # Two readiness gates, because the plot becoming visible does NOT mean the app
+  # is ready to drive — and the deps-on-the-page change (#35) made the widget
+  # render fast enough to expose both windows on a cold boot:
+  #
+  #  1. marker `data-irid-plotly-ready`: the factory finished rendering AND
+  #     attached its own gd.on('plotly_*') handlers. `Plotly.react` sets
+  #     `el.data` before that `.then` runs, so waiting on data alone loses a
+  #     gesture fired right after (the onRelayout/onClick flake).
+  #  2. irid idle: irid finished wiring the PAGE's DOM listeners (buttons,
+  #     inputs). The marker can fire before that, so a click dispatched right
+  #     after it can hit an unbound button and be lost (the server->client
+  #     push flake). `e2e_wait_idle` keys off irid's own settle tracker.
   e2e_wait_until(app, sprintf(
-    "window.Plotly && document.querySelector('%s') && document.querySelector('%s').data && document.querySelector('%s').data.length === %d",
-    gd, gd, gd, n_traces
+    "window.Plotly && document.querySelector('%s') && document.querySelector('%s').data && document.querySelector('%s').data.length === %d && document.querySelector('%s').getAttribute('data-irid-plotly-ready') === '1'",
+    gd, gd, gd, n_traces, gd
   ), timeout = timeout)
+  e2e_wait_idle(app)
   invisible(app)
 }
 
