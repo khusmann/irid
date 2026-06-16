@@ -53,11 +53,14 @@ App <- function() {
     tags$label(class = "form-label", "Select a dataset:"),
     tags$select(
       class = "form-select mb-3",
-      value = dataset_name,
-      onChange = \() {
-        selected_columns(character(0))
-        choice("")
-      },
+      value = reactiveProxy(
+        get = dataset_name,
+        set = \(name) {
+          dataset_name(name)
+          selected_columns(character(0))
+          choice("")
+        }
+      ),
       Each(
         \() names(all_datasets),
         \(name) tags$option(value = name, name),
@@ -68,13 +71,16 @@ App <- function() {
     tags$label(class = "form-label", "Add a column:"),
     tags$select(
       class = "form-select mb-3",
-      value = choice,
-      onChange = \(event) {
-        if (nzchar(event$value)) {
-          selected_columns(c(selected_columns(), event$value))
+      value = reactiveProxy(
+        get = choice,
+        set = \(col) {
+          if (nzchar(col)) {
+            selected_columns(c(selected_columns(), col))
+          }
+          # Always snap back to the placeholder; `choice` stays "".
           choice("")
         }
-      },
+      ),
       tags$option(value = "", "Select a column..."),
       Each(available, \(col) tags$option(value = col, col), by = identity)
     ),
