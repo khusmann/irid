@@ -243,7 +243,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
     props <- irid_jsonify_names(props)
-    deps <- widget_deps_to_send(wi$deps, session)
+    deps <- lapply(wi$deps, register_widget_dep)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
       name = wi$name,

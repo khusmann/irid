@@ -741,11 +741,11 @@ construction needs before building. irid awaits the return, **buffers**
 any `update` that arrives during the wait (coalesced, delivered once the
 handle commits), and **disposes** the handle if the widget was torn down
 mid-construction. The motivating case is a **script-tag library global**:
-`irid-widget-init` injects deps via `Shiny.renderDependencies`, which runs
-the dep's `head` HTML (the inlined `<script>`) but does not await its
-execution — and no usable `load` event fires, because Shiny injects through
-jQuery, which executes inline `<script>` via `globalEval` against no DOM
-element. So the factory polls for the global itself:
+`irid-widget-init` injects deps via `Shiny.renderDependencies`, which adds
+the `<script>` but does not await its execution — and the element's `load`
+event is unusable because Shiny injects through jQuery, which runs
+`<script src>` via an AJAX `globalEval` (no element load fires). So the
+factory polls for the global itself:
 
 ```js
 irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
@@ -796,31 +796,60 @@ branch flips, `Each` shape-change rebuilds, removes — those rebuild the
 widget fresh, matching how `<input>` focus/scroll/selection state
 behaves in the same situations.
 
-Widget deps ride a single channel — the `irid-widget-init` message —
-so both top-level mounts and dynamically-mounted widgets (inside
-`When` / `Each` / `Match`) follow one code path. UI-attached deps are
-auto-registered as Shiny static resources, but custom-message deps are
-not. `register_widget_dep(dep)` runs before each init: it resolves
-`package`-relative `src$file` to an absolute path and then **inlines**
-each file-backed script/stylesheet directly into the dep's `head` HTML
-(`<script>…</script>` / `<style>…</style>`), clearing `src`/`script`/
-`stylesheet`. href-only deps (CDN) and head-only deps have no `src$file`
-and pass through unchanged.
+Widget deps travel two complementary ways.
 
-Inlining (rather than registering a resource path via
-`shiny::createWebDependency()` → `addResourcePath`) is what makes widgets
-work under **shinylive**. shinylive serves only deps attached to the page
-at render time; a resource path registered mid-session — which is how
-*every* widget dep ships — 404s there, because its request bridge only
-invokes the Shiny app handler and has no httpuv `staticPaths` layer.
-Inlining carries the bytes in the message itself, needs no resource path,
-and in shinylive is byte-for-byte a wash (webR has no real HTTP layer, so
-a would-be file `GET` crosses the same in-browser bridge as the message).
-The cost is in *server* Shiny, where a resource path would be browser-cached
-across reloads — so `widget_deps_to_send()` tracks each `name@version` it has sent
-on `session$userData` and ships the (often multi-MB) content only once per
-session. `Shiny.renderDependencies` also dedups *rendering* by name, so
-re-firing `irid-widget-init` on a remount is a no-op for the deps step.
+**Per-mount, via the message.** Deps ride the `irid-widget-init` message
+so both top-level mounts and dynamically-mounted widgets (inside
+`When` / `Each` / `Match`) follow one code path. Message deps are not
+auto-registered as Shiny static resources, so `register_widget_dep(dep)`
+runs before each init: it resolves `package`-relative `src$file` to an
+absolute path and routes file-backed deps through
+`shiny::createWebDependency()` (which calls `addResourcePath` and rewrites
+`src` to an href). href-only deps (CDN) and head-only deps pass through
+unchanged. `Shiny.renderDependencies` dedups by name across the session,
+so re-firing `irid-widget-init` on a remount is a no-op for the deps step.
+
+**At render, via the container.** `process_tags` also attaches each
+widget's deps to its container tag, so htmltools collects them into the
+page `<head>` the normal Shiny way — served and browser-cached, and
+critically **served under shinylive**. shinylive's in-browser request
+bridge has no httpuv `staticPaths` layer, so a resource path registered
+mid-session (the `createWebDependency` form above) 404s there; a
+statically-placed widget would otherwise load blank. Page-attaching the
+dep sidesteps that. The two paths coexist without double-loading:
+`Shiny.renderDependencies` dedups the per-mount copy by name against the
+already-rendered page-attached one (verified — see the spikes below).
+
+Page-attaching has one ordering consequence: a widget's factory script
+(`<name>-irid.js`) now lands in the `<head>` **ahead of `irid.js`**, so
+`window.irid` may not exist yet when the factory runs. Registration is
+therefore order-independent: a factory calls `defineWidget` if irid.js has
+loaded, else parks `[name, factory]` on `window.iridPendingFactories` for
+irid.js to drain when it loads (symmetric to `pendingInits`, which buffers
+the reverse race — inits arriving before their factory). The plotly factory
+wraps this in a small `defineIridWidget` helper; a CDN/ESM widget shipped
+only via the init message (CodeMirror) always runs after irid.js and can
+call `defineWidget` directly.
+
+This page-attachment only reaches widgets present in the **static** tree at
+render. A widget that appears *only* inside control flow (`When` / `Each` /
+`Match`) is behind a closure not walked until the server renders it, so its
+deps are not collected — and under shinylive (only) such a widget loads
+blank, because the per-mount resource path 404s there. This is a **known
+limitation**; the proper fix is shinylive honoring mid-session resource
+paths (issue #34). Until then the public-API workaround is to render one
+instance of the widget statically — hidden if need be — so its container
+page-attaches the library:
+
+```r
+# preload plotly's assets so plots mounted only inside Each/When load under
+# shinylive; drop once shinylive serves mid-session resource paths
+tags$div(style = "display:none", PlotlyOutput(\() plotly::plot_ly()))
+```
+
+(`plotly_dependency()` is the internal dep list behind this; it is
+deliberately unexported — exporting an ergonomic preload handle is a clean
+additive follow-up if the dynamic-only-shinylive case proves common.)
 
 ### Force-send is per-binding
 

@@ -761,6 +761,20 @@
     }
   };
 
+  // Drain factories that registered before irid.js ran. A page-attached widget
+  // dep (the static-page delivery path; see ARCHITECTURE.md) loads its factory
+  // script into the page <head> ahead of irid.js, so it can't call
+  // `window.irid.defineWidget` yet — it parks `[name, factory]` here instead.
+  // Symmetric to `pendingInits` (which buffers the reverse race, inits arriving
+  // before their factory).
+  var pendingFactories = window.iridPendingFactories;
+  window.iridPendingFactories = null;
+  if (pendingFactories) {
+    pendingFactories.forEach(function(f) {
+      window.irid.defineWidget(f[0], f[1]);
+    });
+  }
+
   Shiny.addCustomMessageHandler('irid-widget-init', function(msg) {
     if (widgets[msg.id]) return;  // idempotent
     // Shiny.renderDependencies returns undefined synchronously in

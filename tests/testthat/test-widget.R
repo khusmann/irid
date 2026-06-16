@@ -129,6 +129,30 @@ test_that("widget node produces a widget_inits entry", {
   expect_length(init$prop_fns, 0L)
 })
 
+test_that("a static widget's deps are attached so htmltools page-collects them", {
+  # Page-attaching lets the library ride the static page (served + cached, and
+  # crucially served under shinylive) instead of relying only on the per-mount
+  # resource path. The dep must be discoverable by htmltools::findDependencies
+  # on the processed tag tree.
+  dep <- htmltools::htmlDependency("mylib", "1.0", src = c(href = "https://x/"), script = "a.js")
+  out <- process_tags(htmltools::tags$div(IridWidget("demo", deps = dep)))
+  found <- htmltools::findDependencies(out$tag)
+  expect_true(any(vapply(found, function(d) identical(d$name, "mylib"), logical(1))))
+  # It also still rides the init message (the per-mount copy, deduped client-side).
+  expect_equal(single_init(out)$deps, list(dep))
+})
+
+test_that("a widget hidden inside control flow is not page-attached at render", {
+  # Behind a `When` closure, the widget isn't walked at render, so its dep is
+  # not collected onto the page. (Declaring it in the static tree is the
+  # escape hatch for that case — see the irid_widget branch comment.)
+  dep <- htmltools::htmlDependency("mylib", "1.0", src = c(href = "https://x/"), script = "a.js")
+  hidden <- When(\() TRUE, \() IridWidget("demo", deps = dep))
+  out <- process_tags(htmltools::tags$div(hidden))
+  found <- htmltools::findDependencies(out$tag)
+  expect_false(any(vapply(found, function(d) identical(d$name, "mylib"), logical(1))))
+})
+
 test_that("callable prop is two-way: binding + prop_fns + kind='prop' row", {
   rv <- shiny::reactiveVal("hi\n")
   w <- IridWidget("codemirror", props = list(content = rv))
