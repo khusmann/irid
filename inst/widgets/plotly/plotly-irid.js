@@ -5,14 +5,25 @@
 // the R-side translation table that maps each named state arg to a spec path
 // and a source event.
 //
-// Load order: irid.js (which defines window.irid) is on the page already; this
-// script ships as a widget dep and runs at init time. Two races are handled:
-// the factory-vs-init race by irid's pendingInits buffer, and the
-// plotly-main-global-not-loaded race by this factory being `async` and awaiting
-// `waitForPlotly()` before it touches Plotly (see below).
+// Load order: this script ships both page-attached (in the <head>, ahead of
+// irid.js) and via the init message (after irid.js). `defineIridWidget` below
+// handles both — it registers immediately if irid.js has run, else parks the
+// factory on `window.iridPendingFactories` for irid.js to drain on load. Two
+// further races are handled downstream: the factory-vs-init race by irid's
+// pendingInits buffer, and the plotly-main-global-not-loaded race by this
+// factory being `async` and awaiting `waitForPlotly()` before it touches Plotly
+// (see below).
 
 (function () {
-  if (!window.irid || typeof window.irid.defineWidget !== "function") return;
+  // Register a widget factory regardless of whether irid.js has loaded yet.
+  function defineIridWidget(name, factory) {
+    if (window.irid && typeof window.irid.defineWidget === "function") {
+      window.irid.defineWidget(name, factory);
+    } else {
+      (window.iridPendingFactories = window.iridPendingFactories || [])
+        .push([name, factory]);
+    }
+  }
 
   // --- small helpers (module scope; no closure deps) ----------------------
 
@@ -115,7 +126,7 @@
     });
   }
 
-  window.irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
+  defineIridWidget("plotly", async function (el, props, sendEvent, setProp) {
     var Plotly = await waitForPlotly();   // captured local; defined from here on
 
     var applyDepth = 0;                // >0 while our own graph mutations run

@@ -820,6 +820,17 @@ dep sidesteps that. The two paths coexist without double-loading:
 `Shiny.renderDependencies` dedups the per-mount copy by name against the
 already-rendered page-attached one (verified — see the spikes below).
 
+Page-attaching has one ordering consequence: a widget's factory script
+(`<name>-irid.js`) now lands in the `<head>` **ahead of `irid.js`**, so
+`window.irid` may not exist yet when the factory runs. Registration is
+therefore order-independent: a factory calls `defineWidget` if irid.js has
+loaded, else parks `[name, factory]` on `window.iridPendingFactories` for
+irid.js to drain when it loads (symmetric to `pendingInits`, which buffers
+the reverse race — inits arriving before their factory). The plotly factory
+wraps this in a small `defineIridWidget` helper; a CDN/ESM widget shipped
+only via the init message (CodeMirror) always runs after irid.js and can
+call `defineWidget` directly.
+
 This page-attachment only reaches widgets present in the **static** tree at
 render. A widget that appears *only* inside control flow (`When` / `Each` /
 `Match`) is behind a closure not walked until the server renders it, so its
