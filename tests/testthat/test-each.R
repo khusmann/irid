@@ -363,6 +363,51 @@ test_that("Each rebuilds the entry when a keyed item's shape changes", {
   m$handle$destroy()
 })
 
+test_that("Each keyed reorder emits an order payload that serializes to a JSON array", {
+  # Regression: a keyed reorder builds `msg$order` by `vapply`-ing over the
+  # id vector. `vapply` defaults to `USE.NAMES = TRUE`, which names the result
+  # by the (character) ids; `as.list` of a named vector serializes to a JSON
+  # *object* (`{"2": ..., "1": ...}`) rather than an array — and the client's
+  # irid-mutate handler calls `msg.order.forEach`, which a JS object does not
+  # have, throwing "msg.order.forEach is not a function" on every reorder.
+  # The MockShinySession captures the raw R list, so the bug only surfaces
+  # under real JSON serialization — assert that explicitly here.
+  items <- shiny::reactiveVal(list(
+    list(id = "a", v = 1),
+    list(id = "b", v = 2),
+    list(id = "c", v = 3)
+  ))
+  m <- mount_each(
+    items,
+    function(item) shiny::tags$span(),
+    by = function(x) x$id
+  )
+  flushReact()
+
+  # Pure reorder — swap the first two. No removes/inserts, only `order`.
+  items(list(
+    list(id = "b", v = 2),
+    list(id = "a", v = 1),
+    list(id = "c", v = 3)
+  ))
+  flushReact()
+
+  msgs <- m$session$msgs()
+  last <- msgs[[length(msgs)]]
+  expect_equal(last$type, "irid-mutate")
+  expect_null(last$message$removes)
+  expect_null(last$message$inserts)
+  expect_equal(length(last$message$order), 3L)
+
+  # The payload must be an unnamed list so Shiny serializes it as a JSON
+  # array (`[...]`), not an object (`{...}`).
+  expect_null(names(last$message$order))
+  json <- as.character(jsonlite::toJSON(last$message$order))
+  expect_true(startsWith(json, "["))
+
+  m$handle$destroy()
+})
+
 test_that("Each short-circuits same-keys + same-shape (no mutate emitted)", {
   # Regression check on the focus-preservation short-circuit.
   items <- shiny::reactiveVal(list(

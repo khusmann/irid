@@ -161,10 +161,16 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   if (length(removes) > 0L) msg$removes <- as.list(removes)
   if (length(inserts) > 0L) msg$inserts <- inserts
   if (!is.null(plan$order)) {
+    # `USE.NAMES = FALSE` keeps the result unnamed — `plan$order` is a
+    # character vector, so a default `vapply` would name the result by the
+    # id strings, and `as.list` of a named vector serializes to a JSON
+    # *object* (`{...}`) instead of an array, breaking `msg.order.forEach`
+    # in the client's irid-mutate handler.
     msg$order <- as.list(vapply(
       plan$order,
       function(id) env$item_mounts[[id]]$wrapper_id,
-      character(1L)
+      character(1L),
+      USE.NAMES = FALSE
     ))
   }
   session$sendCustomMessage("irid-mutate", msg)
