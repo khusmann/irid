@@ -270,6 +270,18 @@ test_that("dom_opts flags land on the event row", {
   expect_true(e$passive)
 })
 
+test_that("dom_opts filter rides through to the event row (NULL when absent)", {
+  filtered <- process_tags(
+    tags$input(onKeyDown = wire(
+      \() NULL, dom_opts = wire_dom_opts(filter = "e.key === 'Enter'")
+    ))
+  )
+  expect_equal(filtered$events[[1]]$filter, "e.key === 'Enter'")
+
+  plain <- process_tags(tags$div(onClick = wire(\() NULL)))
+  expect_null(plain$events[[1]]$filter)
+})
+
 test_that("coalesce derives from timing mode; carrier override wins", {
   immediate <- process_tags(tags$button(onClick = wire(\() NULL)))
   expect_false(immediate$events[[1]]$coalesce)
