@@ -163,10 +163,11 @@ workarounds added solely to dodge the shared-counter pollution come out:
    the gate; drop the comment + ordering constraint.
 2. **"Skip selection-only relayouts"** — added so the selection-outline
    relayout's `sendEvent` didn't out-sequence the `selected_ids` setProp. No
-   longer load-bearing for correctness. **Decision: keep it** as an
-   optional/cosmetic guard so `onRelayout` isn't handed transient selection
-   geometry, but rewrite the comment to drop the sequence justification (the
-   `TODO(#28)` note already frames it as optional). *(Open question — see below.)*
+   longer load-bearing for correctness. **Decision (settled in review): drop it
+   entirely.** `onRelayout` will then also fire on selection-outline relayouts
+   (transient `selections` geometry); that is acceptable and keeps the listener
+   minimal. The empty-`{}` relayout guard stays (it's unrelated — avoids
+   notifying with an empty payload).
 
 The `TODO(#28)` markers in that file are removed as each site is resolved.
 
@@ -261,10 +262,8 @@ Survey results: _(to fill in during implementation)_
 
 ## Open questions for review
 
-**Keep or drop the plotly "skip selection-only relayouts" guard?** It is no
-longer needed for correctness. Keeping it spares `onRelayout` the transient
-selection geometry; dropping it is less code. Plan currently keeps it (cosmetic)
-with a rewritten comment. — _Your call (the one remaining decision)._
+_All resolved during review (see "Resolved during review" below). No open
+questions remain._
 _Resolved during review:_
 
 - **Gating scope** — gate strictly by `write_targets` (no `__default`
@@ -273,6 +272,8 @@ _Resolved during review:_
   `dev/spikes/widget-module-ns.R`; **folded into this PR** via the
   `widgetStreams` index. See "Folded in: widget channels are broken inside Shiny
   modules" above.
+- **Plotly selection-only relayout skip** — **drop it** entirely (not load-
+  bearing once the gate is per-channel). See cleanup item 2 above.
 
 ## Re-confirm-on-bump caveats
 
