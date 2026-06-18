@@ -82,7 +82,13 @@ TodoApp <- function() {
             type = "text",
             class = "form-control",
             placeholder = "What needs to be done?",
-            value = new_text
+            value = new_text,
+            # Submit on Enter. The `filter` drops every other keydown
+            # client-side, so only Enter ever round-trips to the server.
+            onKeyDown = wire(
+              \() add_todo(),
+              dom_opts = wire_dom_opts(filter = "e.key === 'Enter'")
+            )
           ),
           tags$button(
             class = "btn btn-primary",

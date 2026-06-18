@@ -990,30 +990,34 @@ the content tree errors, tear it down and render a fallback.
 Reactive children should return text only. Currently no validation — non-text
 returns silently produce unexpected output.
 
-### Client-side event filtering (planned)
+### Client-side event filtering
 
-Add a `filter` field to `wire_dom_opts()` that accepts a JS expression
-string. The expression is evaluated client-side with the DOM event object
-as `e` — if falsy, the event is never sent to the server (zero
-round-trips). This avoids flooding the server with events the handler
-doesn't care about (e.g. `onKeyDown` that only handles Enter). Deferred to
-a follow-up; `wire_dom_opts` is built extensible so adding `filter` is
-additive.
+`wire_dom_opts()` takes a `filter` field: a JS expression string evaluated
+client-side with the DOM event object as `e`. When it is falsy the event is
+dropped before any `prevent_default`/`stop_propagation` and never sent to
+the server (zero round-trips). This avoids flooding the server with events
+the handler doesn't care about (e.g. `onKeyDown` that only handles Enter).
+The client compiles the expression once per listener (`new Function('e',
+...)`) and gates dispatch in `attachListener`, the immediate direct-send
+path, and the config-only listener.
 
-An `irid_key_filter()` helper would generate the JS expression for common
-key matching:
+Callers write the predicate directly:
 
 ```r
 tags$input(
   value = field,
   onKeyDown = wire(
-    \(e) submit(),
-    dom_opts = wire_dom_opts(filter = irid_key_filter("Enter"))
+    \() submit(),
+    dom_opts = wire_dom_opts(filter = "e.key === 'Enter'")
   )
 )
 ```
 
-Once `filter` is available, the todo example's `onKeyDown = \(event) if (event$key == "Enter") add_todo()` can be restored. It was removed in the interim because without client-side filtering, every keydown is sent to the server — which, combined with the missing event queue ordering (see `dev/client-event-queue-design.md`), causes Enter to race ahead of the pending `onInput` debounce and submit an incomplete value.
+This is what restores the todo example's Enter-to-add behavior. Without
+client-side filtering every keydown is sent to the server — which, combined
+with the missing event queue ordering (see
+`dev/client-event-queue-design.md`), causes Enter to race ahead of the
+pending `onInput` debounce and submit an incomplete value.
 
 ### Testing
 

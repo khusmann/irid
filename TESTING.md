@@ -183,6 +183,12 @@ listener options for that event.
       `timing` keeps the per-event default (no clobber)
 - [ ] `wire_dom_opts` flags (`prevent_default`/`stop_propagation`/`capture`/
       `passive`) land on the event row and are applied client-side
+- [ ] `wire_dom_opts(filter = ...)` carries a non-empty string; non-string /
+      empty-string filters error at construction
+- [ ] `filter` rides through `resolve_wire_config` to the event row and the
+      client message (defaults to `NULL` when absent)
+- [ ] e2e: a falsy `filter` predicate drops the DOM event client-side — no
+      `prevent_default`/`stop_propagation`, no round-trip; a truthy one passes
 - [ ] `wire(dom_opts = ...)` with no handler is client-only: a listener
       applies the flags, `clientOnly = TRUE`, no round-trip
 - [ ] Without a `timing`, `input` events default to `wire_debounce(200)`;

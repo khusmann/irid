@@ -283,6 +283,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         stopPropagation = ev$stop_propagation,
         capture = ev$capture,
         passive = ev$passive,
+        filter = ev$filter,
         clientOnly = is.null(handler),
         source = ev$source
       )
