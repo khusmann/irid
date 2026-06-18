@@ -237,6 +237,12 @@ install_widget_dep_sink <- function(session) {
   session$output[["__irid_widget_deps__"]] <- shiny::renderUI(
     htmltools::tagList(unname(session$userData$irid_deps_seen()))
   )
+  # The sink lives in a `display:none` div, and Shiny suspends hidden outputs by
+  # default — which would stop the `renderUI` from ever running, so no deps would
+  # ship. Force it to render regardless of visibility.
+  shiny::outputOptions(
+    session$output, "__irid_widget_deps__", suspendWhenHidden = FALSE
+  )
   invisible()
 }
 
