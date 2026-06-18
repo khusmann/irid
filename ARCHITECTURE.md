@@ -14,7 +14,7 @@ R/
   mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
   scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
-  widget.R        IridWidget (two-way props) + dep-registration
+  widget.R        IridWidget (two-way props)
   irid-package.R Package-level imports
 
 inst/js/
