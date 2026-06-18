@@ -12,7 +12,7 @@ A list of \code{html_dependency} objects.
 \description{
 The plotly.js bundle (sourced from the suggested \code{{plotly}} package) plus the
 irid-plotly factory script, carried by \code{\link[=PlotlyOutput]{PlotlyOutput()}} as its widget \code{deps}
-and delivered at mount time through the per-session renderUI dep sink (see
-\code{install_widget_dep_sink} in mount.R).
+and delivered at mount time via \code{insertUI} (see \code{deliver_widget_deps} in
+mount.R).
 }
 \keyword{internal}

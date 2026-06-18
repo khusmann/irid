@@ -5,10 +5,10 @@
 // the R-side translation table that maps each named state arg to a spec path
 // and a source event.
 //
-// Load order: this script is delivered by the per-session renderUI dep sink
-// (Shiny's native render pipeline; see the R-side `install_widget_dep_sink`),
-// which always runs after irid.js — so `window.irid.defineWidget` is defined
-// when this calls it. Two races are still handled downstream: the
+// Load order: this script is delivered via insertUI at mount time (Shiny's
+// native render pipeline; see the R-side `deliver_widget_deps`), which always
+// runs after irid.js — so `window.irid.defineWidget` is defined when this calls
+// it. Two races are still handled downstream: the
 // factory-vs-init race by irid's pendingInits buffer, and the
 // plotly-main-global-not-loaded race by this factory being `async` and awaiting
 // `waitForPlotly()` before it touches Plotly (see below).

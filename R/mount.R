@@ -200,76 +200,40 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   invisible()
 }
 
-# Per-session hidden `renderUI` sink that delivers widget dependencies through
-# Shiny's *native render pipeline* — the only dep-delivery path shinylive serves
-# (see ARCHITECTURE.md "Widgets -> Lifecycle and dependencies"). Installed once
-# per session, lazily, on the first widget mount; the guard on
-# `session$userData` lets the recursive control-flow mounts share one sink.
+# Deliver a widget's dependencies at mount time through Shiny's *native render
+# pipeline*, via `insertUI` — the only dep-delivery path shinylive serves (a bare
+# `Shiny.renderDependencies` off the `irid-widget-init` custom message 404s
+# there; see ARCHITECTURE.md "Widgets -> Lifecycle and dependencies"). Verified:
+# an `insertUI`-delivered file-backed dep loads under shinylive (spike, web
+# assets 0.9.1 — re-confirm on bump).
 #
-# Routing deps here (rather than page-attaching at render or shipping them on the
-# `irid-widget-init` custom message) reaches widgets that appear *only* inside
-# `When`/`Each`/`Match` — `irid_mount_processed` is the recursive chokepoint
-# every nested mount calls — and keeps the factory script arriving *after*
-# `irid.js` (which stays in the initial <head> as `irid_dependency()`), so
-# `window.irid` always exists when a factory runs.
-install_widget_dep_sink <- function(session) {
-  if (isTRUE(session$userData$irid_dep_sink)) return(invisible())
-  session$userData$irid_dep_sink <- TRUE
-  session$userData$irid_deps_seen <- shiny::reactiveVal(list())
-
-  # The insert carries a PLAIN placeholder (no file-backed dep), so it is
-  # shinylive-safe regardless of any side-channel 404 — the dependency assets
-  # themselves ride the `renderUI` output below, the verified native-pipeline
-  # path. `session$ns()` namespaces the placeholder id so the sink works when a
-  # `renderIrid` mount runs inside a Shiny module; for a top-level session it is
-  # the identity.
+# Delivering here (rather than page-attaching at render) reaches widgets that
+# appear *only* inside `When`/`Each`/`Match` — `irid_mount_processed` is the
+# recursive chokepoint every nested mount calls — and keeps the factory script
+# arriving *after* `irid.js` (which stays in the initial <head> as
+# `irid_dependency()`), so `window.irid` always exists when a factory runs.
+#
+# Deduped by dependency name across the session so a shared library (e.g.
+# plotly.js across many `Each` items) is inserted once, not once per item.
+# `package`- / file-backed deps need no manual resource registration — the
+# native pipeline resolves and serves them (the reason `register_widget_dep` is
+# gone). The insert is `immediate = FALSE`, so deps arrive on the first flush.
+deliver_widget_deps <- function(session, deps) {
+  if (length(deps) == 0L) return(invisible())
+  seen <- session$userData$irid_deps_seen
+  if (is.null(seen)) seen <- character()
+  new <- Filter(function(d) !(d$name %in% seen), deps)
+  if (length(new) == 0L) return(invisible())
+  session$userData$irid_deps_seen <- c(
+    seen, vapply(new, function(d) d$name, character(1L))
+  )
   shiny::insertUI(
     selector = "body",
     where = "beforeEnd",
-    ui = shiny::tags$div(
-      style = "display:none",
-      shiny::uiOutput(session$ns("__irid_widget_deps__"))
-    ),
+    ui = htmltools::tagList(new),
     immediate = FALSE,
     session = session
   )
-
-  session$output[["__irid_widget_deps__"]] <- shiny::renderUI(
-    htmltools::tagList(unname(session$userData$irid_deps_seen()))
-  )
-  # The sink lives in a `display:none` div, and Shiny suspends hidden outputs by
-  # default — which would stop the `renderUI` from ever running, so no deps would
-  # ship. Force it to render regardless of visibility.
-  shiny::outputOptions(
-    session$output, "__irid_widget_deps__", suspendWhenHidden = FALSE
-  )
-  invisible()
-}
-
-# Route a widget's dependencies into the per-session sink, deduped by name so a
-# shared library (e.g. plotly.js across many `Each` items) is added once, not
-# once per item. Adding a new dep re-fires the sink's `renderUI`; Shiny ships
-# only the deps it has not already sent on the session, and the client dedups by
-# name, so remounts are cheap and idempotent. Package- / file-backed deps need
-# no manual resource registration: the native render pipeline resolves and
-# serves them (the reason `register_widget_dep` is gone).
-feed_widget_dep_sink <- function(session, deps) {
-  if (length(deps) == 0L) return(invisible())
-  install_widget_dep_sink(session)
-  seen <- session$userData$irid_deps_seen
-  # `isolate` so feeding from a static (top-level) mount — which runs outside
-  # any reactive context — can read the accumulator, and so feeding from inside
-  # a control-flow observer does not subscribe that observer to the set (only
-  # the sink's renderUI should depend on it).
-  cur <- shiny::isolate(seen())
-  added <- FALSE
-  for (d in deps) {
-    if (is.null(cur[[d$name]])) {
-      cur[[d$name]] <- d
-      added <- TRUE
-    }
-  }
-  if (added) seen(cur)
   invisible()
 }
 
@@ -320,18 +284,18 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # mutate that introduced the container, so the init message arrives
   # at the client after the DOM change.
   #
-  # Dependencies do NOT ride this message — they flow through the per-session
-  # `renderUI` sink (the native render pipeline, served under shinylive). The
-  # init message arrives before the sink has delivered the factory script, so
-  # the client parks it under `pendingInits` and drains it when the factory's
-  # `defineWidget` lands.
+  # Dependencies do NOT ride this message — they are delivered via `insertUI`
+  # through the native render pipeline (served under shinylive). The init message
+  # arrives before that insert has delivered the factory script, so the client
+  # parks it under `pendingInits` and drains it when the factory's `defineWidget`
+  # lands.
   for (wi in result$widget_inits) {
     props <- wi$static_props
     for (key in names(wi$prop_fns)) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
     props <- irid_jsonify_names(props)
-    feed_widget_dep_sink(session, wi$deps)
+    deliver_widget_deps(session, wi$deps)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
       name = wi$name,

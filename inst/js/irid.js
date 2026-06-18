@@ -880,10 +880,10 @@
   };
 
   // The init message carries no deps — a widget's dep `<script>`/`<link>`
-  // assets ride the per-session renderUI sink (Shiny's native render pipeline;
-  // see the R-side `install_widget_dep_sink`). The factory script therefore
-  // always loads after irid.js, so `window.irid` exists when it calls
-  // `defineWidget`. An init that still beats its factory (the sink delivers it
+  // assets are delivered via insertUI at mount time (Shiny's native render
+  // pipeline; see the R-side `deliver_widget_deps`). The factory script
+  // therefore always loads after irid.js, so `window.irid` exists when it calls
+  // `defineWidget`. An init that still beats its factory (the insert delivers it
   // a moment later) parks under `pendingInits` and drains on `defineWidget`.
   Shiny.addCustomMessageHandler('irid-widget-init', function(msg) {
     if (widgets[msg.id]) return;  // idempotent

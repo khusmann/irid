@@ -340,12 +340,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       container$attribs$id <- id
       container$attribs[["data-irid-widget"]] <- node$name
 
-      # Deps are NOT page-attached here. They flow through the per-session
-      # `renderUI` sink at mount time (see `install_widget_dep_sink` in
-      # mount.R), which delivers them via Shiny's native render pipeline — the
-      # only dep-delivery path shinylive serves, and one that reaches widgets
-      # appearing *only* inside `When`/`Each`/`Match` too. `node$deps` is
-      # carried on the `widget_inits` entry above and consumed by mount.
+      # Deps are NOT page-attached here. They are delivered at mount time via
+      # `insertUI` (see `deliver_widget_deps` in mount.R), riding Shiny's native
+      # render pipeline — the only dep-delivery path shinylive serves, and one
+      # that reaches widgets appearing *only* inside `When`/`Each`/`Match` too.
+      # `node$deps` is carried on the `widget_inits` entry above and consumed by
+      # mount.
       return(walk(container))
     }
 

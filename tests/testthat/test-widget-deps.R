@@ -1,80 +1,101 @@
-# Tests for the per-session renderUI dep sink (`install_widget_dep_sink` /
-# `feed_widget_dep_sink` in mount.R) — the native-render-pipeline path that
-# delivers a widget's dependencies so they load under shinylive, INCLUDING a
-# widget mounted only inside `When`/`Each`/`Match` (the case issue #34 could not
-# serve). Deps no longer page-attach at render, nor ride the `irid-widget-init`
-# custom message.
+# Tests for widget dependency delivery (`deliver_widget_deps` in mount.R) — the
+# native-render-pipeline path (`insertUI`) that delivers a widget's deps so they
+# load under shinylive, INCLUDING a widget mounted only inside When/Each/Match
+# (the case issue #34 could not serve). Deps no longer page-attach at render, nor
+# ride the `irid-widget-init` custom message.
 
 library(shiny)
-
-# Read the sink's accumulated deps (name -> html_dependency) off a session.
-sink_deps <- function(session) isolate(session$userData$irid_deps_seen())
 
 mk_dep <- function(name, ...) {
   htmltools::htmlDependency(name, "1.0", src = c(href = "https://x/"),
                             script = "a.js", ...)
 }
 
-# --- feed/dedup ---------------------------------------------------------------
-
-test_that("feed_widget_dep_sink installs the sink and stores deps by name", {
-  session <- MockShinySession$new()
-  dep <- mk_dep("lib")
-  withReactiveDomain(session, feed_widget_dep_sink(session, list(dep)))
-
-  expect_true(isTRUE(session$userData$irid_dep_sink))
-  seen <- sink_deps(session)
-  expect_named(seen, "lib")
-  expect_identical(seen$lib, dep)
-})
-
-test_that("empty deps neither install the sink nor error", {
-  session <- MockShinySession$new()
-  withReactiveDomain(session, feed_widget_dep_sink(session, list()))
-  expect_null(session$userData$irid_dep_sink)
-})
-
-test_that("deps are deduped by name across feeds (shared library added once)", {
-  session <- MockShinySession$new()
-  shared1 <- mk_dep("plotly")
-  shared2 <- mk_dep("plotly")          # same name, e.g. another Each item
-  other   <- mk_dep("d3")
-  withReactiveDomain(session, {
-    feed_widget_dep_sink(session, list(shared1))
-    feed_widget_dep_sink(session, list(shared2, other))
-  })
-  seen <- sink_deps(session)
-  expect_setequal(names(seen), c("plotly", "d3"))
-  expect_identical(seen$plotly, shared1)  # first wins; not overwritten
-})
-
-test_that("package/file-backed deps are stored verbatim (sink resolves at render)", {
-  # The native pipeline resolves `package` + `src$file` itself, so the sink
-  # carries the raw dep — no pre-registration (the old `register_widget_dep`).
-  session <- MockShinySession$new()
-  dep <- htmltools::htmlDependency(
-    name = "pkgdep", version = "1.0",
-    src = c(file = "htmlwidgets/lib/x"), script = "x.js", package = "somepkg"
+# A stub session that records insertUI content + custom messages and runs
+# onFlushed callbacks immediately, so `insertUI` delivers synchronously here.
+recording_session <- function() {
+  rec <- new.env()
+  rec$inserts <- list()
+  rec$messages <- list()
+  session <- list(
+    userData = new.env(),
+    ns = identity,
+    input = list(),
+    output = list(),
+    onFlushed = function(fn, once = TRUE) { fn(); invisible() },
+    sendInsertUI = function(selector, multiple, where, content) {
+      rec$inserts[[length(rec$inserts) + 1L]] <- list(content)
+    },
+    sendCustomMessage = function(type, msg) {
+      rec$messages[[length(rec$messages) + 1L]] <- list(list(type = type, msg = msg))
+    }
   )
-  withReactiveDomain(session, feed_widget_dep_sink(session, list(dep)))
-  stored <- sink_deps(session)$pkgdep
-  expect_equal(stored$package, "somepkg")
-  expect_equal(stored$src$file, "htmlwidgets/lib/x")
+  session$rec <- rec
+  session
+}
+
+# Dep names carried by all recorded inserts, in order.
+inserted_dep_names <- function(session) {
+  unlist(lapply(session$rec$inserts, function(ins) {
+    vapply(ins[[1]]$deps, function(d) d$name, character(1L))
+  }))
+}
+
+# --- delivery / dedup --------------------------------------------------------
+
+test_that("deps are delivered via insertUI and tracked by name", {
+  s <- recording_session()
+  deliver_widget_deps(s, list(mk_dep("lib")))
+  expect_equal(inserted_dep_names(s), "lib")
+  expect_equal(s$userData$irid_deps_seen, "lib")
 })
 
-# --- mount integration --------------------------------------------------------
+test_that("empty deps deliver nothing and set no state", {
+  s <- recording_session()
+  deliver_widget_deps(s, list())
+  expect_length(s$rec$inserts, 0L)
+  expect_null(s$userData$irid_deps_seen)
+})
 
-test_that("a widget mounted only inside control flow reaches the sink (#34)", {
-  # The widget is behind a `When` closure, so process_tags never walks it and
-  # its dep is not on the static page. It must still reach the sink the moment
-  # the control-flow observer mounts it — exactly the dynamic-only case #34
-  # could not serve under shinylive.
+test_that("deps are deduped by name across deliveries (shared library once)", {
+  s <- recording_session()
+  deliver_widget_deps(s, list(mk_dep("plotly")))
+  deliver_widget_deps(s, list(mk_dep("plotly"), mk_dep("d3")))  # plotly repeats
+  expect_equal(inserted_dep_names(s), c("plotly", "d3"))        # plotly inserted once
+  expect_setequal(s$userData$irid_deps_seen, c("plotly", "d3"))
+})
+
+test_that("a package/file-backed dep is resolved + served by the native pipeline", {
+  # No irid-side registration (the old `register_widget_dep`): handing the raw
+  # `package` + `src$file` dep to insertUI, Shiny's `processDeps` resolves it to
+  # an href and registers the resource path itself.
+  skip_if_not_installed("plotly")
+  s <- recording_session()
+  dep <- htmltools::htmlDependency(
+    name = paste0("test-plotly-main-", as.integer(Sys.time())),
+    version = "2.25.2",
+    src = c(file = "htmlwidgets/lib/plotlyjs"),
+    script = "plotly-latest.min.js",
+    package = "plotly"
+  )
+  deliver_widget_deps(s, list(dep))
+  resolved <- s$rec$inserts[[1]][[1]]$deps[[1]]
+  expect_false(is.null(resolved$src$href))
+  expect_true(resolved$src$href %in% names(shiny::resourcePaths()))
+})
+
+# --- mount integration -------------------------------------------------------
+
+test_that("a widget mounted only inside control flow reaches delivery (#34)", {
+  # The widget is behind a `When` closure, so process_tags never walks it and its
+  # dep is not on the static page. It must still reach delivery the moment the
+  # control-flow observer mounts it — exactly the dynamic-only case #34 could not
+  # serve under shinylive.
   session <- MockShinySession$new()
   dep <- mk_dep("mylib")
   processed <- process_tags(tags$div(
     When(\() TRUE, \() IridWidget("demo", deps = dep))
   ))
-  # The dep is NOT collected onto the static tag (closure not walked).
   found <- htmltools::findDependencies(processed$tag)
   expect_false(any(vapply(found, function(d) identical(d$name, "mylib"), logical(1))))
 
@@ -82,10 +103,10 @@ test_that("a widget mounted only inside control flow reaches the sink (#34)", {
     irid_mount_processed(processed, session)
     session$flushReact()
   })
-  expect_identical(sink_deps(session)$mylib, dep)
+  expect_true("mylib" %in% session$userData$irid_deps_seen)
 })
 
-test_that("an Each over many items feeds a shared dep to the sink once", {
+test_that("an Each over many items delivers a shared dep once", {
   session <- MockShinySession$new()
   dep <- mk_dep("plotly")
   items <- reactiveVal(list("a", "b", "c"))
@@ -96,24 +117,15 @@ test_that("an Each over many items feeds a shared dep to the sink once", {
     irid_mount_processed(processed, session)
     session$flushReact()
   })
-  seen <- sink_deps(session)
-  expect_named(seen, "plotly")           # one entry despite three mounts
+  expect_equal(session$userData$irid_deps_seen, "plotly")  # one name, three mounts
 })
 
 test_that("the irid-widget-init message no longer carries deps", {
-  # A deps-free widget needs no sink, so a plain stub session captures the
-  # init message shape directly.
-  sent <- list()
-  fake <- list(
-    sendCustomMessage = function(type, msg) {
-      sent[[length(sent) + 1L]] <<- list(type = type, msg = msg)
-    },
-    input = list(), output = list(), userData = new.env(),
-    ns = identity, onFlushed = function(fn, once = TRUE) invisible()
-  )
-  irid_mount_processed(process_tags(IridWidget("demo")), fake)
+  s <- recording_session()
+  irid_mount_processed(process_tags(IridWidget("demo")), s)
 
-  init <- Filter(function(m) m$type == "irid-widget-init", sent)
+  msgs <- lapply(s$rec$messages, function(m) m[[1]])
+  init <- Filter(function(m) m$type == "irid-widget-init", msgs)
   expect_length(init, 1L)
   expect_false("deps" %in% names(init[[1]]$msg))
   expect_named(init[[1]]$msg, c("id", "name", "props"))
