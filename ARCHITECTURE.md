@@ -1015,51 +1015,6 @@ character since plotly reports it as ISO strings; the keyed maps → character;
 `NA`/`null` → `NULL`). `coerce_state_prop` `force()`s its captured name/callable so proxies
 built in a construction loop don't all resolve to the last one.
 
-## Remaining Work
-
-### `Portal` (planned)
-
-Not yet implemented. Would render content into a different DOM target. Needs
-`process_tags` handling and client-side support.
-
-### `Catch` (planned)
-
-Not yet implemented. Would provide error boundaries: if any `observe()` inside
-the content tree errors, tear it down and render a fallback.
-
-### Reactive child validation
-
-Reactive children should return text only. Currently no validation — non-text
-returns silently produce unexpected output.
-
-### Client-side event filtering
-
-`wire_dom_opts()` takes a `filter` field: a JS expression string evaluated
-client-side with the DOM event object as `e`. When it is falsy the event is
-dropped before any `prevent_default`/`stop_propagation` and never sent to
-the server (zero round-trips). This avoids flooding the server with events
-the handler doesn't care about (e.g. `onKeyDown` that only handles Enter).
-The client compiles the expression once per listener (`new Function('e',
-...)`) and gates dispatch in `attachListener`, the immediate direct-send
-path, and the config-only listener.
-
-Callers write the predicate directly:
-
-```r
-tags$input(
-  value = field,
-  onKeyDown = wire(
-    \() submit(),
-    dom_opts = wire_dom_opts(filter = "e.key === 'Enter'")
-  )
-)
-```
-
-This is what powers the todo example's Enter-to-add behavior: the filter
-drops every non-Enter keydown client-side, and the [per-element ordering
-queue](#per-element-ordering-queue) guarantees the pending `onInput` value
-flushes before the Enter keydown reaches the server.
-
-### Testing
+## Testing
 
 See [TESTING.md](TESTING.md) for the full test plan.
