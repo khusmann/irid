@@ -879,34 +879,20 @@
     }
   };
 
-  // Drain factories that registered before irid.js ran. A page-attached widget
-  // dep (the static-page delivery path; see ARCHITECTURE.md) loads its factory
-  // script into the page <head> ahead of irid.js, so it can't call
-  // `window.irid.defineWidget` yet — it parks `[name, factory]` here instead.
-  // Symmetric to `pendingInits` (which buffers the reverse race, inits arriving
-  // before their factory).
-  var pendingFactories = window.iridPendingFactories;
-  window.iridPendingFactories = null;
-  if (pendingFactories) {
-    pendingFactories.forEach(function(f) {
-      window.irid.defineWidget(f[0], f[1]);
-    });
-  }
-
+  // The init message carries no deps — a widget's dep `<script>`/`<link>`
+  // assets ride the per-session renderUI sink (Shiny's native render pipeline;
+  // see the R-side `install_widget_dep_sink`). The factory script therefore
+  // always loads after irid.js, so `window.irid` exists when it calls
+  // `defineWidget`. An init that still beats its factory (the sink delivers it
+  // a moment later) parks under `pendingInits` and drains on `defineWidget`.
   Shiny.addCustomMessageHandler('irid-widget-init', function(msg) {
     if (widgets[msg.id]) return;  // idempotent
-    // Shiny.renderDependencies returns undefined synchronously in
-    // current Shiny versions; Promise.resolve normalizes both the
-    // sync and the documented Promise-returning shapes so the .then
-    // continuation runs once deps are loaded either way.
-    Promise.resolve(Shiny.renderDependencies(msg.deps || [])).then(function() {
-      var factory = defined.get(msg.name);
-      if (!factory) {
-        if (!pendingInits[msg.name]) pendingInits[msg.name] = [];
-        pendingInits[msg.name].push({ id: msg.id, props: msg.props });
-        return;
-      }
-      mountWidget(msg.id, msg.name, msg.props, factory);
-    });
+    var factory = defined.get(msg.name);
+    if (!factory) {
+      if (!pendingInits[msg.name]) pendingInits[msg.name] = [];
+      pendingInits[msg.name].push({ id: msg.id, props: msg.props });
+      return;
+    }
+    mountWidget(msg.id, msg.name, msg.props, factory);
   });
 })();
