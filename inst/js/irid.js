@@ -1,6 +1,6 @@
 (function() {
   var eventsRegistered = new Set();  // `${id}:${event}` keys — once-per-pair listener install
-  var sequences = {};  // element id -> latest sent sequence number
+  var sequences = {};  // channel (send inputId) -> latest sent sequence number
   var PROP_ATTRS = { value: true, disabled: true, checked: true, innerHTML: true };
   var anchors = new Map();  // id -> { start: CommentNode, end: CommentNode }
   var ANCHOR_RE = /^irid:(s|e):(.+)$/;
@@ -185,22 +185,21 @@
   //   "dom"  — set a DOM attribute or property on
   //            `getElementById(msg.id)`. Includes focused-element
   //            optimistic-update gating for `attr === "value"`.
-  Shiny.addCustomMessageHandler('irid-attr', function(msg) {
-    // Universal stale-echo gate. When the user produces events faster
-    // than the server can echo them back, an echo for an earlier value
-    // can arrive after newer ones have been sent. `sequences[id]` is
-    // bumped in `attachPayloadMeta` on every outbound event, so it
-    // moves ahead of an in-flight echo as soon as the user produces
-    // another event from the same element. The check is inert when no
-    // sequence is present (programmatic updates from a different
-    // element) or when sequences hasn't moved past the echo's seq
-    // (echo is current).
-    if (msg.sequence !== undefined && msg.sequence !== null &&
-        sequences[msg.id] !== undefined &&
-        msg.sequence < sequences[msg.id]) {
-      return;
-    }
+  // Stale-echo gate. When the user produces events faster than the server can
+  // echo them back, an echo for an earlier value can arrive after newer ones
+  // have been sent. Each channel's counter (`sequences[channel]`) is bumped in
+  // `attachPayloadMeta` on every outbound send, so it moves ahead of an
+  // in-flight echo as soon as the user produces another event ON THE SAME
+  // CHANNEL. Inert when no sequence/channel is present (programmatic updates),
+  // or when the channel's counter hasn't moved past the echo's seq.
+  function isStaleEcho(seq, channel) {
+    return seq !== undefined && seq !== null &&
+           channel !== undefined && channel !== null &&
+           sequences[channel] !== undefined &&
+           seq < sequences[channel];
+  }
 
+  Shiny.addCustomMessageHandler('irid-attr', function(msg) {
     if (msg.target === 'widget') {
       // Route to the widget's update hook. Skip if no widget is
       // registered for this id — covers the timing-dependent reorder
@@ -210,17 +209,37 @@
       if (!w) return;
       // `values` is always a `{attr -> value}` map (one or more keys),
       // coalesced server-side per widget per flush. A single-prop change is
-      // just a one-entry map.
+      // just a one-entry map. The gate is PER KEY: a batch can carry props
+      // from different channels (e.g. xaxis_range + yaxis_range from one box
+      // zoom), so each key is gated against its own channel via `value_meta`
+      // (`{key -> {seq, channel}}`). Keys with no `value_meta` entry are
+      // programmatic and always apply.
+      var values = msg.values;
+      if (msg.value_meta) {
+        var kept = {};
+        var any = false;
+        for (var k in values) {
+          var meta = msg.value_meta[k];
+          if (meta && isStaleEcho(meta.seq, meta.channel)) continue;
+          kept[k] = values[k];
+          any = true;
+        }
+        if (!any) return;  // every key gated out — nothing to apply
+        values = kept;
+      }
       if (w.handle) {
-        if (typeof w.handle.update === 'function') w.handle.update(msg.values);
+        if (typeof w.handle.update === 'function') w.handle.update(values);
       } else {
         // Async construction still in flight — buffer, coalescing by key
         // (later wins, same as the server-side per-flush batch). Flushed when
         // the handle commits in mountWidget.
-        w.pending = Object.assign(w.pending || {}, msg.values);
+        w.pending = Object.assign(w.pending || {}, values);
       }
       return;
     }
+
+    // dom/text stale-echo gate (single channel per message).
+    if (isStaleEcho(msg.sequence, msg.channel)) return;
 
     if (msg.target === 'text') {
       var a = lookupAnchors(msg.id);
@@ -363,19 +382,24 @@
   }
 
   // Attach the irid event envelope to a payload object: stable element
-  // id, a per-event nonce, and a per-element monotonic sequence number.
-  // Shared between DOM events (from `buildPayload`) and widget events
-  // (from `sendWidgetEvent`) so both paths produce identical wire shapes
-  // and share the same sequence counter.
-  function attachPayloadMeta(payload, id) {
+  // id, a per-event nonce, and a per-CHANNEL monotonic sequence number.
+  // `channel` is the inputId the payload is sent on (`session$ns(input_id)`),
+  // so each client→server stream from an element — a DOM event, a widget
+  // event, a widget prop write-back — owns its own counter. The inbound
+  // stale-echo gate compares an echo against the counter of the channel that
+  // produced it, so a sibling channel's send can't gate another channel's
+  // echo (see the `irid-attr` handler). Shared between DOM events (from
+  // `buildPayload`) and widget events (from `pushManaged`) so both paths
+  // produce identical wire shapes.
+  function attachPayloadMeta(payload, id, channel) {
     payload.id = id;
     payload.nonce = Math.random();
-    if (!sequences[id]) sequences[id] = 0;
-    payload.__irid_seq = ++sequences[id];
+    if (!sequences[channel]) sequences[channel] = 0;
+    payload.__irid_seq = ++sequences[channel];
     return payload;
   }
 
-  function buildPayload(e, el, id) {
+  function buildPayload(e, el, id, channel) {
     var payload = {};
     // Extract all primitive-valued properties from the event object
     for (var key in e) {
@@ -396,22 +420,23 @@
     if (typeof el.checked === 'boolean') {
       payload.checked = el.checked;
     }
-    return attachPayloadMeta(payload, id);
+    return attachPayloadMeta(payload, id, channel);
   }
 
-  // Push a payload through the managed-state pipeline for `inputId`. Silent
-  // no-op if no R subscriber exists — widget JS can register events/props
-  // unconditionally and only the ones with an R-side handler round-trip.
-  function pushManaged(inputId, id, payload) {
-    var s = managed[inputId];
+  // Push a payload through a managed stream `s`. Silent no-op if `s` is
+  // missing — widget JS can register events/props unconditionally and only
+  // the ones with an R-side handler resolve to a stream. The channel/counter
+  // key is `s.inputId` (the namespaced send target), so the per-channel
+  // sequence stays correct under Shiny modules.
+  function pushManaged(s, id, payload) {
     if (!s) return;
-    var p = attachPayloadMeta(Object.assign({}, payload || {}), id);
+    var p = attachPayloadMeta(Object.assign({}, payload || {}), id, s.inputId);
     s.dispatch(p);
   }
 
   // `sendEvent(event, payload)` — a widget notification.
   function sendWidgetEvent(id, event, payload) {
-    pushManaged('irid_ev_' + id + '_' + event, id, payload || {});
+    pushManaged(widgetStreams['event:' + id + ':' + event], id, payload || {});
   }
 
   // `setProp(key, value)` — the client → server half of a two-way prop. The
@@ -419,7 +444,7 @@
   // has its own `irid_prop_{id}_{key}` input), the symmetric partner of the
   // server → client `irid-attr target="widget"` → `update` hook.
   function setWidgetProp(id, key, value) {
-    pushManaged('irid_prop_' + id + '_' + key, id, { value: value });
+    pushManaged(widgetStreams['prop:' + id + ':' + key], id, { value: value });
   }
 
   // --- Rate limiting (throttle / debounce with optional coalesce) ---
@@ -427,6 +452,13 @@
   // event. All listeners must use $(document).one(), not addEventListener.
 
   var managed = {};  // inputId -> state object
+  // Widget client→server streams indexed by the stable `{kind}:{id}:{event}`
+  // triple a factory's `sendEvent`/`setProp` actually knows. `managed` is
+  // keyed by the namespaced inputId, which a widget factory can't reconstruct
+  // (it doesn't know the module namespace), so a separate index resolves the
+  // stream — see `sendWidgetEvent`/`setWidgetProp`. Populated from `irid-events`
+  // for `source === "widget"`.
+  var widgetStreams = {};
   var idleListenerActive = false;
 
   function sendPayload(inputId, payload) {
@@ -536,7 +568,7 @@
       if (filter && !filter(e)) return;
       if (msg.preventDefault) e.preventDefault();
       if (msg.stopPropagation) e.stopPropagation();
-      dispatch(buildPayload(e, el, msg.id));
+      dispatch(buildPayload(e, el, msg.id, msg.inputId));
     }, { capture: !!msg.capture, passive: !!msg.passive });
   }
 
@@ -723,6 +755,12 @@
         setupDebounce(el, msg);
       } else {
         setupImmediate(el, msg);
+      }
+      // Index widget streams by the `{kind}:{id}:{event}` triple a factory's
+      // `sendEvent`/`setProp` resolves against (module-namespace-agnostic).
+      if (msg.source === 'widget') {
+        widgetStreams[msg.kind + ':' + msg.id + ':' + msg.event] =
+          managed[msg.inputId];
       }
     });
   });

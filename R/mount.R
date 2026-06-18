@@ -9,15 +9,22 @@
 #' per-widget pending map on `session$userData$irid_widget_pending`, and a
 #' one-shot `session$onFlushed` handler drains every widget's map at flush
 #' end into a single `irid-attr target="widget"` carrying a
-#' `values: {attr -> value}` object. The batch sequence is the highest
-#' contributed by any binding (or `NULL` for a purely programmatic update).
+#' `values: {attr -> value}` object.
+#'
+#' The stale-echo gate is keyed PER CHANNEL, and a batch can mix props from
+#' different channels (e.g. `xaxis_range` + `yaxis_range` from one box zoom),
+#' so the sequence travels per key: `value_meta: {attr -> {seq, channel}}`.
+#' A key contributed without a sequence (purely programmatic) gets no
+#' `value_meta` entry and the client applies it unconditionally; a batch with
+#' no gated keys carries no `value_meta` at all.
 #'
 #' Batching is intra-flush only: a prop updating in one flush and another in
 #' a later flush still produces two messages.
 #'
 #' @keywords internal
 #' @noRd
-irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
+irid_queue_widget_attr <- function(session, id, attr, value,
+                                   sequence = NULL, channel = NULL) {
   pending <- session$userData$irid_widget_pending
   if (is.null(pending)) {
     pending <- new.env(parent = emptyenv())
@@ -33,25 +40,21 @@ irid_queue_widget_attr <- function(session, id, attr, value, sequence = NULL) {
       for (wid in ids) {
         entry <- pending[[wid]]
         msg <- list(id = wid, target = "widget", values = entry$values)
-        if (!is.null(entry$sequence)) msg$sequence <- entry$sequence
+        if (length(entry$value_meta) > 0L) msg$value_meta <- entry$value_meta
         session$sendCustomMessage("irid-attr", msg)
       }
     }, once = TRUE)
   }
   entry <- pending[[id]]
   if (is.null(entry)) {
-    entry <- list(values = list(), sequence = NULL)
+    entry <- list(values = list(), value_meta = list())
     pending$.order <- c(pending$.order, id)
   }
   # Single-bracket assignment so a legitimate NULL value keeps its key in
   # the map rather than being dropped (`[[<-` with NULL removes the entry).
   entry$values[attr] <- list(irid_jsonify_names(value))
   if (!is.null(sequence)) {
-    entry$sequence <- if (is.null(entry$sequence)) {
-      sequence
-    } else {
-      max(entry$sequence, sequence)
-    }
+    entry$value_meta[[attr]] <- list(seq = sequence, channel = channel)
   }
   pending[[id]] <- entry
   invisible()
@@ -271,10 +274,20 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       }
       handler <- ev$handler
 
+      # The channel = the namespaced inputId the client sends on. It is the
+      # client's per-channel sequence-counter key and the stale-echo gate key,
+      # so echoes stamped with it (below) gate only against newer sends on the
+      # SAME channel.
+      channel <- session$ns(input_id)
+
       msg <- list(
         id = ev$id,
         event = ev$event,
-        inputId = session$ns(input_id),
+        inputId = channel,
+        # `kind` ("prop"/"event") lets the client index widget streams by the
+        # `{kind}:{id}:{event}` triple its `setProp`/`sendEvent` resolves
+        # against — robust to the module namespace the client can't see.
+        kind = ev$kind,
         mode = ev$mode,
         ms = ev$ms,
         leading = ev$leading,
@@ -299,18 +312,30 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         latency <- getOption("irid.debug.latency", 0)
         if (latency > 0) Sys.sleep(latency)
         ev_data <- session$input[[input_id]]
+        source_id <- ev_data[["id"]]
+        write_targets <- ev$write_targets
 
-        # Thread event sequence number for optimistic update tracking.
-        # Store both the sequence and the source element ID so binding
-        # observers only attach the sequence when the binding target
-        # matches the event source (same element). Cross-element updates
-        # (e.g. button click clearing a text input) arrive with no
-        # sequence and are treated as programmatic by the client.
+        # Thread the event sequence for optimistic-update tracking, keyed PER
+        # CHANNEL. `irid_current_sequence[[source_id]][[attr]] = {seq, channel}`
+        # records, for each binding attr this event declares it writes
+        # (`write_targets`), the seq+channel a binding observer should stamp on
+        # its echo. Keying by write target (not just the source element) means
+        # a sibling channel firing in the same flush writes DISJOINT keys and
+        # cannot steal another channel's entry. An event with no declared
+        # targets — a hand-rolled `on*` handler or a `sendEvent` notification —
+        # records nothing, so any binding it incidentally drives echoes ungated
+        # (treated as programmatic). Gating is a property of irid-MANAGED
+        # bindings (autobind `value`/`checked`, `reactiveProxy`, widget props).
         seq <- ev_data[["__irid_seq"]]
-        if (!is.null(seq)) {
-          session$userData$irid_current_sequence <- list(
-            seq = seq, source = ev_data[["id"]]
-          )
+        if (!is.null(seq) && !is.null(write_targets)) {
+          cur <- session$userData$irid_current_sequence
+          if (is.null(cur)) cur <- list()
+          entry <- cur[[source_id]]
+          if (is.null(entry)) entry <- list()
+          info <- list(seq = seq, channel = channel)
+          for (tgt in write_targets) entry[[tgt]] <- info
+          cur[[source_id]] <- entry
+          session$userData$irid_current_sequence <- cur
           session$onFlushed(function() {
             session$userData$irid_current_sequence <- NULL
           }, once = TRUE)
@@ -345,9 +370,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # binding's current value — and if the binding's write is
         # debounced and hasn't delivered yet, the server's stale value
         # would overwrite in-flight client state.
-        source_id <- ev_data[["id"]]
         source_bindings <- bindings_by_id[[source_id]]
-        write_targets <- ev$write_targets
         if (!is.null(seq) && length(source_bindings) > 0L &&
             !is.null(write_targets)) {
           for (sb in source_bindings) {
@@ -355,14 +378,15 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             val <- isolate(sb$fn())
             if (sb$target == "widget") {
               # Same per-widget batch as the binding observers — the
-              # force-send echo coalesces with them in this flush.
-              irid_queue_widget_attr(session, sb$id, sb$attr, val, seq)
+              # force-send echo coalesces with them in this flush. Stamps
+              # this event's channel so the client gates per channel.
+              irid_queue_widget_attr(session, sb$id, sb$attr, val, seq, channel)
             } else {
               msg <- switch(sb$target,
                 dom  = list(id = sb$id, target = "dom",  attr = sb$attr,
-                            value = val, sequence = seq),
+                            value = val, sequence = seq, channel = channel),
                 text = list(id = sb$id, target = "text",
-                            value = val, sequence = seq)
+                            value = val, sequence = seq, channel = channel)
               )
               session$sendCustomMessage("irid-attr", msg)
             }
@@ -388,21 +412,26 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      seq_info <- session$userData$irid_current_sequence
-      seq <- if (!is.null(seq_info) && seq_info$source == b$id) {
-        seq_info$seq
-      } else {
-        NULL
-      }
+      # Look up this binding's own channel: the entry keyed by (source, attr)
+      # that an event in this flush recorded for the target `b$attr`. Absent
+      # for a programmatic update, a cross-element write, or a binding driven
+      # only by a hand-rolled handler — all of which echo ungated.
+      cur <- session$userData$irid_current_sequence
+      info <- if (!is.null(cur) && !is.null(cur[[b$id]])) cur[[b$id]][[b$attr]] else NULL
+      seq <- if (!is.null(info)) info$seq else NULL
+      channel <- if (!is.null(info)) info$channel else NULL
       if (b$target == "widget") {
         # Coalesced per-widget; drained as one `values` map at flush end.
-        irid_queue_widget_attr(session, b$id, b$attr, val, seq)
+        irid_queue_widget_attr(session, b$id, b$attr, val, seq, channel)
       } else {
         msg <- switch(b$target,
           dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
           text = list(id = b$id, target = "text",                value = val)
         )
-        if (!is.null(seq)) msg$sequence <- seq
+        if (!is.null(seq)) {
+          msg$sequence <- seq
+          msg$channel <- channel
+        }
         session$sendCustomMessage("irid-attr", msg)
       }
     }, priority = binding_priority)
