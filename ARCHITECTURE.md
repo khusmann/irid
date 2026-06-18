@@ -521,25 +521,23 @@ unrelated inputs never block each other.
 {
   id:    "irid-7",
   name:  "codemirror",
-  props: { content: "...", language: "r", theme: "dracula" },
-  deps:  [{ name: "cm6", version: "6.0.1", src: { href: "..." }, ... }]
+  props: { content: "...", language: "r", theme: "dracula" }
 }
 ```
 
 Sent after the swap/mutate that introduces the widget's container into
-the DOM. The client:
+the DOM. The message carries **no deps** — a widget's `<script>` / `<link>`
+assets ride the per-session renderUI dep sink (see [Lifecycle and
+dependencies](#lifecycle-and-dependencies)), not this side channel. The
+client:
 
-1. Calls `Shiny.renderDependencies(msg.deps)` to inject `<script>` /
-   `<link>` tags. Deps are dedup'd by name across the session. Note this
-   injects the tags but does **not** await their execution — see the
-   async-factory contract below.
-2. Looks up the factory registered under `msg.name`. If none is
-   registered yet (factory script still loading), buffers `{id, props}`
-   under `pendingInits[name]` and drains it when `irid.defineWidget(name,
-   ...)` eventually lands. (This handles the *factory-not-registered*
-   race; the *library-global-not-loaded* race is the factory's own
-   concern — see below.)
-3. Once the factory is available, `mountWidget` reserves the id
+1. Looks up the factory registered under `msg.name`. If none is
+   registered yet (the sink hasn't delivered the factory script yet),
+   buffers `{id, props}` under `pendingInits[name]` and drains it when
+   `irid.defineWidget(name, ...)` eventually lands. (This handles the
+   *factory-not-registered* race; the *library-global-not-loaded* race is
+   the factory's own concern — see below.)
+2. Once the factory is available, `mountWidget` reserves the id
    synchronously (so a duplicate init is idempotent and an `irid-attr`
    arriving mid-construction buffers rather than dropping), then calls
    `factory(el, props, sendEvent, setProp)`. A factory returns its
@@ -802,11 +800,10 @@ construction needs before building. irid awaits the return, **buffers**
 any `update` that arrives during the wait (coalesced, delivered once the
 handle commits), and **disposes** the handle if the widget was torn down
 mid-construction. The motivating case is a **script-tag library global**:
-`irid-widget-init` injects deps via `Shiny.renderDependencies`, which adds
-the `<script>` but does not await its execution — and the element's `load`
-event is unusable because Shiny injects through jQuery, which runs
-`<script src>` via an AJAX `globalEval` (no element load fires). So the
-factory polls for the global itself:
+the renderUI dep sink injects the dep `<script>` but its execution is not
+awaited — and the element's `load` event is unusable because Shiny injects
+through jQuery, which runs `<script src>` via an AJAX `globalEval` (no
+element load fires). So the factory polls for the global itself:
 
 ```js
 irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
@@ -857,68 +854,60 @@ branch flips, `Each` shape-change rebuilds, removes — those rebuild the
 widget fresh, matching how `<input>` focus/scroll/selection state
 behaves in the same situations.
 
-Widget deps travel two complementary ways.
+**Deps travel one way: the per-session renderUI sink.** Every widget's
+dependencies are delivered at **mount time** through Shiny's *native render
+pipeline*, via a hidden per-session `renderUI` output
+(`install_widget_dep_sink` in [mount.R](R/mount.R)). The sink is installed
+lazily on the first widget mount (guarded on `session$userData` so the
+recursive control-flow mounts share one), and each mount routes its
+widget's deps into it (`feed_widget_dep_sink`), deduped by dependency name
+so a shared library (plotly.js across many `Each` items) is added once. The
+sink's `reactiveVal` of seen deps drives the `renderUI`; adding a new dep
+re-fires it, and Shiny ships only the deps it hasn't already sent on the
+session (the client dedups by name too), so remounts are cheap and
+idempotent. `package`- and file-backed deps need no manual registration —
+the native pipeline resolves and serves them. The `irid-widget-init`
+message carries no deps.
 
-**Per-mount, via the message.** Deps ride the `irid-widget-init` message
-so both top-level mounts and dynamically-mounted widgets (inside
-`When` / `Each` / `Match`) follow one code path. Message deps are not
-auto-registered as Shiny static resources, so `register_widget_dep(dep)`
-runs before each init: it resolves `package`-relative `src$file` to an
-absolute path and routes file-backed deps through
-`shiny::createWebDependency()` (which calls `addResourcePath` and rewrites
-`src` to an href). href-only deps (CDN) and head-only deps pass through
-unchanged. `Shiny.renderDependencies` dedups by name across the session,
-so re-firing `irid-widget-init` on a remount is a no-op for the deps step.
+Why the native pipeline: shinylive serves resource paths registered
+mid-session **only** when they ride Shiny's native render pipeline (initial
+UI, `renderUI`, outputs, `insertUI`). A bare `Shiny.renderDependencies`
+loaded off a custom message is *not* wired to shinylive's static serving,
+so that side channel 404s for file-backed deps there (independent of the
+client call: `Shiny.renderContent` invoked from a custom message 404s too).
+Routing deps through `renderUI` is exactly the path shinylive serves —
+verified with a throwaway spike (a file-backed dep delivered mid-session
+via `renderUI` loads under shinylive; the custom-message control 404s).
+Pinned to **shinylive web assets 0.9.1** — this leans on shinylive's
+runtime serving behavior, so re-confirm on a shinylive bump.
 
-**At render, via the container.** `process_tags` also attaches each
-widget's deps to its container tag, so htmltools collects them into the
-page `<head>` the normal Shiny way — served and browser-cached, and
-critically **served under shinylive**. This is what makes file-backed
-widget deps load there. shinylive *does* serve resource paths registered
-mid-session — but only ones that ride Shiny's **native render pipeline**
-(initial UI, `renderUI`, outputs, `insertUI`). The per-mount delivery
-above registers its path with the same `addResourcePath`, but ships it on
-a custom-message side channel loaded by a bare `Shiny.renderDependencies`,
-which shinylive's static serving is *not* wired to — so that path 404s
-under shinylive (independent of the client call: `Shiny.renderContent`
-invoked from a custom message 404s too). Page-attaching routes the dep
-through the native pipeline instead, so it loads. The two paths coexist
-without double-loading: `Shiny.renderDependencies` dedups the per-mount
-copy by name against the already-rendered page-attached one. (All verified
-with throwaway spikes under `dev/spikes/`, build-ignored; see issue #34.)
+> The sink's `insertUI` places only a *plain* hidden placeholder element
+> (no file-backed dep) — its serving is not in question. The dependency
+> `<script>` / `<link>` assets ride the `renderUI` output, the verified
+> path. irid does not bet on `insertUI` serving a file-backed dep.
+>
+> The output lives in a `display:none` div, so the sink sets
+> `outputOptions(suspendWhenHidden = FALSE)` — without it Shiny suspends the
+> hidden output and the `renderUI` never runs, so no deps ship.
 
-Page-attaching has one ordering consequence: a widget's factory script
-(`<name>-irid.js`) now lands in the `<head>` **ahead of `irid.js`**, so
-`window.irid` may not exist yet when the factory runs. Registration is
-therefore order-independent: a factory calls `defineWidget` if irid.js has
-loaded, else parks `[name, factory]` on `window.iridPendingFactories` for
-irid.js to drain when it loads (symmetric to `pendingInits`, which buffers
-the reverse race — inits arriving before their factory). The plotly factory
-wraps this in a small `defineIridWidget` helper; a CDN/ESM widget shipped
-only via the init message (CodeMirror) always runs after irid.js and can
-call `defineWidget` directly.
+**This closes the #34 limitation.** Because `irid_mount_processed` is the
+recursive chokepoint every nested control-flow mount calls, a widget that
+appears *only* inside `When` / `Each` / `Match` feeds its deps the moment it
+mounts — so it loads under shinylive too, with no static-preload workaround.
+The delivery is uniform across entry modes (`iridApp`, `iridOutput` /
+`renderIrid`) and nested mounts: the sink self-installs on first mount, with
+no per-entry-point UI edits.
 
-This page-attachment only reaches widgets present in the **static** tree at
-render. A widget that appears *only* inside control flow (`When` / `Each` /
-`Match`) is behind a closure not walked until the server renders it, so its
-deps are not collected — and under shinylive (only) such a widget loads
-blank, because its deps then reach the client solely via the custom-message
-side channel shinylive won't serve. This is a **known limitation**; the
-principled fix is to deliver widget deps through Shiny's native pipeline
-(e.g. `insertUI`/outputs) rather than the custom message (issue #34). Until
-then the public-API workaround is to render one instance of the widget
-statically — hidden if need be — so its container page-attaches the
-library:
-
-```r
-# preload plotly's assets so plots mounted only inside Each/When load under
-# shinylive; drop once shinylive serves mid-session resource paths
-tags$div(style = "display:none", PlotlyOutput(\() plotly::plot_ly()))
-```
-
-(`plotly_dependency()` is the internal dep list behind this; it is
-deliberately unexported — exporting an ergonomic preload handle is a clean
-additive follow-up if the dynamic-only-shinylive case proves common.)
+**Timing and ordering.** Deps now arrive on the **first flush** rather than
+in the initial HTML `<head>`; for a static widget that is slightly later
+than the old page-attach, but already tolerated — the async-factory contract
+polls for its library global, and `pendingInits` buffers an init that beats
+its factory. The factory script (`<name>-irid.js`) now always arrives via
+the sink *after* `irid.js` (which stays in the initial `<head>` as
+`irid_dependency()`), so `window.irid` always exists when a factory runs:
+every factory calls `irid.defineWidget` directly — no `window.iridPendingFactories`
+parking. (`PlotlyOutput`'s deps are `plotly_dependency()`; they flow through
+the sink like any other widget's.)
 
 ### Force-send is per-binding
 
