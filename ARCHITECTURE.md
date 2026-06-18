@@ -854,56 +854,52 @@ branch flips, `Each` shape-change rebuilds, removes — those rebuild the
 widget fresh, matching how `<input>` focus/scroll/selection state
 behaves in the same situations.
 
-**Deps travel one way: `insertUI` at mount time.** Every widget's
-dependencies are delivered through Shiny's *native render pipeline* via a
-single `insertUI("body", "beforeEnd", tagList(deps))` per mount
+**Deps travel one way: `insertUI` at mount time.** Every widget's deps are
+delivered through Shiny's native render pipeline via one
+`insertUI("body", "beforeEnd", tagList(deps))` per mount
 (`deliver_widget_deps` in [mount.R](R/mount.R)), deduped by dependency name
-on `session$userData` so a shared library (plotly.js across many `Each`
-items) is inserted once. `package`- and file-backed deps need no manual
-registration — Shiny's `processDeps` resolves and serves them as part of the
-insert. The `irid-widget-init` message carries no deps.
+on `session$userData`. Shiny's `processDeps` resolves and serves
+`package`/file-backed deps as part of the insert (no manual registration);
+the `irid-widget-init` message carries no deps.
 
-Why the native pipeline: shinylive serves resource paths registered
-mid-session **only** when they ride Shiny's native render pipeline (initial
-UI, `renderUI`, outputs, `insertUI`). A bare `Shiny.renderDependencies`
-loaded off a custom message is *not* wired to shinylive's static serving,
-so that side channel 404s for file-backed deps there (independent of the
-client call: `Shiny.renderContent` invoked from a custom message 404s too).
-`insertUI` is on the native pipeline — verified with a throwaway spike (a
-file-backed dep delivered mid-session via `insertUI` loads under shinylive;
-a custom-message control 404s). Pinned to **shinylive web assets 0.9.1** —
-this leans on shinylive's runtime serving behavior, so re-confirm on a
-shinylive bump.
+This is the only delivery path shinylive serves: shinylive serves mid-session
+resource paths **only** on the native pipeline (initial UI, `renderUI`,
+outputs, `insertUI`); a bare `Shiny.renderDependencies` off a custom message
+404s there. A spike confirmed `insertUI` serves a file-backed dep under
+shinylive (the custom-message control 404s) — pinned to **shinylive web
+assets 0.9.1**, re-confirm on a bump.
 
-> An earlier iteration used a hidden per-session `renderUI` *sink*
-> (`uiOutput` + `reactiveVal` + `outputOptions(suspendWhenHidden = FALSE)`,
-> because Shiny suspends hidden outputs). `insertUI` was the doc's stated
-> follow-up, gated only on confirming it serves a file-backed dep under
-> shinylive; once the spike confirmed that, the sink collapsed to the
-> one-liner above. (See also *Lifecycle* below — a related dead end:
-> page-attaching static deps for faster initial load was rejected because a
-> spike showed page-attached factory scripts render *before* `irid.js`,
-> which would resurrect the `iridPendingFactories` parking; the uniform
-> `insertUI` path sidesteps ordering entirely.)
+**Closes #34, uniformly.** `irid_mount_processed` is the chokepoint every
+nested control-flow mount calls, so a widget appearing *only* inside
+`When`/`Each`/`Match` delivers its deps the moment it mounts — no
+static-preload workaround. Same path for every entry mode (`iridApp`,
+`renderIrid`) and nesting depth.
 
-**This closes the #34 limitation.** Because `irid_mount_processed` is the
-recursive chokepoint every nested control-flow mount calls, a widget that
-appears *only* inside `When` / `Each` / `Match` delivers its deps the moment
-it mounts — so it loads under shinylive too, with no static-preload
-workaround. Delivery is uniform across entry modes (`iridApp`, `iridOutput`
-/ `renderIrid`) and nested mounts; nothing to thread through each entry
-point.
+**Ordering is a non-issue.** Deps arrive on the first flush — slightly later
+than a `<head>` page-attach, but tolerated (the async-factory poll and
+`pendingInits` cover it). The factory script always arrives *after* `irid.js`
+(which stays in the initial `<head>` as `irid_dependency()`), so `window.irid`
+always exists and factories call `irid.defineWidget` directly — no
+`window.iridPendingFactories` parking.
 
-**Timing and ordering.** Deps arrive on the **first flush** rather than in
-the initial HTML `<head>`; for a static widget that is slightly later than a
-`<head>` page-attach would be, but already tolerated — the async-factory
-contract polls for its library global, and `pendingInits` buffers an init
-that beats its factory. The factory script (`<name>-irid.js`) always arrives
-via the insert *after* `irid.js` (which stays in the initial `<head>` as
-`irid_dependency()`), so `window.irid` always exists when a factory runs:
-every factory calls `irid.defineWidget` directly — no
-`window.iridPendingFactories` parking. (`PlotlyOutput`'s deps are
-`plotly_dependency()`; they deliver like any other widget's.)
+> History: an earlier iteration used a hidden `renderUI` sink (`uiOutput` +
+> `reactiveVal` + `outputOptions(suspendWhenHidden = FALSE)`); once the spike
+> confirmed `insertUI` serves under shinylive, it collapsed to the one-liner
+> above.
+
+**Rejected: page-attaching static deps for faster load** (deps in the initial
+`<head>` instead of one flush later). A spike (real Shiny `<head>`, 2026-06)
+showed it can't be made clean: a page-attached factory script renders
+*before* `irid.js`, and there's no lever to reorder them — `htmlDependency()`
+has no priority, htmltools puts descendant-attached deps before root-attached
+ones (`irid_dependency()` is root), and Shiny injects deps above `tags$head`
+content (so an inline stub loses too). It would therefore require resurrecting
+the `iridPendingFactories` parking this design deletes — and still wouldn't
+reach control-flow-only widgets (#34). If the first-flush delay is ever
+measured to matter, the only clean variant is page-attaching the heavy
+*library* (ordering-agnostic) while delivering the *factory* script via
+`insertUI` — needing an `IridWidget` API to mark which dep registers the
+factory.
 
 ### Force-send is per-binding
 
