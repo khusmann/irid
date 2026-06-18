@@ -251,7 +251,11 @@ feed_widget_dep_sink <- function(session, deps) {
   if (length(deps) == 0L) return(invisible())
   install_widget_dep_sink(session)
   seen <- session$userData$irid_deps_seen
-  cur <- seen()
+  # `isolate` so feeding from a static (top-level) mount — which runs outside
+  # any reactive context — can read the accumulator, and so feeding from inside
+  # a control-flow observer does not subscribe that observer to the set (only
+  # the sink's renderUI should depend on it).
+  cur <- shiny::isolate(seen())
   added <- FALSE
   for (d in deps) {
     if (is.null(cur[[d$name]])) {
