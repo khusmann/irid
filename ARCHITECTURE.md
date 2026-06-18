@@ -1001,8 +1001,7 @@ The client compiles the expression once per listener (`new Function('e',
 ...)`) and gates dispatch in `attachListener`, the immediate direct-send
 path, and the config-only listener.
 
-There is deliberately no key-matching helper — callers write the predicate
-directly, which keeps the API surface small and the expression explicit:
+Callers write the predicate directly:
 
 ```r
 tags$input(
