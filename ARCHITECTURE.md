@@ -471,6 +471,33 @@ When `coalesce` is true, the rate limiter also gates on server idle state
 (via `Shiny.shinyapp.$idleTimeout`), so events never queue faster than
 the server can process them.
 
+#### Per-element ordering queue
+
+Each `(element, event)` stream has its own rate-limit timer, so without
+coordination an immediate event can overtake a still-debouncing one on the
+same element and reach the server first. The canonical bug: a text input's
+`value` autobind (debounced `input`, 200ms) plus an `onKeyDown` Enter handler
+(immediate) that reads the bound value — pressing Enter right after typing
+sends the keydown before the `input` flush, so the server acts on a stale
+value.
+
+To fix this each element gets a FIFO queue of *pending streams*. A stream
+**joins** the moment it first buffers a payload (claim order). When any stream
+becomes ready to send, `drainQueue` walks the queue head-first: a ready head
+sends; a not-ready head that has a *later* ready stream behind it is
+**preemptively flushed** (its timer cancelled, its buffered payload sent now),
+then the later stream sends. Cutting a debounce short this way is correct — a
+later event on the same element is exactly the signal that the user paused. A
+slot claimed with no buffered payload is dropped, not sent empty.
+
+Ordering beats backpressure: a preemptive flush sends even when the stream
+would otherwise gate on `serverBusy`, while a stream's own steady-state sends
+still respect `coalesce`. This relies on Shiny processing back-to-back
+event-priority inputs in send order — each lands in its own flush, so the
+later handler observes the earlier handler's reactive writes (verified against
+Shiny 1.7.4; re-confirm on bump). The queue is per-element, not global, so
+unrelated inputs never block each other.
+
 ### `irid-widget-init`
 
 ```js
@@ -1013,11 +1040,10 @@ tags$input(
 )
 ```
 
-This is what restores the todo example's Enter-to-add behavior. Without
-client-side filtering every keydown is sent to the server — which, combined
-with the missing event queue ordering (see
-`dev/client-event-queue-design.md`), causes Enter to race ahead of the
-pending `onInput` debounce and submit an incomplete value.
+This is what powers the todo example's Enter-to-add behavior: the filter
+drops every non-Enter keydown client-side, and the [per-element ordering
+queue](#per-element-ordering-queue) guarantees the pending `onInput` value
+flushes before the Enter keydown reaches the server.
 
 ### Testing
 

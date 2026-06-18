@@ -116,6 +116,24 @@ the client.
 - [ ] `dom_opts$prevent_default = TRUE` is forwarded to the event entry on the client
 - [ ] timing shapes (`irid_*()`) are pure structs (no `coalesce`, no handler argument)
 
+## Per-element event ordering (client queue)
+
+Verify that independent streams on one element send in claim order — an
+immediate event cannot overtake a still-debouncing sibling on the same element.
+
+- [ ] e2e: typing (debounced `value` autobind) then Enter (immediate
+      `onKeyDown`) before the debounce flushes — the server's handler observes
+      the typed value, not a stale/empty one (`test-event-order-e2e.R`)
+- [ ] A ready immediate stream preemptively flushes an earlier debounced head
+      (cancels its timer, sends its buffer first), then sends itself
+- [ ] A claimed slot with no buffered payload is dropped, not sent empty
+- [ ] Ordering beats backpressure: a preemptive flush sends even when the
+      stream would gate on `serverBusy`
+- [ ] A lone coalescing stream still gates steady-state sends on `serverBusy`
+      (queue does not break coalesce backpressure)
+- [ ] The queue is per-element — events on different elements do not block
+      each other
+
 ## Auto-bind (state-binding props)
 
 Verify that callable `value`/`checked` props produce both a read binding and
