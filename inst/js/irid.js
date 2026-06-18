@@ -458,6 +458,59 @@
     }
   }
 
+  // --- Per-element ordered send queue --------------------------------------
+  // Each (element,event) stream has its own rate-limit timer, so an immediate
+  // event (onKeyDown) can overtake a still-debouncing one (the value binding's
+  // onInput) and reach the server first — the todo "Enter before onInput
+  // flushes" bug. A per-element FIFO of pending streams restores ordering: a
+  // stream JOINS the moment it first buffers a payload (claim order) and a ready
+  // stream drains in claim order, preemptively flushing an earlier stream still
+  // waiting on its timer. Cutting a debounce short is correct — a later event on
+  // the same element is exactly the signal the user paused. Ordering beats
+  // backpressure: a preemptive flush sends even when the stream would otherwise
+  // gate on serverBusy, while a stream's own steady-state sends still respect
+  // coalesce. Relies on Shiny processing back-to-back event-priority inputs in
+  // send order (verified against Shiny 1.7.4 — re-confirm on bump).
+  var elementQueues = {};  // elementId -> [stream, ...] pending, claim order
+
+  function queueJoin(s) {
+    var q = elementQueues[s.id] || (elementQueues[s.id] = []);
+    if (q.indexOf(s) === -1) q.push(s);
+  }
+
+  // Mark `s` ready to send `payload` (may be null), then drain its element.
+  function queueReady(s, payload) {
+    s.qPayload = payload;
+    s.qReady = true;
+    queueJoin(s);
+    drainQueue(s.id);
+  }
+
+  function drainQueue(elId) {
+    var q = elementQueues[elId];
+    if (!q) return;
+    while (q.length) {
+      var head = q[0];
+      if (!head.qReady) {
+        var laterReady = false;
+        for (var i = 1; i < q.length; i++) {
+          if (q[i].qReady) { laterReady = true; break; }
+        }
+        if (!laterReady) break;   // head still legitimately waiting; stop
+        head.qFlush();            // preempt: cancel timer, surface its buffer
+      }
+      q.shift();
+      var p = head.qPayload;
+      head.qPayload = null;
+      head.qReady = false;
+      // Null guard: a slot claimed with no payload is dropped, not sent empty.
+      if (p !== null && p !== undefined) {
+        sendPayload(head.inputId, p);
+        if (head.coalesce) { head.serverBusy = true; ensureIdleListener(); }
+      }
+    }
+  }
+
   // Compile a `wire_dom_opts(filter = ...)` expression into a predicate
   // over the DOM event `e`, or null when no filter is set. A filtered-out
   // event is dropped before any `preventDefault`/`stopPropagation` or
@@ -501,14 +554,24 @@
 
   function setupThrottle(el, msg) {
     var s = {
+      id: msg.id, inputId: msg.inputId,
       payload: null,
       timerRunning: false, timerReady: false,
       serverBusy: false,
       coalesce: msg.coalesce,
       leading: msg.leading,
-      maybeSend: null,
-      dispatch: null
+      qPayload: null, qReady: false,
+      maybeSend: null, dispatch: null, qFlush: null
     };
+
+    function startCooldown() {
+      s.timerRunning = true;
+      setTimeout(function() {
+        s.timerRunning = false;
+        s.timerReady = true;
+        s.maybeSend();
+      }, msg.ms);
+    }
 
     s.maybeSend = function() {
       if (s.coalesce && s.serverBusy) return;
@@ -517,42 +580,32 @@
       var p = s.payload;
       s.payload = null;
       s.timerReady = false;
-      s.serverBusy = true;
-      sendPayload(msg.inputId, p);
-      s.timerRunning = true;
-      setTimeout(function() {
-        s.timerRunning = false;
-        s.timerReady = true;
-        s.maybeSend();
-      }, msg.ms);
-      if (s.coalesce) ensureIdleListener();
+      queueReady(s, p);
+      startCooldown();
     };
 
     s.dispatch = function(payload) {
       s.payload = payload;
+      queueJoin(s);              // claim slot at DOM-event time
       if (s.timerRunning) return;
       if (s.leading && !(s.coalesce && s.serverBusy)) {
         // Fire immediately, start cooldown timer
         var p = s.payload;
         s.payload = null;
-        s.serverBusy = true;
-        sendPayload(msg.inputId, p);
-        s.timerRunning = true;
-        setTimeout(function() {
-          s.timerRunning = false;
-          s.timerReady = true;
-          s.maybeSend();
-        }, msg.ms);
-        if (s.coalesce) ensureIdleListener();
+        queueReady(s, p);
+        startCooldown();
       } else {
         // Start timer, send when it fires
-        s.timerRunning = true;
-        setTimeout(function() {
-          s.timerRunning = false;
-          s.timerReady = true;
-          s.maybeSend();
-        }, msg.ms);
+        startCooldown();
       }
+    };
+
+    // Preempt: the leading edge already fired; surface the trailing buffer.
+    s.qFlush = function() {
+      s.qPayload = s.payload;
+      s.payload = null;
+      s.timerReady = false;
+      s.qReady = true;
     };
 
     managed[msg.inputId] = s;
@@ -561,12 +614,13 @@
 
   function setupDebounce(el, msg) {
     var s = {
+      id: msg.id, inputId: msg.inputId,
       payload: null,
       timerId: null, timerReady: false,
       serverBusy: false,
       coalesce: msg.coalesce,
-      maybeSend: null,
-      dispatch: null
+      qPayload: null, qReady: false,
+      maybeSend: null, dispatch: null, qFlush: null
     };
 
     s.maybeSend = function() {
@@ -576,14 +630,13 @@
       var p = s.payload;
       s.payload = null;
       s.timerReady = false;
-      s.serverBusy = true;
-      sendPayload(msg.inputId, p);
-      if (s.coalesce) ensureIdleListener();
+      queueReady(s, p);
     };
 
     s.dispatch = function(payload) {
       s.payload = payload;
       s.timerReady = false;
+      queueJoin(s);              // claim slot at DOM-event time
       if (s.timerId !== null) clearTimeout(s.timerId);
       s.timerId = setTimeout(function() {
         s.timerId = null;
@@ -592,51 +645,58 @@
       }, msg.ms);
     };
 
+    // Preempt: a later sibling is ready and we're the head. Cancel the timer
+    // and surface the buffered payload (null -> dropped by the drain).
+    s.qFlush = function() {
+      if (s.timerId !== null) { clearTimeout(s.timerId); s.timerId = null; }
+      s.timerReady = false;
+      s.qPayload = s.payload;
+      s.payload = null;
+      s.qReady = true;
+    };
+
     managed[msg.inputId] = s;
     if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
   }
 
   function setupImmediate(el, msg) {
-    // Two paths: a managed-state path (coalesce, or widget — widget
-    // events always need managed state since they reach the pipeline
-    // through `sendWidgetEvent` rather than a DOM listener), and a
-    // direct-send path for plain DOM immediate-no-coalesce.
-    if (msg.coalesce || msg.source === 'widget') {
-      var s = {
-        payload: null,
-        serverBusy: false,
-        coalesce: !!msg.coalesce,
-        maybeSend: null,
-        dispatch: null
-      };
+    // All immediate streams route through the element queue so a plain
+    // immediate event (e.g. onKeyDown) can preemptively flush a sibling
+    // debounced stream before sending. Widget events reach `dispatch` through
+    // `sendWidgetEvent` rather than a DOM listener, so they skip attachListener.
+    var s = {
+      id: msg.id, inputId: msg.inputId,
+      payload: null,
+      serverBusy: false,
+      coalesce: !!msg.coalesce,
+      qPayload: null, qReady: false,
+      maybeSend: null, dispatch: null, qFlush: null
+    };
 
-      s.maybeSend = function() {
-        if (s.coalesce && s.serverBusy) return;
-        if (s.payload === null) return;
-        var p = s.payload;
-        s.payload = null;
-        if (s.coalesce) s.serverBusy = true;
-        sendPayload(msg.inputId, p);
-        if (s.coalesce) ensureIdleListener();
-      };
+    s.maybeSend = function() {
+      if (s.coalesce && s.serverBusy) return;
+      if (s.payload === null) return;
+      var p = s.payload;
+      s.payload = null;
+      queueReady(s, p);
+    };
 
-      s.dispatch = function(payload) {
-        s.payload = payload;
-        s.maybeSend();
-      };
+    s.dispatch = function(payload) {
+      s.payload = payload;
+      queueJoin(s);              // claim slot at DOM-event time
+      s.maybeSend();
+    };
 
-      managed[msg.inputId] = s;
-      if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
-    } else {
-      var filter = compileFilter(msg);
-      el.addEventListener(msg.event, function(e) {
-        if (shouldSkip(el, msg.event)) return;
-        if (filter && !filter(e)) return;
-        if (msg.preventDefault) e.preventDefault();
-        if (msg.stopPropagation) e.stopPropagation();
-        sendPayload(msg.inputId, buildPayload(e, el, msg.id));
-      }, { capture: !!msg.capture, passive: !!msg.passive });
-    }
+    // Immediate streams are ready the instant they buffer, so a preempt only
+    // happens in a race; surface whatever is buffered.
+    s.qFlush = function() {
+      s.qPayload = s.payload;
+      s.payload = null;
+      s.qReady = true;
+    };
+
+    managed[msg.inputId] = s;
+    if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
   }
 
   Shiny.addCustomMessageHandler('irid-events', function(msgs) {
