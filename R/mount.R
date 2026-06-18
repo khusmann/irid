@@ -200,6 +200,69 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   invisible()
 }
 
+# Per-session hidden `renderUI` sink that delivers widget dependencies through
+# Shiny's *native render pipeline* — the only dep-delivery path shinylive serves
+# (see ARCHITECTURE.md "Widgets -> Lifecycle and dependencies"). Installed once
+# per session, lazily, on the first widget mount; the guard on
+# `session$userData` lets the recursive control-flow mounts share one sink.
+#
+# Routing deps here (rather than page-attaching at render or shipping them on the
+# `irid-widget-init` custom message) reaches widgets that appear *only* inside
+# `When`/`Each`/`Match` — `irid_mount_processed` is the recursive chokepoint
+# every nested mount calls — and keeps the factory script arriving *after*
+# `irid.js` (which stays in the initial <head> as `irid_dependency()`), so
+# `window.irid` always exists when a factory runs.
+install_widget_dep_sink <- function(session) {
+  if (isTRUE(session$userData$irid_dep_sink)) return(invisible())
+  session$userData$irid_dep_sink <- TRUE
+  session$userData$irid_deps_seen <- shiny::reactiveVal(list())
+
+  # The insert carries a PLAIN placeholder (no file-backed dep), so it is
+  # shinylive-safe regardless of any side-channel 404 — the dependency assets
+  # themselves ride the `renderUI` output below, the verified native-pipeline
+  # path. `session$ns()` namespaces the placeholder id so the sink works when a
+  # `renderIrid` mount runs inside a Shiny module; for a top-level session it is
+  # the identity.
+  shiny::insertUI(
+    selector = "body",
+    where = "beforeEnd",
+    ui = shiny::tags$div(
+      style = "display:none",
+      shiny::uiOutput(session$ns("__irid_widget_deps__"))
+    ),
+    immediate = FALSE,
+    session = session
+  )
+
+  session$output[["__irid_widget_deps__"]] <- shiny::renderUI(
+    htmltools::tagList(unname(session$userData$irid_deps_seen()))
+  )
+  invisible()
+}
+
+# Route a widget's dependencies into the per-session sink, deduped by name so a
+# shared library (e.g. plotly.js across many `Each` items) is added once, not
+# once per item. Adding a new dep re-fires the sink's `renderUI`; Shiny ships
+# only the deps it has not already sent on the session, and the client dedups by
+# name, so remounts are cheap and idempotent. Package- / file-backed deps need
+# no manual resource registration: the native render pipeline resolves and
+# serves them (the reason `register_widget_dep` is gone).
+feed_widget_dep_sink <- function(session, deps) {
+  if (length(deps) == 0L) return(invisible())
+  install_widget_dep_sink(session)
+  seen <- session$userData$irid_deps_seen
+  cur <- seen()
+  added <- FALSE
+  for (d in deps) {
+    if (is.null(cur[[d$name]])) {
+      cur[[d$name]] <- d
+      added <- TRUE
+    }
+  }
+  if (added) seen(cur)
+  invisible()
+}
+
 #' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
@@ -246,18 +309,23 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # are invoked from inside the control-flow observer *after* the swap/
   # mutate that introduced the container, so the init message arrives
   # at the client after the DOM change.
+  #
+  # Dependencies do NOT ride this message — they flow through the per-session
+  # `renderUI` sink (the native render pipeline, served under shinylive). The
+  # init message arrives before the sink has delivered the factory script, so
+  # the client parks it under `pendingInits` and drains it when the factory's
+  # `defineWidget` lands.
   for (wi in result$widget_inits) {
     props <- wi$static_props
     for (key in names(wi$prop_fns)) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
     props <- irid_jsonify_names(props)
-    deps <- lapply(wi$deps, register_widget_dep)
+    feed_widget_dep_sink(session, wi$deps)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
       name = wi$name,
-      props = props,
-      deps = deps
+      props = props
     ))
   }
 
