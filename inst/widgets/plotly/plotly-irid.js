@@ -358,31 +358,18 @@
     function attachListeners() {
       el.on("plotly_relayout", function (payload) {
         if (applying()) return;            // our own relayout/restyle echo
-        // A box/lasso select also fires a relayout carrying only `selections`
-        // (the outline geometry). That is not a layout change onRelayout means,
-        // and its sendEvent would bump the shared per-element sequence past the
-        // `selected_ids` setProp from the SAME gesture — gating the selection
-        // echo as stale so it never reaches the widget's state. Ignore
-        // selection-only relayouts; `selected_ids` owns that gesture.
-        // TODO(#28): once the stale-echo gate is per-channel, this skip is no
-        // longer load-bearing for correctness (could drop, or keep purely to
-        // spare onRelayout the transient selection geometry).
         var keys = Object.keys(payload);
         // Plotly fires a bare `{}` relayout on some interactions (and our own
         // settle can surface one). It carries nothing for onRelayout or any
         // prop, so drop it rather than spuriously notifying with an empty object.
         if (!keys.length) return;
-        if (keys.every(function (k) { return /^selections/.test(k); })) return;
-        // Emit the raw escape-hatch notification FIRST, then the prop writes.
-        // setProp and sendEvent share one per-element sequence counter; if the
-        // notification went last it would bump the sequence past the prop
-        // writes, and each prop's snap-back echo (tagged with the prop's lower
-        // sequence) would be gated out as stale. Notifying first lets every
-        // prop carry the gesture's highest sequence, so a rejected write snaps
-        // back. (When onRelayout is unbound, sendEvent is a no-op that does not
-        // touch the sequence.)
-        // TODO(#28): per-channel sequencing makes emit order irrelevant — this
-        // "notification first" constraint can be dropped once that lands.
+        // Per-channel sequencing (#28): the `relayout` notification and each
+        // prop's `setProp` ride independent sequence counters, so the
+        // notification can no longer out-sequence a same-gesture prop write
+        // (a box/lasso select's selection-only relayout no longer gates the
+        // `selected_ids` echo, and a box zoom's two range props don't gate each
+        // other). Emit order is therefore irrelevant; onRelayout sees every
+        // relayout, including the transient selection-outline geometry.
         sendEvent("relayout", payload);  // raw escape hatch (no-op if unbound)
         entries.forEach(function (entry) {
           if (entry.source !== "relayout") return;
