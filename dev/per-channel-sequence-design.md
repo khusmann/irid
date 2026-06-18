@@ -170,6 +170,41 @@ workarounds added solely to dodge the shared-counter pollution come out:
 
 The `TODO(#28)` markers in that file are removed as each site is resolved.
 
+## Folded in: widget channels are broken inside Shiny modules
+
+Settled by `dev/spikes/widget-module-ns.R` (shiny 1.7.4): a widget's
+client→server channel reconstructs its managed-stream key on the **client** as
+`irid_ev_{id}_{event}` / `irid_prop_{id}_{key}` and looks it up in `managed`. But
+the server registers that stream under `session$ns(input_id)` (`R/mount.R:277`).
+
+- **Top level** — root `session$ns` is `NS(NULL)`, the identity, so the rebuilt
+  key matches. Works (all current tests/examples run here).
+- **Inside a module** — `session$ns` prepends the module id
+  (`counter1-irid_ev_…`), which the client rebuild omits, so `pushManaged`'s
+  lookup **misses** and `setProp`/`sendEvent` silently no-op. Broken today.
+
+DOM events are immune — they bind a closure over the stream object and never
+reconstruct a key — which is why non-widget module UI (e.g.
+`examples/shiny_interop.R`) works. This is a pre-existing bug, independent of the
+gate, but it sits in exactly the code #28 touches (the channel key is the same
+`s.inputId` the per-channel counter keys on), so we fix it here.
+
+**Fix.** Stop reconstructing a namespaced-assuming key on the client. Index
+widget streams by the stable `(kind, id, event)` triple the factory actually
+knows:
+
+- Client: a `widgetStreams` map keyed `"{kind}:{id}:{event}"` → the managed
+  stream `s`, populated in the `irid-events` handler for `source === "widget"`.
+  `sendWidgetEvent`/`setWidgetProp` resolve `s` through it; `pushManaged` takes
+  the resolved stream and sends on `s.inputId` (the namespaced target) — which
+  is also the per-channel counter key, so the two fixes share one channel
+  identity.
+- Server: include `kind` (`"prop"`/`"event"`) on widget event messages in
+  `R/mount.R` so the client can build the index key (DOM events omit it).
+
+This makes `managed` keying uniform (always the namespaced `inputId`) and routes
+widget sends through an index that is correct under any namespace.
+
 ## Survey for other workarounds
 
 Before closing, grep the codebase + widget factories for the same
@@ -200,12 +235,19 @@ Survey results: _(to fill in during implementation)_
   box-select `selected_ids` echo is **applied** (state re-resolves on a
   subsequent data change), the regression the bug describes. Confirm the gate
   helper is exercised for the per-key widget drop path.
+- **Widget-in-module (module fix)** — a widget whose `setProp`/`sendEvent`
+  round-trips correctly when mounted via `renderIrid` inside a `moduleServer`
+  (the case the spike shows is broken today). An e2e with a trivial widget
+  inside a module is the faithful test; a lighter unit guard can assert the
+  client builds the `widgetStreams` key from `(kind, id, event)` and that the
+  server emits `kind` on widget event messages.
 
 ## Docs
 
 - `ARCHITECTURE.md` — update the optimistic-update / sequence section to describe
   per-channel keying (counter, `irid_current_sequence` shape, `value_meta` on
-  widget batches) instead of per-element.
+  widget batches) instead of per-element. Document the `widgetStreams` index and
+  that widget channels are now module-safe (the Widgets / namespacing notes).
 - `TESTING.md` — the "Optimistic updates" checklist items that assert
   per-element behaviour need rewording, notably:
   - "Multiple events in one flush: later sequence overwrites earlier … all
@@ -219,21 +261,18 @@ Survey results: _(to fill in during implementation)_
 
 ## Open questions for review
 
-1. **Keep or drop the plotly "skip selection-only relayouts" guard?** It is no
-   longer needed for correctness. Keeping it spares `onRelayout` the transient
-   selection geometry; dropping it is less code. Plan currently keeps it
-   (cosmetic) with a rewritten comment. — _Your call._
-2. **Channel-key namespacing.** The widget `pushManaged` path already looks up
-   `managed[...]` by the **un-namespaced** `irid_ev_{id}_{event}` while DOM uses
-   the namespaced `msg.inputId`; widget events therefore appear to assume a
-   top-level (identity-ns) session today. This design keys the counter by
-   `s.inputId` (whatever the stream resolved under) and the server stamps
-   `session$ns(input_id)` — consistent at top level, and no worse than today in a
-   module. Out of scope to fix module support for widget channels here; flagging
-   it. — _Confirm acceptable._
+**Keep or drop the plotly "skip selection-only relayouts" guard?** It is no
+longer needed for correctness. Keeping it spares `onRelayout` the transient
+selection geometry; dropping it is less code. Plan currently keeps it (cosmetic)
+with a rewritten comment. — _Your call (the one remaining decision)._
+_Resolved during review:_
 
-_Resolved during review:_ gate strictly by `write_targets` (no `__default`
-catch-all); hand-rolled handlers echo ungated. See "Behaviour change" above.
+- **Gating scope** — gate strictly by `write_targets` (no `__default`
+  catch-all); hand-rolled handlers echo ungated. See "Behaviour change" above.
+- **Channel-key namespacing** — confirmed broken in modules by
+  `dev/spikes/widget-module-ns.R`; **folded into this PR** via the
+  `widgetStreams` index. See "Folded in: widget channels are broken inside Shiny
+  modules" above.
 
 ## Re-confirm-on-bump caveats
 
@@ -241,3 +280,6 @@ catch-all); hand-rolled handlers echo ungated. See "Behaviour change" above.
   inputs in send order) is unchanged by this work but still underpins the
   same-flush reasoning; pinned to the existing Shiny version note in
   `dev/client-event-queue-design.md`.
+- The module-namespacing verdict (`dev/spikes/widget-module-ns.R`) depends on
+  `session$ns` / `NS(NULL)` composition; pinned to shiny 1.7.4, re-confirm on
+  bump.
