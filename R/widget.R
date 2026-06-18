@@ -150,33 +150,3 @@ IridWidget <- function(
     class = "irid_widget"
   )
 }
-
-# File-backed dependencies (anything with `src$file` or a `package` arg)
-# need their path registered as a Shiny static resource before the client
-# can fetch them. UI-attached deps get this automatically; deps shipped
-# via the `irid-widget-init` custom message do not — `Shiny.renderDependencies`
-# resolves URLs but doesn't register routes. `createWebDependency` does
-# both, but it can't resolve `package`-relative `src$file` on its own,
-# so do that first.
-#
-# href-only deps (CDN-style — e.g. the CodeMirror example) and head-only
-# deps pass through unchanged.
-register_widget_dep <- function(dep) {
-  if (!is.null(dep$package)) {
-    root <- system.file(package = dep$package)
-    if (!nzchar(root)) {
-      cli::cli_abort(
-        "Could not locate the {.pkg {dep$package}} package for widget \\
-         dependency {.field {dep$name}}."
-      )
-    }
-    if (!is.null(dep$src$file)) {
-      dep$src <- list(file = file.path(root, dep$src$file))
-    }
-    dep$package <- NULL
-  }
-  if (!is.null(dep$src$file)) {
-    dep <- shiny::createWebDependency(dep)
-  }
-  dep
-}

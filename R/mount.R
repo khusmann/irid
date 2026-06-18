@@ -200,6 +200,43 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   invisible()
 }
 
+# Deliver a widget's dependencies at mount time through Shiny's *native render
+# pipeline*, via `insertUI` — the only dep-delivery path shinylive serves (a bare
+# `Shiny.renderDependencies` off the `irid-widget-init` custom message 404s
+# there; see ARCHITECTURE.md "Widgets -> Lifecycle and dependencies"). Verified:
+# an `insertUI`-delivered file-backed dep loads under shinylive (spike, web
+# assets 0.9.1 — re-confirm on bump).
+#
+# Delivering here (rather than page-attaching at render) reaches widgets that
+# appear *only* inside `When`/`Each`/`Match` — `irid_mount_processed` is the
+# recursive chokepoint every nested mount calls — and keeps the factory script
+# arriving *after* `irid.js` (which stays in the initial <head> as
+# `irid_dependency()`), so `window.irid` always exists when a factory runs.
+#
+# Deduped by dependency name across the session so a shared library (e.g.
+# plotly.js across many `Each` items) is inserted once, not once per item.
+# `package`- / file-backed deps need no manual resource registration — the
+# native pipeline resolves and serves them (the reason `register_widget_dep` is
+# gone). The insert is `immediate = FALSE`, so deps arrive on the first flush.
+deliver_widget_deps <- function(session, deps) {
+  if (length(deps) == 0L) return(invisible())
+  seen <- session$userData$irid_deps_seen
+  if (is.null(seen)) seen <- character()
+  new <- Filter(function(d) !(d$name %in% seen), deps)
+  if (length(new) == 0L) return(invisible())
+  session$userData$irid_deps_seen <- c(
+    seen, vapply(new, function(d) d$name, character(1L))
+  )
+  shiny::insertUI(
+    selector = "body",
+    where = "beforeEnd",
+    ui = htmltools::tagList(new),
+    immediate = FALSE,
+    session = session
+  )
+  invisible()
+}
+
 #' Mount a pre-processed irid tag tree
 #'
 #' Takes the output of [process_tags()] and wires up Shiny observers for
@@ -246,18 +283,23 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # are invoked from inside the control-flow observer *after* the swap/
   # mutate that introduced the container, so the init message arrives
   # at the client after the DOM change.
+  #
+  # Dependencies do NOT ride this message — they are delivered via `insertUI`
+  # through the native render pipeline (served under shinylive). The init message
+  # arrives before that insert has delivered the factory script, so the client
+  # parks it under `pendingInits` and drains it when the factory's `defineWidget`
+  # lands.
   for (wi in result$widget_inits) {
     props <- wi$static_props
     for (key in names(wi$prop_fns)) {
       props[[key]] <- isolate(wi$prop_fns[[key]]())
     }
     props <- irid_jsonify_names(props)
-    deps <- lapply(wi$deps, register_widget_dep)
+    deliver_widget_deps(session, wi$deps)
     session$sendCustomMessage("irid-widget-init", list(
       id = wi$id,
       name = wi$name,
-      props = props,
-      deps = deps
+      props = props
     ))
   }
 

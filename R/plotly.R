@@ -218,8 +218,8 @@ validate_plotly_trace_names <- function(data) {
 
 # Memoize the plotly.js html dependencies (typedarray, jquery, crosstalk,
 # plotly-htmlwidgets-css, plotly-main). They're grabbed once from a throwaway
-# build — all five carry `package` + `src$file`, exactly what
-# register_widget_dep resolves.
+# build — all five carry `package` + `src$file`, which Shiny's native pipeline
+# resolves and serves when `deliver_widget_deps` inserts them at mount time.
 .plotly_cache <- new.env(parent = emptyenv())
 
 plotly_js_dependencies <- function() {
@@ -245,8 +245,9 @@ plotly_widget_dependency <- function() {
 #' Plotly html dependencies for PlotlyOutput
 #'
 #' The plotly.js bundle (sourced from the suggested `{plotly}` package) plus the
-#' irid-plotly factory script, carried by [PlotlyOutput()] and page-attached via
-#' its container (see `process_tags`' `irid_widget` branch).
+#' irid-plotly factory script, carried by [PlotlyOutput()] as its widget `deps`
+#' and delivered at mount time via `insertUI` (see `deliver_widget_deps` in
+#' mount.R).
 #'
 #' @return A list of `html_dependency` objects.
 #' @keywords internal
