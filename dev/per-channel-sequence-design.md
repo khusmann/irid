@@ -79,28 +79,33 @@ counter bump and the gate comparison consistent.
 
 ### Server (`R/mount.R`)
 
-`irid_current_sequence` becomes a per-source, per-target map so each binding
-reads *its own* triggering event's seq+channel rather than "whatever event fired
-last this flush":
+`irid_current_sequence` becomes a map keyed by **source element + declared
+write target**, so each binding reads *its own* triggering channel's seq+channel
+rather than "whatever event fired last this flush":
 
 ```
-irid_current_sequence[[source_id]] = list(
-  "__default" = list(seq, channel),   # catch-all for the element
-  <write_target_attr> = list(seq, channel),   # one per declared write target
-  ...
-)
+irid_current_sequence[[source_id]][[write_target_attr]] = list(seq, channel)
 ```
 
-- The **event observer** sets, for its source element: the `__default`
-  catch-all (preserving today's "any binding on the source element picks up the
-  seq" behaviour for hand-rolled handlers that declare no `write_targets`), plus
-  one specific entry per `write_targets` attr. Multiple events on the same
-  element in one flush merge by key (last-writer-wins **per key**) instead of
-  clobbering the whole record — so a sibling channel's send can no longer steal
-  another channel's entry.
-- The **binding observer** for `(id, attr)` looks up the specific
-  `[[attr]]` entry, falling back to `__default`. It stamps both `sequence` and
-  `channel` onto the echo (or `irid_queue_widget_attr`).
+Gating is keyed strictly by `write_targets` — the bindings irid *manages*
+two-way (autobind `value`/`checked`, `reactiveProxy` side-effect writes, widget
+props). A hand-rolled `on*` handler declares no `write_targets`, so it populates
+no entry and the binding it happens to drive echoes with **no sequence** —
+treated as a programmatic update, applied ungated. This is a deliberate
+behaviour change from today's "any binding on the source element picks up the
+seq" rule (see "Behaviour change" below); it makes the seq-stamp path consistent
+with the already-`write_targets`-scoped force-send loop and the
+one-channel-per-event contract.
+
+- The **event observer** sets one entry per `write_targets` attr for its source
+  element. Multiple events on the same element in one flush write **disjoint
+  keys** (each channel owns its own targets), so there is no clobbering — a
+  sibling channel's send can no longer steal another channel's entry. Events
+  with no `write_targets` (notifications, hand-rolled handlers) set nothing.
+- The **binding observer** for `(id, attr)` looks up `[[id]][[attr]]`; if absent
+  (programmatic, or hand-rolled-driven), it sends no sequence. When present it
+  stamps both `sequence` and `channel` onto the echo (or
+  `irid_queue_widget_attr`).
 - The **force-send loop** already iterates `write_targets`; it stamps the
   triggering event's seq + channel (both in scope).
 - `channel <- session$ns(input_id)` is computed once per event in the
@@ -117,10 +122,35 @@ across contributing bindings — meaningless once channels differ per key).
   seq `Na` (bumps `sequences[C1]`). Its event observer sets
   `cur[[id]][["selected_ids"]] = {Na, C1}`.
 - `sendEvent("relayout", …)` → channel `C2 = …irid_ev_{id}_relayout`, seq `Nb`
-  (bumps `sequences[C2]`, **not** `C1`). Its observer touches only `__default`
-  and its own targets — never `selected_ids`.
+  (bumps `sequences[C2]`, **not** `C1`). It declares no `write_targets`, so its
+  observer sets no `irid_current_sequence` entry — never touches `selected_ids`.
 - The `selected_ids` binding echoes with `{seq: Na, channel: C1}`. Client gate:
   `sequences[C1] > Na`? No (only selected_ids sends bump `C1`). **Applied.**
+
+## Behaviour change: hand-rolled handlers no longer gate
+
+Today an event observer stores `irid_current_sequence` for *any* event carrying
+a seq, and any binding on the source element picks it up. This redesign gates
+strictly by declared `write_targets`, so a binding driven only by a hand-rolled
+`on*` handler (which declares no targets) echoes ungated.
+
+This is a deliberate narrowing, justified by three existing facts:
+
+- **The force-send half is already `write_targets`-scoped.** Hand-rolled
+  handlers already get no force-send (`R/mount.R`); this makes the natural-echo
+  seq-stamp consistent with that, rather than leaving the two halves split.
+- **The one-channel-per-event rule already steers off the conflicting pattern.**
+  `value = rv` + `onInput` (same event) errors today; the blessed way to run a
+  synchronous side-effect on write is `value = reactiveProxy(get, set)` — an
+  autobind with a declared target that stays fully gated.
+- **`__default` never robustly protected the residual case anyway.** A
+  hand-rolled handler on a non-autobind event (e.g. `onKeyDown` writing a
+  co-bound `value`) would gate against the *keydown* channel, which newer typing
+  does not bump — so the "protection" was illusory.
+
+Net: managed two-way bindings (autobind `value`/`checked`, `reactiveProxy`,
+widget props) keep full optimistic gating; hand-rolled `on*` handlers are
+side-effect channels whose incidental echoes apply as programmatic.
 
 ## Cleanup unlocked (PlotlyOutput)
 
@@ -155,16 +185,16 @@ Survey results: _(to fill in during implementation)_
   assertions with `value_meta` per-key assertions:
   - per-key `{seq, channel}` recorded and emitted;
   - a purely programmatic batch carries no `value_meta`;
-  - the `irid_current_sequence` integration test uses the new nested structure
-    (`cur[[id]][["__default"]]` / per-target) and asserts the drained
-    `value_meta`.
+  - the `irid_current_sequence` integration test uses the new per-target
+    structure (`cur[[id]][[attr]]`) and asserts the drained `value_meta`.
 - **R unit (new, `test-mount-sequence.R` or fold into batching)** — the
   per-channel threading in `irid_mount_processed`:
   - a binding whose `(id, attr)` matches a write target stamps that target's
     seq+channel;
   - a sibling channel's event in the same flush does **not** overwrite another
     target's entry (the core regression);
-  - a hand-rolled handler (no `write_targets`) falls back to `__default`;
+  - a hand-rolled handler (no `write_targets`) stamps **no** sequence — its
+    binding's echo applies as programmatic (the behaviour change above);
   - a cross-element binding (`source ≠ id`) still stamps nothing (programmatic).
 - **JS / e2e** — extend the plotly e2e (`test-plotly-e2e.R`) to assert the
   box-select `selected_ids` echo is **applied** (state re-resolves on a
@@ -183,7 +213,9 @@ Survey results: _(to fill in during implementation)_
     binding is tagged with its own triggering channel's seq; a sibling channel
     does not clobber it.
   - "`sequences[id]` increments on every DOM event" → `sequences[channel]`.
-  - add a widget per-key gate item.
+  - "Binding observers attach `sequence` … only when `b$id` matches source" →
+    only when a `write_targets` entry matches `(b$id, b$attr)`.
+  - add a widget per-key gate item and a hand-rolled-handler-is-ungated item.
 
 ## Open questions for review
 
@@ -199,11 +231,9 @@ Survey results: _(to fill in during implementation)_
    `session$ns(input_id)` — consistent at top level, and no worse than today in a
    module. Out of scope to fix module support for widget channels here; flagging
    it. — _Confirm acceptable._
-3. **`__default` reserved key.** Uses the literal `"__default"` as the catch-all
-   key in the per-source map, relying on no widget prop / DOM attr being named
-   `__default`. Acceptable, or prefer a structurally separate field
-   (`list(default = …, targets = list(...))`)? The flat form merges more simply
-   across multiple same-flush events. — _Preference?_
+
+_Resolved during review:_ gate strictly by `write_targets` (no `__default`
+catch-all); hand-rolled handlers echo ungated. See "Behaviour change" above.
 
 ## Re-confirm-on-bump caveats
 
@@ -211,5 +241,3 @@ Survey results: _(to fill in during implementation)_
   inputs in send order) is unchanged by this work but still underpins the
   same-flush reasoning; pinned to the existing Shiny version note in
   `dev/client-event-queue-design.md`.
-</content>
-</invoke>
