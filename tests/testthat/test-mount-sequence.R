@@ -1,0 +1,189 @@
+# Per-channel stale-echo sequencing (#28).
+#
+# Drives the event observers in `irid_mount_processed` with simulated client
+# inputs (each carrying `__irid_seq`, `id`, `nonce`) and inspects the resulting
+# `irid-attr` echoes. The core invariant: an echo is stamped with the sequence
+# of ITS OWN channel, so a sibling channel firing in the same flush — another
+# prop, or a notification — cannot make a current echo look stale.
+
+new_capturing_session <- function() {
+  s <- shiny::MockShinySession$new()
+  store <- new.env(parent = emptyenv())
+  store$msgs <- list()
+  s$sendCustomMessage <- function(type, message) {
+    store$msgs[[length(store$msgs) + 1L]] <<-
+      list(type = type, message = message)
+    invisible()
+  }
+  s$msgs <- function() store$msgs
+  s
+}
+
+attr_msgs <- function(session) {
+  Filter(function(m) m$type == "irid-attr", session$msgs())
+}
+
+# Mount a widget, drain the initial (programmatic) flush, and return a context
+# whose `$drain()` returns only the irid-attr echoes produced after `expr`.
+mount_and_settle <- function(node) {
+  s <- new_capturing_session()
+  result <- process_tags(node)
+  handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
+  s$flushReact()
+  base <- length(attr_msgs(s))
+  list(
+    session = s, result = result, handle = handle,
+    wid = result$bindings[[1]]$id,
+    new_attrs = function() {
+      all <- attr_msgs(s)
+      if (length(all) <= base) list() else all[(base + 1L):length(all)]
+    }
+  )
+}
+
+test_that("two props written in one flush each carry their own channel+seq", {
+  # The prop-vs-prop regression: under a shared per-element counter, prop `a`'s
+  # echo (lower seq) was gated by prop `b`'s later send. Per channel, each
+  # echo carries its own seq.
+  a <- shiny::reactiveVal("a0")
+  b <- shiny::reactiveVal("b0")
+  ctx <- mount_and_settle(IridWidget(name = "test", props = list(a = a, b = b)))
+  wid <- ctx$wid
+
+  ctx$session$setInputs(
+    !!paste0("irid_prop_", wid, "_a") :=
+      list(value = "a1", id = wid, `__irid_seq` = 5, nonce = 0.1),
+    !!paste0("irid_prop_", wid, "_b") :=
+      list(value = "b1", id = wid, `__irid_seq` = 9, nonce = 0.2)
+  )
+  ctx$session$flushReact()
+
+  msgs <- ctx$new_attrs()
+  expect_length(msgs, 1L)                    # coalesced into one widget batch
+  vm <- msgs[[1]]$message$value_meta
+  expect_equal(vm$a$seq, 5)
+  expect_equal(vm$b$seq, 9)
+  # Distinct channels — `a`'s is not `b`'s.
+  expect_true(grepl("_a$", vm$a$channel))
+  expect_true(grepl("_b$", vm$b$channel))
+  expect_false(identical(vm$a$channel, vm$b$channel))
+
+  ctx$handle$destroy()
+})
+
+test_that("a sibling notification does not pollute a prop's echo sequence", {
+  # `selected_ids` (a prop) and `relayout` (a sendEvent notification with no
+  # write target) fire from the SAME gesture. The notification carries a higher
+  # seq but writes nothing, so the prop's echo keeps its own lower seq.
+  selected <- shiny::reactiveVal(NULL)
+  relayouts <- shiny::reactiveVal(0L)
+  node <- IridWidget(
+    name = "test",
+    props = list(selected_ids = selected),
+    events = list(relayout = function(e) relayouts(relayouts() + 1L))
+  )
+  ctx <- mount_and_settle(node)
+  wid <- ctx$wid
+
+  ctx$session$setInputs(
+    !!paste0("irid_prop_", wid, "_selected_ids") :=
+      list(value = list("p1"), id = wid, `__irid_seq` = 3, nonce = 0.1),
+    !!paste0("irid_ev_", wid, "_relayout") :=
+      list(id = wid, `__irid_seq` = 8, nonce = 0.2)
+  )
+  ctx$session$flushReact()
+
+  msgs <- ctx$new_attrs()
+  expect_length(msgs, 1L)
+  vm <- msgs[[1]]$message$value_meta
+  # The prop echo carries ITS seq (3), not the notification's later 8.
+  expect_equal(vm$selected_ids$seq, 3)
+  expect_true(grepl("_selected_ids$", vm$selected_ids$channel))
+
+  ctx$handle$destroy()
+})
+
+test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
+  # Behaviour change (#28): gating is keyed by declared `write_targets`. A
+  # hand-rolled `on*` handler declares none, so a binding it drives echoes with
+  # no sequence (applied as programmatic). `value = rv` autobinds on `input`;
+  # the hand-rolled `onKeyDown` is a separate, undeclared channel.
+  rv <- shiny::reactiveVal("x")
+  node <- shiny::tags$input(value = rv, onKeyDown = function(e) rv("typed"))
+  ctx <- mount_and_settle(node)
+  wid <- ctx$wid
+
+  ctx$session$setInputs(
+    !!paste0("irid_ev_", wid, "_keydown") :=
+      list(id = wid, key = "a", `__irid_seq` = 7, nonce = 0.1)
+  )
+  ctx$session$flushReact()
+
+  msgs <- ctx$new_attrs()
+  # The value binding echoed the new value, but with no sequence/channel.
+  value_echo <- Filter(function(m) identical(m$message$attr, "value"), msgs)
+  expect_length(value_echo, 1L)
+  expect_equal(value_echo[[1]]$message$value, "typed")
+  expect_false("sequence" %in% names(value_echo[[1]]$message))
+  expect_false("channel" %in% names(value_echo[[1]]$message))
+
+  ctx$handle$destroy()
+})
+
+test_that("an autobind handler stamps its value binding with seq + channel", {
+  # The managed path: `value = rv` declares `value` as its write target, so a
+  # client write of the input echoes back gated (seq + channel present).
+  rv <- shiny::reactiveVal("x")
+  ctx <- mount_and_settle(shiny::tags$input(value = rv))
+  wid <- ctx$wid
+
+  ctx$session$setInputs(
+    !!paste0("irid_ev_", wid, "_input") :=
+      list(value = "y", id = wid, `__irid_seq` = 4, nonce = 0.1)
+  )
+  ctx$session$flushReact()
+
+  # Both the binding observer and the no-op force-send echo `value` (a known,
+  # harmless duplicate) — each must carry the input channel's seq.
+  value_echo <- Filter(
+    function(m) identical(m$message$attr, "value"), ctx$new_attrs()
+  )
+  expect_gte(length(value_echo), 1L)
+  for (m in value_echo) {
+    expect_equal(m$message$sequence, 4)
+    expect_true(grepl("_input$", m$message$channel))
+  }
+
+  ctx$handle$destroy()
+})
+
+test_that("widget event messages carry kind and a namespaced inputId", {
+  # The module fix: the client indexes widget streams by `{kind}:{id}:{event}`,
+  # so the server must label each widget channel with its kind, and the inputId
+  # must be the namespaced send target (MockShinySession namespaces as
+  # "mock-session-").
+  v <- shiny::reactiveVal("v0")
+  node <- IridWidget(
+    name = "test",
+    props = list(v = v),
+    events = list(ping = function(e) NULL)
+  )
+  s <- new_capturing_session()
+  result <- process_tags(node)
+  handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
+
+  ev_msg <- Filter(function(m) m$type == "irid-events", s$msgs())
+  expect_length(ev_msg, 1L)
+  rows <- ev_msg[[1]]$message
+  bykind <- stats::setNames(
+    rows, vapply(rows, function(r) r$event, character(1))
+  )
+
+  expect_equal(bykind$v$kind, "prop")
+  expect_equal(bykind$ping$kind, "event")
+  # inputId is namespaced (the client's managed key / send target).
+  expect_true(grepl("^mock-session-irid_prop_.*_v$", bykind$v$inputId))
+  expect_true(grepl("^mock-session-irid_ev_.*_ping$", bykind$ping$inputId))
+
+  handle$destroy()
+})

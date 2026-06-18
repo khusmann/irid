@@ -85,21 +85,28 @@ test_that("widgets drain in first-seen order, not alphabetical", {
   expect_equal(ids, c("w-2", "w-10"))
 })
 
-test_that("batch sequence is the max contributed by any binding", {
+test_that("each key carries its own {seq, channel} in value_meta", {
+  # The gate is per channel, so the sequence travels per key (not one batch-
+  # level max): a box zoom can contribute xaxis_range + yaxis_range from two
+  # different channels in one batch.
   s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1, sequence = 3)
-  irid:::irid_queue_widget_attr(s, "w1", "b", 2, sequence = 7)
+  irid:::irid_queue_widget_attr(s, "w1", "a", 1, sequence = 3, channel = "ch_a")
+  irid:::irid_queue_widget_attr(s, "w1", "b", 2, sequence = 7, channel = "ch_b")
   irid:::irid_queue_widget_attr(s, "w1", "c", 3, sequence = NULL)
   s$flushReact()
 
-  expect_equal(attr_msgs(s)[[1]]$message$sequence, 7)
+  vm <- attr_msgs(s)[[1]]$message$value_meta
+  expect_equal(vm$a, list(seq = 3, channel = "ch_a"))
+  expect_equal(vm$b, list(seq = 7, channel = "ch_b"))
+  # A programmatic key (no sequence) gets no value_meta entry — applied always.
+  expect_false("c" %in% names(vm))
 })
 
-test_that("a purely programmatic batch carries no sequence", {
+test_that("a purely programmatic batch carries no value_meta", {
   s <- new_batch_session()
   irid:::irid_queue_widget_attr(s, "w1", "a", 1)
   s$flushReact()
-  expect_false("sequence" %in% names(attr_msgs(s)[[1]]$message))
+  expect_false("value_meta" %in% names(attr_msgs(s)[[1]]$message))
 })
 
 test_that("a later attr overwrites an earlier value for the same key", {
@@ -196,7 +203,7 @@ test_that("props changing in separate flushes drain as separate messages", {
   m$handle$destroy()
 })
 
-test_that("a batch driven by the current event sequence carries that sequence", {
+test_that("a binding stamps its own (source, attr) channel into value_meta", {
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()            # initial (programmatic) batch
@@ -204,11 +211,35 @@ test_that("a batch driven by the current event sequence carries that sequence", 
 
   wid <- m$result$bindings[[1]]$id
   shiny::isolate(content("yo"))
-  m$session$userData$irid_current_sequence <- list(seq = 42, source = wid)
+  # New per-channel shape: keyed by source id, then write-target attr.
+  m$session$userData$irid_current_sequence <- list()
+  m$session$userData$irid_current_sequence[[wid]] <-
+    list(content = list(seq = 42, channel = "ch_content"))
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_equal(last$sequence, 42)
+  expect_equal(last$value_meta$content, list(seq = 42, channel = "ch_content"))
+
+  m$handle$destroy()
+})
+
+test_that("a binding whose attr has no current-sequence entry echoes ungated", {
+  # A sibling channel recorded a DIFFERENT attr this flush; the content binding
+  # finds no entry for its own attr and sends no value_meta (programmatic).
+  content <- shiny::reactiveVal("hi")
+  m <- mount_widget(list(content = content))
+  m$session$flushReact()
+  base <- length(attr_msgs(m$session))
+
+  wid <- m$result$bindings[[1]]$id
+  shiny::isolate(content("yo"))
+  m$session$userData$irid_current_sequence <- list()
+  m$session$userData$irid_current_sequence[[wid]] <-
+    list(other_attr = list(seq = 9, channel = "ch_other"))
+  m$session$flushReact()
+
+  last <- attr_msgs(m$session)[[base + 1L]]$message
+  expect_false("value_meta" %in% names(last))
 
   m$handle$destroy()
 })

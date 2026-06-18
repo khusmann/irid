@@ -357,8 +357,10 @@ anchor references are preserved across moves.
 ### `irid-attr`
 
 ```js
-// target = "dom" — DOM property/attribute write
-{id: "irid-3", target: "dom",  attr: "value", value: "hello", sequence: 12}
+// target = "dom" — DOM property/attribute write. `sequence`+`channel` gate the
+// echo against the channel that produced it (omitted for programmatic writes).
+{id: "irid-3", target: "dom",  attr: "value", value: "hello",
+ sequence: 12, channel: "irid_ev_irid-3_input"}
 
 // target = "text" — text replacement in a comment-anchor range
 {id: "irid-5", target: "text", value: "Count: 42"}
@@ -366,8 +368,11 @@ anchor references are preserved across moves.
 // target = "widget" — route a coalesced batch to a widget's update() hook.
 // `values` is always a {attr -> value} map (one or more keys), built by
 // coalescing every widget binding that fired in the same server flush.
+// `value_meta` carries the per-key {seq, channel} for the stale-echo gate (only
+// for keys that came from a client write; programmatic keys are omitted).
 {id: "irid-7", target: "widget",
- values: {content: "...", cursor: {line: 1, ch: 1}}, sequence: 12}
+ values: {content: "...", cursor: {line: 1, ch: 1}},
+ value_meta: {content: {seq: 12, channel: "irid_prop_irid-7_content"}}}
 ```
 
 Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
@@ -385,10 +390,10 @@ widget registered at `msg.id` and calls `handle.update(msg.values)`
 with the coalesced `{attr -> value}` map; the widget's update hook
 owns the "compare against current state, skip on match" logic — irid
 stays generic because what counts as "current state" is
-library-specific. The universal stale-echo gate above ensures the
-widget never sees out-of-order batches, so the hook doesn't need a
-sequence argument. See [Widgets](#widgets) for the per-flush
-batching that builds `values`.
+library-specific. The per-key stale-echo gate (via `value_meta`) drops any
+stale key from the batch before the hook runs, so the hook never sees an
+out-of-order value and doesn't need a sequence argument. See [Widgets](#widgets)
+for the per-flush batching that builds `values`.
 
 ### `irid-swap`
 
@@ -438,6 +443,7 @@ initialize any new Shiny outputs.
     event: "input",
     inputId: "irid_ev_irid-2_input",
     source: "dom",
+    kind: null,            // "prop" / "event" for widget channels; null for DOM
     mode: "throttle",
     ms: 100,
     leading: true,
@@ -461,11 +467,22 @@ event fields), and pushes the payload through the managed-state via
 `clientOnly` entry (a config-only `wire` with `dom_opts` but no
 handler) attaches a bare listener that applies the DOM flags and never
 sends — no managed state, no round-trip. If `source = "widget"`, the
-listener-attach step is skipped;
-the widget JS pushes payloads through `irid.sendWidgetEvent(id, event,
-payload)`, which uses the same managed-state machinery. The DOM and
-widget paths share one sequence counter per element id, so cross-element
-echoes are gated uniformly.
+listener-attach step is skipped; the entry is also indexed in
+`widgetStreams` under `{kind}:{id}:{event}`, and the widget JS pushes payloads
+through `irid.sendWidgetEvent(id, event, payload)` / `setProp`, which resolve
+their stream through that index. The index (rather than rebuilding the inputId
+on the client) is what makes widget channels work under Shiny modules, where
+the namespaced `inputId` is unknowable to a widget factory.
+
+**Per-channel sequencing.** Every outbound send bumps a counter keyed by its
+`inputId` (`sequences[channel]`), and each echo carries the `channel` (and seq)
+it should be gated against. A channel is one client→server stream — a DOM
+event, a widget event, or a widget prop write-back — so a sibling channel's send
+can never gate another channel's echo. This matters for widgets, where one
+element multiplexes many props/events: a box-select firing both
+`setProp("selected_ids")` and a `relayout` notification, or a box-zoom writing
+both `xaxis_range` and `yaxis_range`, no longer cross-gate. See
+[Controlled Input: Optimistic Updates](#controlled-input-optimistic-updates).
 
 When `coalesce` is true, the rate limiter also gates on server idle state
 (via `Shiny.shinyapp.$idleTimeout`), so events never queue faster than
@@ -542,53 +559,70 @@ overwrite characters the user typed while the server was processing. Conversely,
 programmatic updates (e.g. clearing an input after form submission) must always
 apply, even while the element is focused.
 
-**Sequence numbers** solve this. Each event payload includes an incrementing
-`__irid_seq`. The R event observer stores it on
-`session$userData$irid_current_sequence` and registers `session$onFlushed` to
-clear it after the flush completes. Binding observers attach the sequence to
-`irid-attr` messages when present. On the client, `irid-attr` for `value` on a
-focused element uses the sequence to decide:
+**Per-channel sequence numbers** solve this. Each event payload includes an
+incrementing `__irid_seq`, counted PER CHANNEL on the client (`sequences[channel]`,
+keyed by the `inputId` the payload is sent on). A *channel* is one client→server
+stream from an element: a DOM event, a widget event, or a widget prop write-back.
+The R event observer records, for each binding attr the event declares it writes
+(`write_targets`), the `{seq, channel}` a binding observer should stamp on its
+echo — stored on `session$userData$irid_current_sequence` keyed by
+`[[source_id]][[attr]]`, cleared via `session$onFlushed`. Binding observers stamp
+both `sequence` and `channel`; the echo gate compares the echo's `sequence`
+against `sequences[channel]`. On the client, `irid-attr` for `value` on a focused
+element decides:
 
-- **Stale echo** (sequence < client's latest sent) → skip.
-- **Current echo, same value** (sequence ≥ latest sent, `el.value === msg.value`)
+- **Stale echo** (sequence < the channel's latest sent) → skip.
+- **Current echo, same value** (not stale, `el.value === msg.value`)
   → no-op skip (avoids cursor position reset).
-- **Server transform** (sequence ≥ latest sent, different value) → apply (e.g.
+- **Server transform** (not stale, different value) → apply (e.g.
   server uppercases input).
-- **Programmatic update** (no sequence) → always apply.
+- **Programmatic update** (no sequence/channel) → always apply.
+
+Keying by channel (not by element) is what lets a widget multiplex many
+props/events through one element without a sibling channel's send gating another
+channel's echo. A widget batch carries the gate per key (`value_meta:
+{key -> {seq, channel}}`) since one batch can coalesce props from different
+channels (e.g. `xaxis_range` + `yaxis_range` from a box zoom).
 
 Key design points:
 
-- **`onFlushed` for cleanup.** The sequence is stored as a plain (non-reactive)
+- **`onFlushed` for cleanup.** The map is stored as a plain (non-reactive)
   session variable so binding observers can read it without creating a reactive
   dependency. `session$onFlushed(once = TRUE)` clears it after the entire reactive
-  chain settles — derived reactives and chained observers all see the sequence
+  chain settles — derived reactives and chained observers all see the entry
   within the same flush, but the next flush starts clean.
 
-- **Cross-element updates.** The R side stores both the sequence and the source
-  element ID. Binding observers only attach the sequence when `b$id` matches the
-  event source. If a button click's handler clears a text input, the text input's
-  binding sees a different source and omits the sequence — so the client treats it
-  as a programmatic update and applies it. Without this, the button's sequence
-  (e.g. 1) would be compared against the text input's independent counter (e.g. 5)
-  and incorrectly rejected as stale.
+- **Gating is for irid-managed bindings only.** Only events with declared
+  `write_targets` — autobind `value`/`checked`, `reactiveProxy` writes, widget
+  two-way props — record sequence entries. A hand-rolled `on*` handler (opaque
+  closure, no declared target) records nothing, so a binding it incidentally
+  drives echoes ungated (applied as programmatic). This keeps the seq-stamp path
+  consistent with the already-`write_targets`-scoped force-send, and the
+  one-channel-per-event rule already steers controlled values onto the managed
+  autobind path.
 
-- **Multiple events in one flush.** If two event observers run in the same flush,
-  the later one's sequence overwrites the earlier. This is correct — it means all
-  bindings in that flush are tagged with the latest sequence, which is the most
-  conservative (least likely to be considered stale).
+- **Cross-element updates.** Entries are keyed by source element id, so a binding
+  on a *different* element finds no entry and omits the sequence. If a button
+  click's handler clears a text input, the text input's binding is treated as
+  programmatic and applies.
+
+- **Sibling channels in one flush.** Two events on the same element in one flush
+  write DISJOINT keys (each channel owns its `write_targets`), so neither steals
+  the other's entry — each echo carries its own channel's seq.
 
 - **`__irid_seq` is excluded** from the `event_obj` passed to user handlers, so
   it is an internal-only field.
 
 - **Force-send on no-op.** After running the user's event handler, the event
-  observer reads all bindings for the source element with `isolate()` and sends
-  `irid-attr` messages tagged with the sequence. This covers the case where the
-  handler sets a `reactiveVal` to the same value it already holds (a no-op that
-  doesn't invalidate the binding observer). Without the force-send, the client
-  would receive no echo and could not apply a server transform. For example, a
-  handler that truncates `text(substr(event$value, 1, 10))` when `text()` is
-  already 10 characters — the reactive doesn't change, but the client still needs
-  the truncated value to replace what the user typed. When the reactive *does*
+  observer reads the source element's bindings whose attr is in `write_targets`
+  with `isolate()` and sends `irid-attr` messages stamped with this event's
+  sequence and channel. This covers the case where the handler sets a
+  `reactiveVal` to the same value it already holds (a no-op that doesn't
+  invalidate the binding observer). Without the force-send, the client would
+  receive no echo and could not apply a server transform. For example, a handler
+  that truncates `text(substr(event$value, 1, 10))` when `text()` is already 10
+  characters — the reactive doesn't change, but the client still needs the
+  truncated value to replace what the user typed. When the reactive *does*
   change, both the force-send and the binding observer fire with the same value;
   the client handles the duplicate harmlessly.
 

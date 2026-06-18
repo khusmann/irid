@@ -236,6 +236,13 @@ listener options for that event.
 - [ ] Event input IDs are correctly namespaced via `session$ns()`
 - [ ] Bindings inside a module target the correct namespaced element IDs
 - [ ] Nested modules (module inside module) produce unique IDs
+- [ ] Widget event messages carry `kind` (`"prop"`/`"event"`) and a namespaced
+      `inputId`, and the client indexes `widgetStreams` by `{kind}:{id}:{event}`
+      so `setProp`/`sendEvent` resolve the stream without rebuilding the
+      namespaced inputId (`test-mount-sequence.R`)
+- [ ] A widget inside `renderIrid` inside a `moduleServer`: `setProp`/`sendEvent`
+      round-trip (regression — broke when the client rebuilt an un-namespaced
+      key; see `dev/spikes/widget-module-ns.R` for the original verdict)
 
 ## Optimistic updates
 
@@ -243,25 +250,34 @@ Verify the sequence-based optimistic update system for controlled inputs.
 
 ### Sequence tracking
 
-- [ ] Each event payload includes an incrementing `__irid_seq`
+- [ ] Each event payload includes an incrementing `__irid_seq`, counted per
+      channel (`sequences[channel]`, keyed by the send `inputId`)
 - [ ] `__irid_seq` is excluded from the `event_obj` passed to user handlers
-- [ ] Event observer stores `irid_current_sequence` on `session$userData`
+- [ ] Event observer stores `irid_current_sequence[[source]][[attr]] = {seq,
+      channel}` per declared `write_targets` (`test-mount-sequence.R`)
 - [ ] `onFlushed` clears `irid_current_sequence` after the flush completes
-- [ ] Binding observers attach `sequence` to `irid-attr` only when `b$id` matches source
+- [ ] Binding observers stamp `sequence` + `channel` only when a `write_targets`
+      entry matches `(b$id, b$attr)` (`test-mount-sequence.R`,
+      `test-widget-batching.R`)
+- [ ] A hand-rolled handler (no `write_targets`) drives its binding ungated —
+      echo carries no sequence/channel (`test-mount-sequence.R`)
 
 ### Client-side echo handling
 
-- [ ] **Stale echo** — `irid-attr` with `sequence < latest sent` is skipped
-- [ ] **Current echo, same value** — `sequence >= latest sent` and `el.value === msg.value` is skipped (avoids cursor reset)
-- [ ] **Server transform** — `sequence >= latest sent` and different value is applied (e.g. server truncates input)
-- [ ] **Programmatic update** — `irid-attr` with no sequence always applies, even on focused element
+- [ ] **Stale echo** — `irid-attr` with `sequence < sequences[channel]` is skipped
+- [ ] **Current echo, same value** — not stale and `el.value === msg.value` is skipped (avoids cursor reset)
+- [ ] **Server transform** — not stale and different value is applied (e.g. server truncates input)
+- [ ] **Programmatic update** — `irid-attr` with no sequence/channel always applies, even on focused element
+- [ ] **Widget batch, per-key gate** — a `value_meta` batch drops only the stale
+      keys (gated against each key's own channel) and applies the rest; a batch
+      with every key stale is dropped entirely
 - [ ] **Non-value attributes** — optimistic logic only gates `value` on focused
       elements; other attrs (`disabled`, `class`, etc.) always apply immediately
 - [ ] **Element loses focus before response** — user types, tabs away, server
       responds: update applies normally (element no longer focused, no
       optimistic gating)
 - [ ] **Sequence counter vs sent payloads** — with throttle/coalesce,
-      `sequences[id]` increments on every DOM event (via `buildPayload`), but
+      `sequences[channel]` increments on every DOM event (via `buildPayload`), but
       only some payloads are actually sent. A response to an early payload is
       correctly treated as stale relative to later unsent keystrokes
 
@@ -296,9 +312,11 @@ Verify the sequence-based optimistic update system for controlled inputs.
 - [ ] With debounce: events are held until the user pauses, then gated by server idle
 - [ ] With `coalesce = FALSE` (default for `wire_immediate`): events fire on
       every input without waiting for server — events pile up under high latency
-- [ ] Multiple events in one flush: later sequence overwrites earlier on
-      `session$userData$irid_current_sequence`, so all bindings in that flush
-      are tagged with the most recent sequence
+- [ ] Multiple events in one flush: each writes its own `write_targets` keys in
+      `irid_current_sequence`, so every binding is tagged with ITS channel's
+      sequence (a sibling channel does not clobber another's) — the per-channel
+      regression (`test-mount-sequence.R`): two props, and a notification +
+      prop, in one flush
 
 ## Stale UI indicator
 
