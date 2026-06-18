@@ -24,19 +24,28 @@ test_that("timing constructors validate their args", {
 
 # --- wire_dom_opts -----------------------------------------------------------
 
-test_that("wire_dom_opts defaults all flags to FALSE", {
+test_that("wire_dom_opts defaults all flags to FALSE and filter to NULL", {
   o <- wire_dom_opts()
   expect_s3_class(o, "irid_dom_opts")
   expect_false(o$prevent_default)
   expect_false(o$stop_propagation)
   expect_false(o$capture)
   expect_false(o$passive)
+  expect_null(o$filter)
 })
 
 test_that("wire_dom_opts validates flags are logical scalars", {
   expect_error(wire_dom_opts(prevent_default = 1), "`prevent_default` must be")
   expect_error(wire_dom_opts(capture = NA), "`capture` must be")
   expect_error(wire_dom_opts(passive = c(TRUE, FALSE)), "`passive` must be")
+})
+
+test_that("wire_dom_opts carries and validates the filter expression", {
+  o <- wire_dom_opts(filter = "e.key === 'Enter'")
+  expect_identical(o$filter, "e.key === 'Enter'")
+  expect_error(wire_dom_opts(filter = 1), "`filter` must be")
+  expect_error(wire_dom_opts(filter = ""), "`filter` must be")
+  expect_error(wire_dom_opts(filter = c("a", "b")), "`filter` must be")
 })
 
 # --- wire ---------------------------------------------------------------

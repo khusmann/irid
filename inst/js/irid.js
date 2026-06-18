@@ -458,13 +458,29 @@
     }
   }
 
+  // Compile a `wire_dom_opts(filter = ...)` expression into a predicate
+  // over the DOM event `e`, or null when no filter is set. A filtered-out
+  // event is dropped before any `preventDefault`/`stopPropagation` or
+  // dispatch, so the page's default behavior is left untouched.
+  function compileFilter(msg) {
+    if (!msg.filter) return null;
+    try {
+      return new Function('e', 'return (' + msg.filter + ');');
+    } catch (err) {
+      console.error('irid: invalid event filter expression:', msg.filter, err);
+      return null;
+    }
+  }
+
   // Attach a DOM listener that dispatches the event payload through
   // the managed state. Only invoked for `source !== "widget"` —
   // widget events skip this and push through `sendWidgetEvent` (which
   // calls `s.dispatch` directly).
   function attachListener(el, msg, dispatch) {
+    var filter = compileFilter(msg);
     el.addEventListener(msg.event, function(e) {
       if (shouldSkip(el, msg.event)) return;
+      if (filter && !filter(e)) return;
       if (msg.preventDefault) e.preventDefault();
       if (msg.stopPropagation) e.stopPropagation();
       dispatch(buildPayload(e, el, msg.id));
@@ -474,8 +490,10 @@
   // A config-only event (wire with dom_opts but no handler): apply the
   // DOM listener flags client-side and never round-trip to the server.
   function attachClientOnlyListener(el, msg) {
+    var filter = compileFilter(msg);
     el.addEventListener(msg.event, function(e) {
       if (shouldSkip(el, msg.event)) return;
+      if (filter && !filter(e)) return;
       if (msg.preventDefault) e.preventDefault();
       if (msg.stopPropagation) e.stopPropagation();
     }, { capture: !!msg.capture, passive: !!msg.passive });
@@ -610,8 +628,10 @@
       managed[msg.inputId] = s;
       if (msg.source !== 'widget') attachListener(el, msg, s.dispatch);
     } else {
+      var filter = compileFilter(msg);
       el.addEventListener(msg.event, function(e) {
         if (shouldSkip(el, msg.event)) return;
+        if (filter && !filter(e)) return;
         if (msg.preventDefault) e.preventDefault();
         if (msg.stopPropagation) e.stopPropagation();
         sendPayload(msg.inputId, buildPayload(e, el, msg.id));

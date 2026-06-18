@@ -18,7 +18,8 @@ wire_dom_opts(
   prevent_default = FALSE,
   stop_propagation = FALSE,
   capture = FALSE,
-  passive = FALSE
+  passive = FALSE,
+  filter = NULL
 )
 
 wire(subject = NULL, timing = NULL, coalesce = NULL, dom_opts = NULL)
@@ -37,6 +38,10 @@ If \code{FALSE}, wait for the timer before firing.}
 \item{capture}{Register the listener in the capture phase.}
 
 \item{passive}{Register the listener as passive.}
+
+\item{filter}{A JavaScript expression string, evaluated client-side with
+the event object bound to \code{e}; the event is dropped when it is falsy.
+\code{NULL} (the default) applies no filter.}
 
 \item{subject}{The handler or reactive the wire configures. The slot
 decides which: a bare callable means "bind" in \verb{value =} / \verb{checked =}
@@ -102,6 +107,13 @@ where the event is backed by a real DOM listener (a plain tag, a custom
 element emitting cancelable events); placing it on a widget-emitted event
 errors. Whether \code{prevent_default} has any effect further depends on the
 event being cancelable — a runtime fact.
+
+\code{filter} is a JavaScript expression string evaluated client-side with the
+DOM event object bound to \code{e}. When it evaluates falsy the event is
+dropped entirely — no \code{prevent_default}/\code{stop_propagation}, no server
+round-trip — so a handler that only cares about some events never floods
+the server with the rest. For example, an \code{onKeyDown} that acts only on
+Enter takes \code{filter = "e.key === 'Enter'"}.
 }
 
 \section{The event object}{

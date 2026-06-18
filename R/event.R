@@ -40,6 +40,13 @@
 #' errors. Whether `prevent_default` has any effect further depends on the
 #' event being cancelable — a runtime fact.
 #'
+#' `filter` is a JavaScript expression string evaluated client-side with the
+#' DOM event object bound to `e`. When it evaluates falsy the event is
+#' dropped entirely — no `prevent_default`/`stop_propagation`, no server
+#' round-trip — so a handler that only cares about some events never floods
+#' the server with the rest. For example, an `onKeyDown` that acts only on
+#' Enter takes `filter = "e.key === 'Enter'"`.
+#'
 #' @section The event object:
 #' The `event` argument passed to handlers is a list containing all
 #' primitive-valued properties (string, numeric, logical) from the browser
@@ -72,6 +79,9 @@
 #' @param stop_propagation Call `event.stopPropagation()` before dispatch.
 #' @param capture Register the listener in the capture phase.
 #' @param passive Register the listener as passive.
+#' @param filter A JavaScript expression string, evaluated client-side with
+#'   the event object bound to `e`; the event is dropped when it is falsy.
+#'   `NULL` (the default) applies no filter.
 #'
 #' @return `wire()` returns an `irid_wire`; the timing constructors
 #'   return an `irid_wire_timing`; `wire_dom_opts()` returns an `irid_dom_opts`.
@@ -106,15 +116,16 @@ wire_debounce <- function(ms) {
 #' @rdname wire
 #' @export
 wire_dom_opts <- function(prevent_default = FALSE, stop_propagation = FALSE,
-                          capture = FALSE, passive = FALSE) {
+                          capture = FALSE, passive = FALSE, filter = NULL) {
   check_bool(prevent_default)
   check_bool(stop_propagation)
   check_bool(capture)
   check_bool(passive)
+  check_string(filter, allow_null = TRUE, allow_empty = FALSE)
   structure(
     list(
       prevent_default = prevent_default, stop_propagation = stop_propagation,
-      capture = capture, passive = passive
+      capture = capture, passive = passive, filter = filter
     ),
     class = "irid_dom_opts"
   )

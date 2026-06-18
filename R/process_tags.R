@@ -116,7 +116,8 @@ resolve_wire_config <- function(wire, event_name, default_timing = NULL) {
     prevent_default  = if (is.null(dom)) FALSE else dom$prevent_default,
     stop_propagation = if (is.null(dom)) FALSE else dom$stop_propagation,
     capture          = if (is.null(dom)) FALSE else dom$capture,
-    passive          = if (is.null(dom)) FALSE else dom$passive
+    passive          = if (is.null(dom)) FALSE else dom$passive,
+    filter           = if (is.null(dom)) NULL else dom$filter
   )
 }
 
@@ -543,6 +544,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       pending_events[[i]]$stop_propagation <- cfg$stop_propagation
       pending_events[[i]]$capture <- cfg$capture
       pending_events[[i]]$passive <- cfg$passive
+      pending_events[[i]]$filter <- cfg$filter
       pending_events[[i]]$wire <- NULL
     }
 
