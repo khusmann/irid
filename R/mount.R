@@ -584,7 +584,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # against its own item, not the first one).
         build_entry <- function(id, slot_index, item_value) {
           wrapper_id <- counter()
-          scope <- make_scope(session, id = as.character(wrapper_id))
+          scope <- make_scope(session, id = wrapper_id)
           shape_sig <- shape_signature(item_value)
           is_record_shape <- !is.null(shape_sig)
 
@@ -788,7 +788,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           body <- case$body
           n_body <- length(formals(body))
 
-          scope <- make_scope(session, id = as.character(counter()))
+          scope <- make_scope(session, id = counter())
           env$current_scope <- scope
 
           # Records → mini-store projection (fine-grained leaf reads,
