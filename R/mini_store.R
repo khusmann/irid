@@ -155,7 +155,9 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
     list(fn = fn, set_internal = set_internal)
 
   } else {
-    rv <- shiny::reactiveVal(strip_asis(initial))
+    # shiny#4372: construct under the scope's reactive domain so the leaf
+    # reactiveVal auto-registers for destroy (no-op wrap pre-#4372).
+    rv <- scope$with_scope(shiny::reactiveVal(strip_asis(initial)))
 
     set_internal <- function(v) {
       old_v <- shiny::isolate(rv())
@@ -241,7 +243,9 @@ make_mini_branch_fn <- function(children, keys, path, set_self, set_internal) {
 #'   through `set_value`.
 #' @keywords internal
 make_slot_accessor <- function(get_value, set_value, scope) {
-  rv <- shiny::reactiveVal(shiny::isolate(get_value()))
+  # shiny#4372: construct under the scope's reactive domain so the accessor's
+  # internal reactiveVal auto-registers for destroy (no-op wrap pre-#4372).
+  rv <- scope$with_scope(shiny::reactiveVal(shiny::isolate(get_value())))
   # Shape-change guard: if the parent's slot transiently becomes a
   # record (e.g. heterogeneous list where a slot's shape flips), don't
   # stuff the record into the scalar `rv`. The outer `Each` reconciler

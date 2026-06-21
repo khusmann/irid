@@ -12,7 +12,7 @@ R/
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
   mini_store.R    make_mini_store / make_slot_accessor / is_record — per-item / per-case projections used by Each and Match
-  scope.R         make_scope — per-item / per-case lifetime container; shim for shiny#4372 subdomain teardown
+  scope.R         make_scope — per-item / per-case lifetime container; feature-detects shiny#4372 scoped teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
   widget.R        IridWidget (two-way props)
   irid-package.R Package-level imports
@@ -288,32 +288,47 @@ number is the identity), live under `by = fn` (fires on reorder).
 
 Each per-item / per-case mount creates its own `scope` (see
 `make_scope()`) to bound the lifetime of the per-item / per-case
-reactives and observers. Today the scope is a thin manual observer
-tracker; once [shiny#4372](https://github.com/rstudio/shiny/pull/4372)
-merges, `make_scope` becomes a one-line wrapper around
-`session$makeSubdomain()` and the auto-destroy registry handles teardown.
-Every site that depends on the shim is tagged `# shiny#4372:` so the
-post-merge swap is mechanical.
+reactives and observers. `make_scope` **feature-detects**
+[shiny#4372](https://github.com/rstudio/shiny/pull/4372) at runtime (on
+`session$onDestroy`/`session$destroy`): on a shiny carrying it, the scope is
+a child created via `session$makeScope(id)`, and reactives constructed under
+its reactive domain (`with_scope`) auto-register a weak destroy handle, so
+`scope$destroy()` reclaims observers **and** `reactiveVal`s in one cascade;
+otherwise it falls back to a thin manual observer tracker (today's behavior
+on any pre-#4372 shiny, including current CRAN). Every site that depends on
+the seam is tagged `# shiny#4372:`.
 
-**Known limitation — reactive-leak until shiny#4372 lands.** `scope$destroy()`
-tears down the observers it tracks, but cannot tear down the `reactiveVal`s
-held inside mini-store leaves and slot accessors — Shiny exposes no public
-API for destroying a `reactiveVal`. Each unmounted `Each` item and each
-unmounted `Match` case leaves its leaves behind in the session's reactive
-graph. For short-lived sessions this is harmless; for long-lived sessions
-that churn list contents (e.g. a dashboard where rows are added/removed
-continuously), the leaked leaves accumulate and grow session memory. The
-leak is bounded per-session — it resets when the session ends — but apps in
-that shape should monitor session lifetime until shiny#4372 lands and the
-subdomain cascade reclaims the leaves.
+Only the per-item / per-case **reactives** (mini-store and slot-accessor
+leaves, the keyed `pos_rv`) and the **component-body evaluation** run under
+the child domain (via `with_scope`). The inner `irid_mount_processed` call
+deliberately stays on the **outer `session`**, not the child: `makeScope` is
+a Shiny *module* scope that namespaces input/output IDs through `NS()`, which
+would mangle irid's globally-unique element IDs that outputs and events bind
+to by raw name. The mount's own binding/event observers are torn down
+explicitly by `mount$destroy()`, so they never needed scoping — only the
+leaves (which have no explicit destroy) did.
 
-The same subdomain swap also closes a second gap: **user**-created
+**Reactive-leak — resolved on a shiny#4372 runtime, present otherwise.** On
+the fallback path, `scope$destroy()` tears down the observers it tracks but
+cannot tear down the `reactiveVal`s held inside mini-store leaves and slot
+accessors — pre-#4372 Shiny exposes no public API for destroying a
+`reactiveVal` — so each unmounted `Each` item / `Match` case leaks its leaves
+into the session's reactive graph. The leak is bounded per-session (it resets
+when the session ends), harmless for short-lived sessions, but grows under
+churn (a dashboard adding/removing rows). On a shiny#4372 runtime this is
+fully reclaimed automatically: the leaves are constructed under the child
+scope's domain, and `scope$destroy()` (→ `child$destroy()`) destroys them
+along with the observers — no irid change required at upgrade time. A
+destroyed leaf *throws* on access (it is actively destroyed, not lazily
+GC'd), which is why teardown order is strictly mount → scope.
+
+The same seam closes a second gap on a shiny#4372 runtime: **user**-created
 observers. A bare `observe()` / `observeEvent()` written inside a component
-body (e.g. an analytics tick in an `Each` item callback) currently attaches
-to the session domain, not the per-item scope, so it keeps firing after the
-item unmounts. Once `make_scope` evaluates the component body inside
-`session$makeSubdomain()`, those user observers attach to the subdomain and
-are torn down with the item — no irid-specific scoping primitive needed.
+body (e.g. an analytics tick in an `Each` item callback) would otherwise
+attach to the session domain and keep firing after the item unmounts. Because
+`with_scope` evaluates the component body under the child scope's domain,
+those user observers auto-register against it and are torn down with the
+item — no irid-specific scoping primitive needed.
 
 ## Comment-Anchor Range Protocol
 

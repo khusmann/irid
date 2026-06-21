@@ -4,42 +4,60 @@
 \alias{make_scope}
 \title{Per-item / per-case reactive scope}
 \usage{
-make_scope(session)
+make_scope(session, id)
 }
 \arguments{
-\item{session}{A Shiny session, or \code{NULL} in tests.}
+\item{session}{A Shiny session, a child scope proxy, or \code{NULL} in tests.}
+
+\item{id}{Scope identifier for the shiny#4372 child scope (a non-empty
+string; the caller's element/wrapper counter token). Required — every
+call site already has a unique counter token. Unused on the fallback
+path, but always supplied so the scope's identity is explicit.}
 }
 \value{
-A list with \code{session}, \code{register_observer(obs)}, and \code{destroy()}.
+A list with \code{session}, \code{register_observer(obs)},
+\code{with_scope(expr)}, and \code{destroy()}.
 }
 \description{
 Wraps a Shiny session into a small "scope" object whose responsibility is
 to bound the lifetime of reactives and observers created inside per-item
 (\code{Each}) or per-case (\code{Match}) mounts. Every per-item / per-case mount
 creates one scope at construction; on unmount, \code{scope$destroy()} tears
-down everything registered against it.
+down everything created against it.
 }
 \details{
-Today the implementation is a thin manual tracker: observers register
-themselves via \code{register_observer()} and are destroyed in
-\code{destroy()}. Reactives created inside the scope (mini-store leaves,
-scalar slot accessors) leak until the parent session ends — there is no
-public API for destroying a \code{reactiveVal}.
+\strong{Two implementations, chosen by runtime feature detection.}
+\itemize{
+\item \strong{shiny#4372 path} (when \code{session$onDestroy}/\code{session$destroy} exist):
+\code{make_scope} allocates a child scope via \code{session$makeScope(id)}.
+Reactive primitives constructed while that child is the default reactive
+domain auto-register a weak destroy handle against it, so
+\code{child$destroy()} reclaims observers
+\strong{and} \code{reactiveVal}s in one call. \code{with_scope(expr)} runs \code{expr} under
+the child domain (\code{shiny::withReactiveDomain}); \code{register_observer} is a
+no-op (auto-tracked).
+\item \strong{Fallback path} (any shiny without #4372): a thin manual tracker.
+Observers register via \code{register_observer} and are torn down in
+\code{destroy}. \code{with_scope} is identity — \code{reactiveVal}s created inside still
+leak until session end (no public API to destroy a \code{reactiveVal}
+pre-#4372). This is today's behavior.
+}
+
+The seam is forward-compatible: every per-item / per-case reactive is
+constructed through \code{with_scope}, so the same call sites reclaim correctly
+once a user upgrades to a shiny carrying #4372 — no irid change required.
 
 \strong{Teardown ordering.} On unmount, callers MUST destroy the per-item
-/ per-case \code{mount} handle \emph{before} the scope: the mount's observers
+/ per-case \code{mount} handle \emph{before} the scope. The mount's observers
 (auto-bind bindings, event handlers) read mini-store / slot-accessor
-leaves that live in the scope, so tearing the scope down first
-would leave the mount's observers firing against dead state during
-the same flush. The order is mount → scope at every site that owns
-both.
+leaves that live in the scope; under #4372 a destroyed leaf \emph{throws} on
+access (it is actively destroyed, not lazily GC'd), so tearing the scope
+down first would make those observers error on their next read. The order
+is mount → scope at every site that owns both.
 
-shiny#4372: once \url{https://github.com/rstudio/shiny/pull/4372} merges,
-\code{make_scope} becomes a one-line wrapper around \code{session$makeSubdomain()}
-and the new subdomain teardown handles observers \emph{and} reactives in one
-call. The manual-tracking body of \code{make_scope}, the per-item observer
-registrations in \code{mount.R}, and the manual-observer cleanup loop in
-\code{irid_mount_processed} all become redundant at that point — every site
-that depends on this shim is tagged \verb{# shiny#4372:} for grep-ability.
+shiny#4372: \url{https://github.com/rstudio/shiny/pull/4372} merged 2026-05-29,
+not yet on CRAN as of this writing. Verified against shiny 1.13.0.9000
+(HEAD 44fd783); re-confirm method names / weak-ref semantics on bump. Every
+site that depends on this seam is tagged \verb{# shiny#4372:} for grep-ability.
 }
 \keyword{internal}
