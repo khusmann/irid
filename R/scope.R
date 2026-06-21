@@ -8,10 +8,11 @@
 #'
 #' **Two implementations, chosen by runtime feature detection.**
 #'
-#' - **shiny#4372 path** (when `session$makeScope` exists): `make_scope`
-#'   allocates a child scope via `session$makeScope(id)`. Reactive primitives
-#'   constructed while that child is the default reactive domain auto-register
-#'   a weak destroy handle against it, so `child$destroy()` reclaims observers
+#' - **shiny#4372 path** (when `session$onDestroy`/`session$destroy` exist):
+#'   `make_scope` allocates a child scope via `session$makeScope(id)`.
+#'   Reactive primitives constructed while that child is the default reactive
+#'   domain auto-register a weak destroy handle against it, so
+#'   `child$destroy()` reclaims observers
 #'   **and** `reactiveVal`s in one call. `with_scope(expr)` runs `expr` under
 #'   the child domain (`shiny::withReactiveDomain`); `register_observer` is a
 #'   no-op (auto-tracked).
@@ -31,7 +32,7 @@
 #' leaves that live in the scope; under #4372 a destroyed leaf *throws* on
 #' access (it is actively destroyed, not lazily GC'd), so tearing the scope
 #' down first would make those observers error on their next read. The order
-#' is mount -> scope at every site that owns both.
+#' is mount → scope at every site that owns both.
 #'
 #' shiny#4372: <https://github.com/rstudio/shiny/pull/4372> merged 2026-05-29,
 #' not yet on CRAN as of this writing. Verified against shiny 1.13.0.9000
@@ -47,10 +48,9 @@
 #'   `with_scope(expr)`, and `destroy()`.
 #' @keywords internal
 make_scope <- function(session, id) {
-  # shiny#4372: feature-detect the scoped-teardown API. `makeScope` predates
-  # #4372 (module namespacing), so it is NOT the marker — `onDestroy`/`destroy`
-  # are the new methods, and the child proxy's `onDestroy` is what reactiveVal
-  # construction registers its weak destroy handle against.
+  # shiny#4372: feature-detect the scoped-teardown API on `onDestroy`/`destroy`,
+  # the session methods #4372 adds. Reactives constructed under the child scope's
+  # domain register their weak destroy handle against the proxy's `onDestroy`.
   has_scope <- !is.null(session) &&
     is.function(session$onDestroy) &&
     is.function(session$destroy)

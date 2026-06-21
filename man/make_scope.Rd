@@ -28,10 +28,11 @@ down everything created against it.
 \details{
 \strong{Two implementations, chosen by runtime feature detection.}
 \itemize{
-\item \strong{shiny#4372 path} (when \code{session$makeScope} exists): \code{make_scope}
-allocates a child scope via \code{session$makeScope(id)}. Reactive primitives
-constructed while that child is the default reactive domain auto-register
-a weak destroy handle against it, so \code{child$destroy()} reclaims observers
+\item \strong{shiny#4372 path} (when \code{session$onDestroy}/\code{session$destroy} exist):
+\code{make_scope} allocates a child scope via \code{session$makeScope(id)}.
+Reactive primitives constructed while that child is the default reactive
+domain auto-register a weak destroy handle against it, so
+\code{child$destroy()} reclaims observers
 \strong{and} \code{reactiveVal}s in one call. \code{with_scope(expr)} runs \code{expr} under
 the child domain (\code{shiny::withReactiveDomain}); \code{register_observer} is a
 no-op (auto-tracked).
@@ -52,7 +53,7 @@ once a user upgrades to a shiny carrying #4372 — no irid change required.
 leaves that live in the scope; under #4372 a destroyed leaf \emph{throws} on
 access (it is actively destroyed, not lazily GC'd), so tearing the scope
 down first would make those observers error on their next read. The order
-is mount -> scope at every site that owns both.
+is mount → scope at every site that owns both.
 
 shiny#4372: \url{https://github.com/rstudio/shiny/pull/4372} merged 2026-05-29,
 not yet on CRAN as of this writing. Verified against shiny 1.13.0.9000

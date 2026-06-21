@@ -9,9 +9,8 @@
 #   pkgload::load_all(".claude/worktrees/shiny-dev"); pkgload::load_all(".")
 #   testthat::test_file("tests/testthat/test-scope.R")
 
-# Cheap, instantiation-free probe: inspect the MockShinySession R6 generator.
-# `makeScope` predates #4372 (module namespacing); the new methods are
-# `onDestroy`/`destroy`, so detect on those — matching make_scope's predicate.
+# Cheap, instantiation-free probe for the #4372 methods (`onDestroy`/`destroy`)
+# on the MockShinySession R6 generator — matches make_scope's predicate.
 shiny_has_scope <- function() {
   all(c("onDestroy", "destroy") %in% names(shiny::MockShinySession$public_methods))
 }
