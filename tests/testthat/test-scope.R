@@ -68,10 +68,17 @@ test_that("scope$destroy reclaims mini-store leaf reactiveVals (#4372)", {
   parent <- shiny::reactiveVal(list(a = 1, b = 2))
   mini <- irid:::make_mini_store(parent, parent, scope)
   leaf <- mini$a
+  shiny:::flushReact()
   expect_equal(shiny::isolate(leaf()), 1)
 
   scope$destroy()
+  # The leaf reactiveVal is reclaimed (throws on access)...
   expect_error(shiny::isolate(leaf()), "destroyed")
+  # ...and so is the propagating observer: mutating the (live) parent and
+  # flushing must not resurrect a write into the destroyed leaf. A surviving
+  # observer would write the destroyed rv and error during flush.
+  parent(list(a = 99, b = 2))
+  expect_error(shiny:::flushReact(), NA)
 })
 
 test_that("scope$destroy reclaims slot-accessor reactiveVals (#4372)", {
@@ -88,8 +95,36 @@ test_that("scope$destroy reclaims slot-accessor reactiveVals (#4372)", {
     },
     scope = scope
   )
+  shiny:::flushReact()
   expect_equal(shiny::isolate(acc()), 10)
 
   scope$destroy()
+  # Reactive reclaimed...
   expect_error(shiny::isolate(acc()), "destroyed")
+  # ...and the propagating observer with it (see mini-store test).
+  parent(list(99, 20))
+  expect_error(shiny:::flushReact(), NA)
+})
+
+test_that("scope$destroy tears down user observe() run under with_scope (#4372)", {
+  skip_if_not(shiny_has_scope(), "shiny lacks #4372 scoped teardown")
+  session <- shiny::MockShinySession$new()
+  scope <- irid:::make_scope(session, id = "s_obs")
+  # Mirrors a bare observe() authored inside an Each/Match component body:
+  # with_scope evaluates it under the child domain, so it auto-registers for
+  # teardown (register_observer is a no-op on the #4372 path).
+  src <- shiny::reactiveVal(0L)
+  fires <- 0L
+  scope$with_scope(shiny::observe({
+    src()
+    fires <<- fires + 1L
+  }))
+  shiny:::flushReact()
+  expect_equal(fires, 1L)
+
+  scope$destroy()
+  src(1L)
+  shiny:::flushReact()
+  # Observer reclaimed by the child cascade — no further fires.
+  expect_equal(fires, 1L)
 })

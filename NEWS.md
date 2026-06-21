@@ -28,6 +28,14 @@
   (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
   irid construct. See `examples/codemirror.R`.
 
+* Per-item (`Each`) and per-case (`Match`) `reactiveVal`s are now reclaimed on
+  unmount, rather than leaking until session end. `make_scope` feature-detects
+  [shiny#4372](https://github.com/rstudio/shiny/pull/4372)'s scoped-teardown
+  API at runtime: on a Shiny that carries it, `scope$destroy()` reclaims the
+  per-item / per-case observers **and** `reactiveVal`s — plus any user
+  `observe()` in a component body. Pre-#4372 Shiny (including current CRAN) is
+  unchanged; no irid change is required at upgrade time.
+
 ## Bug fixes
 
 * Reactive bindings no longer flicker when user activity outpaces the
