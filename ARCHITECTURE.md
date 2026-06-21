@@ -298,6 +298,16 @@ otherwise it falls back to a thin manual observer tracker (today's behavior
 on any pre-#4372 shiny, including current CRAN). Every site that depends on
 the seam is tagged `# shiny#4372:`.
 
+Only the per-item / per-case **reactives** (mini-store and slot-accessor
+leaves, the keyed `pos_rv`) and the **component-body evaluation** run under
+the child domain (via `with_scope`). The inner `irid_mount_processed` call
+deliberately stays on the **outer `session`**, not the child: `makeScope` is
+a Shiny *module* scope that namespaces input/output IDs through `NS()`, which
+would mangle irid's globally-unique element IDs that outputs and events bind
+to by raw name. The mount's own binding/event observers are torn down
+explicitly by `mount$destroy()`, so they never needed scoping — only the
+leaves (which have no explicit destroy) did.
+
 **Reactive-leak — resolved on a shiny#4372 runtime, present otherwise.** On
 the fallback path, `scope$destroy()` tears down the observers it tracks but
 cannot tear down the `reactiveVal`s held inside mini-store leaves and slot
