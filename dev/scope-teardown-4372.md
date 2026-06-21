@@ -69,8 +69,8 @@ weak-handle path via `setAutoDestroy` (`autoDestroy = TRUE` default), so an
 
 This also means the design scopes *user*-authored `observe()` inside a component
 body for free (the body runs under the child domain — see *Bonus*), and degrades
-to a clean no-op pre-#4372 (where the session exposes no `makeScope`, so we never
-build a child and `withReactiveDomain(session, …)` is a no-op).
+to a clean no-op pre-#4372 (where the session exposes no `onDestroy`/`destroy`,
+so we never build a child and `with_scope` is identity).
 
 ## Design
 
@@ -85,7 +85,11 @@ auto-register there and `destroy()` reclaims them.
 
 ```r
 make_scope <- function(session, id = NULL) {
-  has_4372 <- !is.null(session) && is.function(session$makeScope)
+  # `makeScope` predates #4372 (module namespacing) — NOT the marker. The new
+  # methods are `onDestroy`/`destroy`; detect on those. (Verified: shiny 1.7.4
+  # has `makeScope` but neither `onDestroy` nor `destroy`.)
+  has_4372 <- !is.null(session) &&
+    is.function(session$onDestroy) && is.function(session$destroy)
 
   if (has_4372) {
     # shiny#4372: child scope auto-tracks observers AND reactiveVals
@@ -99,14 +103,14 @@ make_scope <- function(session, id = NULL) {
     )
   } else {
     # Pre-#4372 fallback: manual observer tracker; reactiveVals leak
-    # (today's behavior). `withReactiveDomain(session, …)` is a no-op.
+    # (today's behavior).
     observers <- list()
     list(
       session           = session,
       register_observer = function(obs) {
         observers[[length(observers) + 1L]] <<- obs
       },
-      with_scope        = function(expr) withReactiveDomain(session, expr),
+      with_scope        = function(expr) expr,   # identity (forces the promise)
       destroy           = function() {
         for (obs in observers) obs$destroy()
         observers <<- list()
@@ -118,12 +122,15 @@ make_scope <- function(session, id = NULL) {
 ```
 
 `with_scope(expr)` relies on R's lazy promise — `expr` is not forced until
-`withReactiveDomain` evaluates it under the scope's domain. Callers write
-`scope$with_scope({ ...construct accessor + body... })`. Pre-#4372,
-`withReactiveDomain(session, …)` re-installs the already-active default domain, a
-genuine no-op (and reactiveVals fall back to today's leak-until-session-end). The
-`register_observer` no-op stays under #4372 (observers auto-register via the
-child domain); the call sites remain so the fallback path still tracks them.
+`withReactiveDomain` evaluates it under the scope's domain (or, on the fallback,
+until the identity wrapper returns it). It is used per-construction and returns
+the constructed object, e.g. `rv <- scope$with_scope(reactiveVal(init))` — no
+out-of-frame assignment trickery. The fallback `with_scope` is **identity**
+(not `withReactiveDomain(session, …)`): it preserves today's exact semantics,
+including the `make_scope(NULL)` unit-test path where there is no session domain
+to install. The `register_observer` no-op stays under #4372 (observers
+auto-register via the child domain); the call sites remain so the fallback path
+still tracks them.
 
 Note `destroy()` calls `child$destroy()` (the proxy self-destruct), **not**
 `session$destroy(id)` — the latter errors on the root session unless given a
@@ -137,23 +144,24 @@ inner mount's binding/event observers are **already** explicitly torn down (by
 `scope$destroy()`'s tracker and `mount$destroy()` respectively), so they were
 never the leak — they only need to keep working.
 
-The clean seam is to wrap the whole **accessor + body construction** for one
-item / case in `scope$with_scope({...})` (i.e. `withReactiveDomain(scope$session,
-…)`). That single wrap captures every reactiveVal created inside
-`make_mini_store` / `make_slot_accessor`, the keyed `pos_rv`, **and** any
-user-authored `observe()` in the body — all auto-register against the child.
+Since `with_scope(expr)` returns the constructed object, each leaking
+reactiveVal is wrapped **per-construction** (`rv <- scope$with_scope(reactiveVal(…))`)
+right where it's built — no out-of-frame block. The two leaf factories self-wrap
+their own `rv`; `build_entry` wraps `pos_rv` and the item-body eval (the latter
+also scopes user `observe()`s); `Match` wraps the case-body eval. **Implemented**
+(verified green against shiny 1.13.0.9000, see *Spike* / *Testing*):
 
 | Reactive | Site | Change |
 |---|---|---|
-| mini-store leaf `rv` | [mini_store.R:158](../R/mini_store.R#L158) | (no edit here) constructed under the `with_scope` wrap at the call site |
-| mini-store root propagator `observe` | [mini_store.R:93](../R/mini_store.R#L93) | keep `domain = scope$session`; under the wrap it also auto-destroys |
-| slot accessor `rv` | [mini_store.R:244](../R/mini_store.R#L244) | (no edit here) constructed under the `with_scope` wrap |
-| slot accessor propagator `observe` | [mini_store.R:250](../R/mini_store.R#L250) | keep `domain = scope$session` |
-| keyed `pos_rv` | [mount.R:620](../R/mount.R#L620) | constructed under the `with_scope` wrap in `build_entry` |
-| `Each` build_entry: accessor + `cf_fn(...)` body | [mount.R:585-648](../R/mount.R#L585) | wrap the accessor build + body eval in `scope$with_scope({...})` |
-| `Match`: `make_mini_store` + `body(binding)` | [mount.R:794-804](../R/mount.R#L794) | wrap the binding build + body eval in `scope$with_scope({...})` |
-| inner per-item mount | [mount.R:184](../R/mount.R#L184) | **unchanged — stays on raw `session`** (see below) |
-| inner per-case mount | [mount.R:811](../R/mount.R#L811) | **unchanged — stays on raw `session`** |
+| mini-store leaf `rv` | [mini_store.R:158](../R/mini_store.R#L158) | `rv <- scope$with_scope(reactiveVal(…))` (self-wrapped) ✅ |
+| mini-store root propagator `observe` | [mini_store.R:93](../R/mini_store.R#L93) | unchanged — `domain = scope$session` already auto-destroys under #4372 ✅ |
+| slot accessor `rv` | [mini_store.R:244](../R/mini_store.R#L244) | `rv <- scope$with_scope(reactiveVal(…))` (self-wrapped) ✅ |
+| slot accessor propagator `observe` | [mini_store.R:250](../R/mini_store.R#L250) | unchanged — `domain = scope$session` ✅ |
+| keyed `pos_rv` | [mount.R:620](../R/mount.R#L620) | `pos_rv <- scope$with_scope(reactiveVal(slot_index))` ✅ |
+| `Each` item body `cf_fn(...)` | [mount.R:642](../R/mount.R#L642) | `child <- scope$with_scope(cf_fn(…))` — scopes user reactives ✅ |
+| `Match` case body | [mount.R:804](../R/mount.R#L804) | `tag_tree <- scope$with_scope(body(…))` ✅ |
+| `make_scope` call (Each / Match) | [mount.R:587](../R/mount.R#L587), [787](../R/mount.R#L787) | pass `id = as.character(counter-token)` ✅ |
+| inner per-item / per-case mount | [mount.R:184](../R/mount.R#L184), [811](../R/mount.R#L811) | **unchanged — stays on raw `session`** (see below) |
 
 **Why the inner mounts stay on `session` (correction to the issue's plan).**
 `irid_mount_processed` registers Shiny outputs (`session$output[[id]] <- …`) and
@@ -254,24 +262,36 @@ reactiveVals/observers we actually scope.
 re-confirm on bump. The dev checkout lives at
 [.claude/worktrees/shiny-dev](../.claude/worktrees/shiny-dev) (gitignored).
 
-## Doc / tag cleanup (step 4)
+## Testing
 
-- scope.R roxygen: replace `makeSubdomain()` references with
-  `makeScope(id)` / `destroy(id)` / `onDestroy` / weak-ref auto-registration.
-- ARCHITECTURE.md: the "Known limitation — reactive-leak" block and the
-  `makeSubdomain` paragraph in *Control Flow Lifecycle* → rewrite to describe the
-  feature-detected `makeScope` path (now-resolved, no longer a known limit when
-  running on a #4372 shiny).
-- Keep all `# shiny#4372:` grep tags; update their wording where they say
-  "replaced by subdomain cascade" → "scope cascade".
+[tests/testthat/test-scope.R](../tests/testthat/test-scope.R):
+
+- **Fallback path** (runs on any shiny): `make_scope(NULL)` tracks + tears down
+  registered observers; `with_scope` is identity; `session` passthrough.
+- **#4372 reclamation** (skip-gated on
+  `c("onDestroy","destroy") %in% MockShinySession$public_methods`): branch
+  selection; a `with_scope`-built reactiveVal, a mini-store leaf, and a
+  slot-accessor `rv` each **throw on access after `scope$destroy()`**. These
+  SKIP on CRAN shiny and start running automatically once a #4372 shiny is
+  installed — no edit. Verified green against the dev clone (all 11 pass; the 4
+  gated ones skip on shiny 1.7.4 with zero failures in the full suite).
+
+## Doc / tag cleanup (remaining)
+
+- scope.R roxygen — **done** (rewritten for the feature-detected
+  `makeScope`/`destroy`/`onDestroy` path; `makeSubdomain` removed).
+- ARCHITECTURE.md — *still TODO*: the "Known limitation — reactive-leak" block
+  and the `makeSubdomain` paragraph in *Control Flow Lifecycle* should be
+  rewritten to describe the feature-detected scope path (no longer a known limit
+  on a #4372 shiny). Grep-tag wording ("subdomain cascade" → "scope cascade").
 
 ## Commit plan (one concept per commit, on this branch)
 
-1. Spike + this design doc (commit before running; fold results back after).
-2. `make_scope` feature-detect + `with_scope` seam + `id` param.
-3. Route the four creation sites through the scope (mini_store.R, mount.R).
-4. Inner mounts run against `scope$session`.
-5. Doc/tag cleanup (scope.R roxygen, ARCHITECTURE.md, grep tags).
-6. Tests (see TESTING.md — scope teardown under both feature-detect branches).
-</content>
-</invoke>
+1. ✅ Spike + this design doc (results folded back).
+2. ✅ `make_scope` feature-detect (`onDestroy`/`destroy`) + `with_scope` seam +
+   `id` param.
+3. ✅ Route the leaking reactiveVals + body evals through `with_scope`
+   (mini_store.R, mount.R).
+4. ✅ Inner mounts stay on raw `session` (corrected from the issue's plan).
+5. ✅ Gated tests (test-scope.R).
+6. ⬜ ARCHITECTURE.md cleanup (scope.R roxygen already done).

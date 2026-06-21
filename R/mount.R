@@ -584,7 +584,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # against its own item, not the first one).
         build_entry <- function(id, slot_index, item_value) {
           wrapper_id <- counter()
-          scope <- make_scope(session)
+          scope <- make_scope(session, id = as.character(wrapper_id))
           shape_sig <- shape_signature(item_value)
           is_record_shape <- !is.null(shape_sig)
 
@@ -617,7 +617,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               new_items[[idx]] <- v
               cf_items(new_items)
             }
-            pos_rv <- shiny::reactiveVal(slot_index)
+            # shiny#4372: scope the keyed position rv for destroy.
+            pos_rv <- scope$with_scope(shiny::reactiveVal(slot_index))
             pos_accessor <- reactiveProxy(get = function() pos_rv())
           } else {
             # Positional mode: slot index is captured (slots are stable).
@@ -639,13 +640,16 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             make_slot_accessor(get_value, set_value, scope)
           }
 
-          child <- if (cf_nformals == 0L) {
+          # shiny#4372: evaluate the item body under the scope's domain so any
+          # user-authored observe()/reactiveVal in the callback attaches to the
+          # item scope and is torn down on unmount (no-op wrap pre-#4372).
+          child <- scope$with_scope(if (cf_nformals == 0L) {
             cf_fn()
           } else if (cf_nformals == 1L) {
             cf_fn(accessor)
           } else {
             cf_fn(accessor, pos_accessor)
-          }
+          })
           wrapped <- tagList(
             htmltools::HTML(paste0("<!--irid:s:", wrapper_id, "-->")),
             child,
@@ -784,7 +788,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           body <- case$body
           n_body <- length(formals(body))
 
-          scope <- make_scope(session)
+          scope <- make_scope(session, id = as.character(counter()))
           env$current_scope <- scope
 
           # Records → mini-store projection (fine-grained leaf reads,
@@ -801,7 +805,9 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             cf_callable
           }
 
-          tag_tree <- if (n_body == 0L) body() else body(binding)
+          # shiny#4372: evaluate the case body under the scope's domain (see
+          # the Each build_entry note) — scopes user reactives to the case.
+          tag_tree <- scope$with_scope(if (n_body == 0L) body() else body(binding))
 
           processed <- process_tags(tag_tree, counter = counter)
           session$sendCustomMessage("irid-swap", list(
