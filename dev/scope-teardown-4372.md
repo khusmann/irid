@@ -14,47 +14,63 @@ per-session, but it grows under churn (a dashboard adding/removing rows).
 This is the "Known limitation — reactive-leak until shiny#4372 lands" in
 ARCHITECTURE.md.
 
-## What shiny#4372 actually merged (verified)
+## What shiny#4372 actually merged (verified against source)
 
-PR merged **2026-05-29**. Confirmed public API on `ShinySession` (and
-`MockShinySession`):
+PR merged **2026-05-29**. Verified by reading the merged source, checked out at
+[.claude/worktrees/shiny-dev](../.claude/worktrees/shiny-dev) — **shiny
+1.13.0.9000**, HEAD `44fd783` (re-confirm on bump). Public API on `ShinySession`
+(and `MockShinySession`):
 
-- `session$makeScope(id)` — creates/retrieves a **child scope proxy** with its
-  own `destroy()` and `onDestroy()`. Reactives created **within this scope's
-  reactive domain** auto-register via weak references.
-- `session$destroy(id = NULL)` — destroys child `id` (or self-destructs a proxy
-  when called with no `id`). Reclaims observers **and** reactiveVals registered
-  in that scope.
+- `session$makeScope(namespace)` — creates/retrieves a **child scope proxy** with
+  its own `destroy()` and `onDestroy()`. `namespace` is validated by
+  `validateNamespace`: a **non-empty, non-NA string** (not the reserved internal
+  root). Reactives constructed while this proxy is the **default reactive
+  domain** auto-register a weak destroy handle against it.
+- `session$destroy(namespace = NULL)` — destroys child `namespace`; on the root
+  session, calling with no `namespace` **errors** (must name a scope). The proxy's
+  own `destroy()` (no arg) self-destructs.
 - `session$onDestroy(callback)` — cleanup callbacks fired on scope destroy.
 
-The mechanism is **scope-at-creation**, not scope-at-destroy: a reactiveVal is
-reclaimed by `destroy(id)` only if it was *created inside* that child scope's
-reactive domain.
+The mechanism is **scope-at-creation**, not scope-at-destroy.
 
-> Note: `session$makeScope(id)` **does** exist in the merged API — the issue and
-> the current scope.R/ARCHITECTURE roxygen guessed at `makeSubdomain()` and were
-> wrong. The real entry point is `makeScope`. Those stale references are fixed in
-> step 4 below.
+> ⚠️ **`makeScope` is a *module namespace* scope, not a bare lifetime container.**
+> It namespaces inputs/outputs through `NS(namespace)` (`createSessionProxy` wires
+> `input`/`output`/`sendInputMessage`/`registerDataObj` through `ns()`). This
+> drives a correction to the issue's plan — see *Design* below: we use the child
+> scope **only as a destroy domain**, and must **not** route the inner per-item
+> mount's I/O through it.
 
-## The crux (open question for the spike)
+> Note: `session$makeScope` **does** exist — the issue and the current
+> scope.R/ARCHITECTURE roxygen guessed at `makeSubdomain()` and were wrong. Fixed
+> in step 4.
 
-`observe()` takes a `domain =` argument, so scoping an observer is a one-liner.
-But `reactiveVal()` / `reactiveValues()` take **no `domain` argument** in 1.7.4
-— they capture `getDefaultReactiveDomain()` at construction. So associating a
-*reactiveVal* with a child scope can't be a `domain =` pass-through; it requires
-either:
+## The crux — RESOLVED from source (mechanism A)
 
-- **(A)** running the construction inside
-  `shiny::withReactiveDomain(scope$session, { reactiveVal(...) })`, or
-- **(B)** a new `domain =` argument on `reactiveVal()` added by #4372.
+`observe()` takes a `domain =` argument. `reactiveVal()` / `reactiveValues()`
+**do not** — confirmed in the merged source:
+`reactiveVal <- function(value = NULL, label = NULL)` has no `domain` formal.
+Auto-registration happens *inside* `ReactiveVal$new`, against the **default
+reactive domain at construction time**:
 
-**Which one is real is the single thing the implementation hinges on.** The spike
-([dev/spikes/scope-teardown-4372.R](spikes/scope-teardown-4372.R)) settles it. The
-design below is written for **(A)** because it's the more general mechanism (it
-also scopes *user*-authored `observe()` calls inside a component body for free —
-see "Bonus" below) and degrades to a clean no-op pre-#4372. If the spike shows
-(B) is available and (A) is *not*, fall back to threading `domain =` per
-construction site; the creation-site inventory is identical either way.
+```r
+# shiny-dev R/reactives.R, ReactiveVal$initialize
+domain <- getDefaultReactiveDomain()
+if (!is.null(domain) && is.function(domain$onDestroy)) {
+  wr <- rlang::new_weakref(key = self)
+  private$.destroyHandle <- domain$onDestroy(make_weak_destroy_wrapper(wr))
+}
+```
+
+So scoping a reactiveVal **requires** constructing it inside
+`shiny::withReactiveDomain(scope$session, { reactiveVal(...) })` — there is no
+`domain =` pass-through (mechanism B does not exist). Observers follow the same
+weak-handle path via `setAutoDestroy` (`autoDestroy = TRUE` default), so an
+`observe(domain = child)` is also reclaimed by `child$destroy()`.
+
+This also means the design scopes *user*-authored `observe()` inside a component
+body for free (the body runs under the child domain — see *Bonus*), and degrades
+to a clean no-op pre-#4372 (where the session exposes no `makeScope`, so we never
+build a child and `withReactiveDomain(session, …)` is a no-op).
 
 ## Design
 
@@ -72,23 +88,25 @@ make_scope <- function(session, id = NULL) {
   has_4372 <- !is.null(session) && is.function(session$makeScope)
 
   if (has_4372) {
-    # shiny#4372: child scope auto-tracks observers AND reactiveVals.
+    # shiny#4372: child scope auto-tracks observers AND reactiveVals
+    # constructed under its reactive domain.
     child <- session$makeScope(id)
     list(
       session           = child,
       register_observer = function(obs) invisible(),   # auto-tracked
-      with_scope        = function(expr) expr,          # `child` IS the domain
-      destroy           = function() child$destroy()
+      with_scope        = function(expr) withReactiveDomain(child, expr),
+      destroy           = function() child$destroy()    # self-destruct proxy
     )
   } else {
-    # Pre-#4372 fallback: manual observer tracker; reactiveVals leak.
+    # Pre-#4372 fallback: manual observer tracker; reactiveVals leak
+    # (today's behavior). `withReactiveDomain(session, …)` is a no-op.
     observers <- list()
     list(
       session           = session,
       register_observer = function(obs) {
         observers[[length(observers) + 1L]] <<- obs
       },
-      with_scope        = function(expr) expr,
+      with_scope        = function(expr) withReactiveDomain(session, expr),
       destroy           = function() {
         for (obs in observers) obs$destroy()
         observers <<- list()
@@ -99,100 +117,142 @@ make_scope <- function(session, id = NULL) {
 }
 ```
 
-Subtlety on `with_scope`: it must run `expr` inside the scope's domain **at the
-construction site**, so it has to be lazy. Two clean options:
+`with_scope(expr)` relies on R's lazy promise — `expr` is not forced until
+`withReactiveDomain` evaluates it under the scope's domain. Callers write
+`scope$with_scope({ ...construct accessor + body... })`. Pre-#4372,
+`withReactiveDomain(session, …)` re-installs the already-active default domain, a
+genuine no-op (and reactiveVals fall back to today's leak-until-session-end). The
+`register_observer` no-op stays under #4372 (observers auto-register via the
+child domain); the call sites remain so the fallback path still tracks them.
 
-- Make `with_scope <- function(expr) withReactiveDomain(scope$session, expr)`
-  and rely on R's lazy promise: `expr` isn't forced until `withReactiveDomain`
-  evaluates it inside the domain. Callers write
-  `scope$with_scope({ ...construct... })`.
-- Pre-#4372, `withReactiveDomain(session, expr)` re-installs the *current*
-  default domain, so it's a genuine no-op. (Confirm in the spike that this holds
-  even when `session` is the active domain.)
+Note `destroy()` calls `child$destroy()` (the proxy self-destruct), **not**
+`session$destroy(id)` — the latter errors on the root session unless given a
+namespace, and the proxy form is the documented child-teardown path.
 
-Use the `withReactiveDomain` form in both branches for uniformity (drop the
-`expr` identity shortcut in the `has_4372` branch — `child` is the domain there).
-The `register_observer` no-op stays because observers created under the child
-domain auto-register; we keep the call sites so the fallback still tracks them.
+### Creation-site inventory
 
-### Creation-site inventory (route all four through the scope)
+The leak is exactly the **reactiveVals** with no explicit destroy: mini-store
+leaves, slot-accessor `rv`s, keyed `pos_rv`. The propagating observers and the
+inner mount's binding/event observers are **already** explicitly torn down (by
+`scope$destroy()`'s tracker and `mount$destroy()` respectively), so they were
+never the leak — they only need to keep working.
+
+The clean seam is to wrap the whole **accessor + body construction** for one
+item / case in `scope$with_scope({...})` (i.e. `withReactiveDomain(scope$session,
+…)`). That single wrap captures every reactiveVal created inside
+`make_mini_store` / `make_slot_accessor`, the keyed `pos_rv`, **and** any
+user-authored `observe()` in the body — all auto-register against the child.
 
 | Reactive | Site | Change |
 |---|---|---|
-| mini-store leaf `rv` | [mini_store.R:158](../R/mini_store.R#L158) | construct inside `scope$with_scope({...})` |
-| mini-store root propagator `observe` | [mini_store.R:93](../R/mini_store.R#L93) | already `domain = scope$session`; keep, drop `register_observer` reliance under #4372 |
-| slot accessor `rv` | [mini_store.R:244](../R/mini_store.R#L244) | construct inside `scope$with_scope({...})` |
-| slot accessor propagator `observe` | [mini_store.R:250](../R/mini_store.R#L250) | already `domain = scope$session`; keep |
-| keyed `pos_rv` | [mount.R:620](../R/mount.R#L620) | construct inside `scope$with_scope({...})` |
-| inner per-item mount | [mount.R:184](../R/mount.R#L184) | pass `entry$scope$session` instead of `session` |
-| inner per-case mount | [mount.R:811](../R/mount.R#L811) | pass `scope$session` instead of `session` |
+| mini-store leaf `rv` | [mini_store.R:158](../R/mini_store.R#L158) | (no edit here) constructed under the `with_scope` wrap at the call site |
+| mini-store root propagator `observe` | [mini_store.R:93](../R/mini_store.R#L93) | keep `domain = scope$session`; under the wrap it also auto-destroys |
+| slot accessor `rv` | [mini_store.R:244](../R/mini_store.R#L244) | (no edit here) constructed under the `with_scope` wrap |
+| slot accessor propagator `observe` | [mini_store.R:250](../R/mini_store.R#L250) | keep `domain = scope$session` |
+| keyed `pos_rv` | [mount.R:620](../R/mount.R#L620) | constructed under the `with_scope` wrap in `build_entry` |
+| `Each` build_entry: accessor + `cf_fn(...)` body | [mount.R:585-648](../R/mount.R#L585) | wrap the accessor build + body eval in `scope$with_scope({...})` |
+| `Match`: `make_mini_store` + `body(binding)` | [mount.R:794-804](../R/mount.R#L794) | wrap the binding build + body eval in `scope$with_scope({...})` |
+| inner per-item mount | [mount.R:184](../R/mount.R#L184) | **unchanged — stays on raw `session`** (see below) |
+| inner per-case mount | [mount.R:811](../R/mount.R#L811) | **unchanged — stays on raw `session`** |
 
-For the two `observe()` propagators that already pass `domain = scope$session`:
-under #4372 `scope$session` is the child proxy, so they auto-register correctly
-with no change. Pre-#4372 they pass the outer session (same as today) and are
-tracked via `register_observer`. No edit needed beyond what's there.
+**Why the inner mounts stay on `session` (correction to the issue's plan).**
+`irid_mount_processed` registers Shiny outputs (`session$output[[id]] <- …`) and
+event observers keyed on raw input IDs (`irid_ev_{id}_{event}`,
+`irid_prop_{id}_{key}`). Those IDs are irid's globally-unique element IDs and the
+client binds to them verbatim. The child proxy from `makeScope` **namespaces**
+`input`/`output` through `NS(namespace)`, so routing the mount through it would
+turn `output[["irid-7"]]` into `output[["ns-irid-7"]]` and read events from the
+wrong input — breaking every output/event inside an `Each`/`Match`. The mount's
+own observers are already destroyed explicitly by `mount$destroy()`, so they
+don't leak; there is nothing to gain and correctness to lose by namespacing them.
+The mount therefore keeps running against the raw outer `session`.
 
-For the inner mounts, `irid_mount_processed` builds its observers against the
-`session` it's handed. Passing `scope$session` makes the per-item mount's
-bindings/event observers attach to the child scope so `destroy(id)` reclaims them
-too — and pre-#4372 `scope$session` is the outer session, so behavior is
-unchanged. (The mount also calls `session$sendCustomMessage` / `session$output`
-/ `insertUI`; confirm the child proxy forwards these — spike question.)
+A binding observer (raw-session domain) depending on a mini-store leaf
+(child-scope domain) is fine — reactive dependency tracking is per-reactive, not
+per-domain; the domain only governs lifecycle. Teardown order **mount → scope**
+(unchanged) guarantees the mount's observers are gone before the leaves they read
+are reclaimed.
 
-### `id` allocation
+### `id` (namespace) allocation
 
-`make_scope` now needs an `id`. Both call sites already have a stable token:
+`make_scope` now needs a `namespace` string. `validateNamespace` accepts any
+non-empty, non-NA string, so a stringified counter token works. It must be
+**unique per live scope** (the scope registry is keyed by it) — and since we do
+*not* route any I/O through the child proxy, the namespace is purely a scope key,
+never an actual input/output prefix on the wire.
 
-- `Each`: `build_entry` makes `wrapper_id <- counter()` immediately before
-  `make_scope(session)`. Pass it: `make_scope(session, id = wrapper_id)`.
-- `Match`: use `cf_id` plus the active-case index (a case can re-mount over the
-  session's life, so include a monotonic suffix to avoid id reuse colliding in
-  the scope registry). Simplest: `make_scope(session, id = counter())` — pull a
-  fresh token from the same counter the rest of the mount uses. Confirm in the
-  spike whether `makeScope` tolerates an id format (string vs the module-id
-  shape it expects).
+- `Each`: `build_entry` makes `wrapper_id <- counter()` right before
+  `make_scope`. Pass `make_scope(session, id = as.character(wrapper_id))`.
+- `Match`: pull a fresh `make_scope(session, id = as.character(counter()))` per
+  active-case mount, so a case re-mounting over the session's life never reuses a
+  retired scope key.
+
+The `counter()` token is monotonic and globally unique within the mount, so
+collisions can't occur.
 
 ### Teardown
 
 `scope$destroy()` already exists at every site (`teardown_entry`, the Match
 observer, the top-level `destroy`). Under #4372 it becomes `child$destroy()`
-which cascades to observers + reactiveVals. **Teardown ordering is unchanged** —
-mount → scope (the mount's observers read scope leaves). The existing
-ordering note in scope.R stays valid.
+which cascades to observers + reactiveVals.
+
+**Teardown ordering is unchanged but now load-bearing.** The spike found that
+post-destroy a scope reactiveVal is **actively destroyed** — `.destroyed` is set
+and any get/set raises `destroyedReactiveError` ("Can't access reactive …; its
+module session has been destroyed"), not a silent no-op or a lazy GC. So the
+mount → scope order is not just hygiene: any observer or accessor that reads a
+leaf **must** be torn down before the scope, or it throws on the next access.
+irid already destroys the mount (its binding/event observers) before the scope at
+every site, and the propagators live in the scope itself — so this holds. The
+existing ordering note in scope.R stays valid and gains this teeth.
 
 ## Bonus closed by the same seam: user observers
 
 A bare `observe()` / `observeEvent()` written inside a component body (e.g. an
 analytics tick in an `Each` item callback) currently attaches to the session
-domain and keeps firing after the item unmounts. The `child` proxy passed as the
-inner mount's domain means the body runs inside the child scope, so those user
-observers attach there and are torn down with the item — no irid-specific
-primitive. ARCHITECTURE.md already promises this; the `with_scope`/child-domain
-inner mount delivers it. (Spike: confirm a user `observe()` created during body
-evaluation is reclaimed by `destroy(id)`.)
+domain and keeps firing after the item unmounts. Because `with_scope` evaluates
+the body under the child domain, those user observers auto-register against the
+child (`setAutoDestroy` weak handle) and are torn down by `child$destroy()` — no
+irid-specific primitive. ARCHITECTURE.md already promises this; `with_scope`
+delivers it. (This is delivered by the body-eval wrap, **not** by the inner mount
+domain, which stays on `session`.)
 
-## Spike (run against a #4372 shiny — required before implementing)
+## Spike — RAN, all PASS
 
-[dev/spikes/scope-teardown-4372.R](spikes/scope-teardown-4372.R) prints PASS/FAIL
-verdicts for:
+[dev/spikes/scope-teardown-4372.R](spikes/scope-teardown-4372.R) ran against the
+checked-out dev shiny (loaded via `pkgload::load_all`; its newer
+`cachem`/`commonmark`/`promises` deps were installed into a throwaway temp lib so
+the project library is untouched). Verdicts:
 
-1. `session$makeScope(id)` exists and returns a proxy with `destroy`/`onDestroy`.
-2. **Mechanism (A) vs (B):** does a `reactiveVal` constructed inside
-   `withReactiveDomain(child, ...)` get reclaimed by `session$destroy(id)`?
-   Does `reactiveVal(domain = child)` exist / work?
-3. An `observe(domain = child)` stops firing after `destroy(id)`.
-4. A reactiveVal created in the child scope is finalized after `destroy(id)` +
-   `gc()` (weak-ref reclamation actually runs).
-5. The child proxy forwards `sendCustomMessage` / `output` / `insertUI` (so the
-   inner per-item mount can run against it).
-6. Pre-#4372 sanity: `withReactiveDomain(session, expr)` is a no-op when
-   `session` is already the active domain.
-7. `makeScope` tolerates the id format we plan to pass (counter integer →
-   `as.character`).
+```
+[PASS] makeScope(stringified-counter) returns proxy with $destroy
+[PASS] makeScope returns proxy with $onDestroy
+[PASS] reactiveVal() has NO `domain` formal (mechanism B absent)
+[PASS] scoped observe fired on dependency change
+[PASS] scope reactiveVal throws on access after destroy() (actively reclaimed)
+[PASS] child-scope reactiveVal env finalized after destroy + gc
+[PASS] user observe (no explicit domain) picked up child as default domain
+[PASS] user observe + its rv reclaimed by child$destroy() (the bonus)
+```
 
-**Caveat to pin:** spike is pinned to the merged-shiny ref it runs against
-(record `packageVersion("shiny")` + git SHA in the doc once run). #4372 method
-names / weak-ref semantics may shift before a CRAN release; re-confirm on bump.
+Resolved by the run, beyond the source reading:
+
+- **Mechanism A only.** `reactiveVal` has no `domain` formal; scoping requires the
+  `withReactiveDomain(child, …)` wrap. Confirmed reclaimed.
+- **Active destroy, not lazy GC.** Post-`destroy()`, a scope reactiveVal *throws*
+  on access — see *Teardown* above. Finalizer also fires after `gc()`.
+- **Bonus holds.** A user `observe()` with no explicit domain, created during a
+  body eval under `withReactiveDomain(child, …)`, is reclaimed by
+  `child$destroy()`.
+
+The spike deliberately does **not** test inner-mount-through-child — that path is
+rejected by design (namespacing), so we only confirm reclamation of the
+reactiveVals/observers we actually scope.
+
+**Caveat to pin:** behavior is pinned to **shiny 1.13.0.9000 / HEAD `44fd783`**.
+#4372 method names / weak-ref semantics may shift before a CRAN release;
+re-confirm on bump. The dev checkout lives at
+[.claude/worktrees/shiny-dev](../.claude/worktrees/shiny-dev) (gitignored).
 
 ## Doc / tag cleanup (step 4)
 

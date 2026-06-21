@@ -1,88 +1,80 @@
-# Spike: confirm the shiny#4372 scoped-teardown runtime behavior before
-# implementing irid issue #24. Throwaway — build-ignored (dev/spikes).
+# Spike: runtime confirmation of the shiny#4372 scoped-teardown behavior for
+# irid issue #24. Throwaway — build-ignored (dev/spikes). The API was already
+# resolved by reading the merged source (see dev/scope-teardown-4372.md); this
+# just confirms it end-to-end at runtime.
 #
-# RUN AGAINST A SHINY WITH #4372 MERGED (>= 2026-05-29 main, not CRAN 1.7.4):
-#   Rscript dev/spikes/scope-teardown-4372.R
+# RUN with the dev shiny loaded (checked out at .claude/worktrees/shiny-dev):
+#   Rscript -e 'pkgload::load_all(".claude/worktrees/shiny-dev"); source("dev/spikes/scope-teardown-4372.R")'
 #
-# Prints PASS/FAIL verdicts for each design assumption. Record the printed
-# `packageVersion("shiny")` + git SHA back into dev/scope-teardown-4372.md.
+# Pinned to shiny 1.13.0.9000 / HEAD 44fd783 — re-confirm on bump.
 
-library(shiny)
-
-ok <- function(label, cond) {
-  cat(sprintf("[%s] %s\n", if (isTRUE(cond)) "PASS" else "FAIL", label))
-}
+ok   <- function(label, cond) cat(sprintf("[%s] %s\n", if (isTRUE(cond)) "PASS" else "FAIL", label))
 info <- function(...) cat(sprintf(...), "\n")
 
 info("shiny version: %s", as.character(packageVersion("shiny")))
 
-# A MockShinySession is the cheapest way to exercise makeScope/destroy outside a
-# running app. The PR adds these to MockShinySession too. If construction fails,
-# we're on a pre-#4372 shiny — bail loudly.
-session <- tryCatch(
-  shiny::MockShinySession$new(),
-  error = function(e) { info("could not build MockShinySession: %s", conditionMessage(e)); NULL }
-)
-
-ok("session$makeScope is a function", !is.null(session) && is.function(session$makeScope))
-ok("session$destroy is a function",   !is.null(session) && is.function(session$destroy))
-ok("session$onDestroy is a function", !is.null(session) && is.function(session$onDestroy))
-
+session <- tryCatch(shiny::MockShinySession$new(), error = function(e) {
+  info("could not build MockShinySession: %s", conditionMessage(e)); NULL
+})
 if (is.null(session) || !is.function(session$makeScope)) {
-  info("STOP: this shiny lacks #4372. Re-run against merged shiny.")
-  quit(status = 1)
+  ok("session$makeScope exists (shiny has #4372)", FALSE)
+  info("STOP: this shiny lacks #4372. Load .claude/worktrees/shiny-dev.")
+  return(invisible())
 }
 
-# ---- 1. child scope proxy shape ------------------------------------------
-child <- session$makeScope(as.character(1L))
-ok("makeScope returns a proxy with $destroy",   is.function(child$destroy))
-ok("makeScope returns a proxy with $onDestroy", is.function(child$onDestroy))
-ok("makeScope tolerates an integer-stringified id", TRUE)  # reached => no error
+# ---- 1. child scope proxy shape + namespace format -----------------------
+child <- session$makeScope(as.character(7L))   # stringified counter token
+ok("makeScope(stringified-counter) returns proxy with $destroy",   is.function(child$destroy))
+ok("makeScope returns proxy with $onDestroy",                      is.function(child$onDestroy))
 
-# ---- 2/3. observer scoped to child stops firing after destroy(id) --------
-fire_count <- 0L
-rv <- NULL
-withReactiveDomain(child, {
-  rv <<- reactiveVal(0L)
-  observe({ rv(); fire_count <<- fire_count + 1L }, domain = child)
+# ---- 2. mechanism A: reactiveVal scoped via withReactiveDomain -----------
+ok("reactiveVal() has NO `domain` formal (mechanism B absent)",
+   !("domain" %in% names(formals(shiny::reactiveVal))))
+
+# ---- 3. scope reactiveVal is actively destroyed (throws) after destroy() --
+# Stronger than GC-eligibility: post-destroy, .destroyed is set and any
+# get/set raises destroyedReactiveError. This is why irid's teardown order
+# MUST be mount -> scope (no lingering reader may touch a destroyed leaf).
+fire <- 0L; rv <- NULL
+shiny::withReactiveDomain(child, {
+  rv <<- shiny::reactiveVal(0L)
+  shiny::observe({ rv(); fire <<- fire + 1L }, domain = child)
 })
-session$flushReact()
-before <- fire_count
+session$flushReact(); base <- fire
 rv(1L); session$flushReact()
-ok("observe in child fired on dependency change", fire_count > before)
+ok("scoped observe fired on dependency change", fire > base)
 
-child$destroy()           # or session$destroy("1") — confirm which is canonical
-after_destroy <- fire_count
-rv(2L); session$flushReact()
-ok("observe stopped firing after destroy()", fire_count == after_destroy)
+child$destroy()
+threw <- tryCatch({ rv(2L); FALSE }, error = function(e) grepl("destroyed", conditionMessage(e)))
+ok("scope reactiveVal throws on access after destroy() (actively reclaimed)", threw)
 
-# ---- 2(B). does reactiveVal() accept a domain= arg? ----------------------
-has_domain_arg <- "domain" %in% names(formals(reactiveVal))
-ok("reactiveVal() has a `domain` formal (mechanism B)", has_domain_arg)
-info("=> if FALSE, scope reactiveVals via withReactiveDomain (mechanism A)")
-
-# ---- 4. reactiveVal is actually reclaimed (weak-ref finalizer fires) ------
-finalized <- new.env(); finalized$hit <- FALSE
-child2 <- session$makeScope(as.character(2L))
-withReactiveDomain(child2, {
-  rv2 <- reactiveVal(0L)
-  # Finalizer on the rv's enclosing environment — fires when GC reclaims it.
-  reg.finalizer(environment(rv2), function(e) finalized$hit <<- TRUE, onexit = FALSE)
+# ---- 4. reactiveVal env finalized after destroy + gc ---------------------
+fin <- new.env(); fin$hit <- FALSE
+child2 <- session$makeScope(as.character(8L))
+shiny::withReactiveDomain(child2, {
+  rv2 <- shiny::reactiveVal(0L)
+  reg.finalizer(environment(rv2), function(e) fin$hit <<- TRUE, onexit = FALSE)
 })
-child2$destroy()
-rm(rv2); gc(); gc()
-ok("reactiveVal env finalized after destroy + gc (reclamation runs)", finalized$hit)
-info("   (FAIL here may mean a lingering reference, not a broken API — inspect)")
+child2$destroy(); rm(rv2); gc(); gc()
+ok("child-scope reactiveVal env finalized after destroy + gc", fin$hit)
+info("   (FAIL may mean a lingering reference, not a broken API — inspect)")
 
-# ---- 5. child proxy forwards the methods the inner mount needs ------------
-ok("child$sendCustomMessage is a function", is.function(child$sendCustomMessage))
-ok("child$output is present",               !is.null(child$output))
-# insertUI reads getDefaultReactiveDomain(); confirm it resolves under the child.
+# ---- 5. bonus: user observe() in a body eval is reclaimed ----------------
+user_fire <- 0L; trig <- NULL
+child3 <- session$makeScope(as.character(9L))
+shiny::withReactiveDomain(child3, {
+  # Simulate a user-authored observe() inside an Each item body.
+  trig <<- shiny::reactiveVal(0L)
+  shiny::observe({ trig(); user_fire <<- user_fire + 1L })   # NO explicit domain
+})
+session$flushReact(); ub <- user_fire
+trig(1L); session$flushReact()
+ok("user observe (no explicit domain) picked up child as default domain", user_fire > ub)
+child3$destroy()
+reclaimed <- tryCatch({ trig(2L); FALSE }, error = function(e) grepl("destroyed", conditionMessage(e)))
+ok("user observe + its rv reclaimed by child$destroy() (the bonus)", reclaimed)
 
-# ---- 6. pre-#4372 no-op sanity (informational) ---------------------------
-# withReactiveDomain(session, expr) should be a no-op when session is already the
-# active domain — the fallback path relies on this. Just exercise it here.
-withReactiveDomain(session, info("withReactiveDomain(session, ...) ran"))
+# ---- 6. pre-#4372 no-op sanity -------------------------------------------
+shiny::withReactiveDomain(session, info("withReactiveDomain(session, ...) ran (no-op when already active)"))
 
 info("done.")
-</content>
