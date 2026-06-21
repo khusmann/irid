@@ -831,7 +831,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       for (env in cf_envs) {
         # When/Match: single current_mount + (Match only) per-case scope
         if (!is.null(env$current_mount)) env$current_mount$destroy()
-        # shiny#4372: per-case scope teardown — replaced by subdomain cascade.
+        # shiny#4372: per-case scope teardown — child scope cascade reclaims
+        # observers + reactiveVals when running on a #4372 shiny.
         if (!is.null(env$current_scope)) env$current_scope$destroy()
         # Each: per-item mounts + per-item scopes (mini-store / slot
         # accessor propagating observers, plus shiny#4372 reactives).

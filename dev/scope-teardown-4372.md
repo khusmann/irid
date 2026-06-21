@@ -276,14 +276,15 @@ re-confirm on bump. The dev checkout lives at
   installed — no edit. Verified green against the dev clone (all 11 pass; the 4
   gated ones skip on shiny 1.7.4 with zero failures in the full suite).
 
-## Doc / tag cleanup (remaining)
+## Doc / tag cleanup — done
 
-- scope.R roxygen — **done** (rewritten for the feature-detected
-  `makeScope`/`destroy`/`onDestroy` path; `makeSubdomain` removed).
-- ARCHITECTURE.md — *still TODO*: the "Known limitation — reactive-leak" block
-  and the `makeSubdomain` paragraph in *Control Flow Lifecycle* should be
-  rewritten to describe the feature-detected scope path (no longer a known limit
-  on a #4372 shiny). Grep-tag wording ("subdomain cascade" → "scope cascade").
+- scope.R roxygen rewritten for the feature-detected
+  `makeScope`/`destroy`/`onDestroy` path; `makeSubdomain` removed.
+- ARCHITECTURE.md: "Known limitation — reactive-leak" block + the *Control Flow
+  Lifecycle* `makeSubdomain` prose rewritten to describe the feature-detected
+  scope path (resolved on a #4372 runtime, fallback otherwise); file-layout line
+  updated. Stale `subdomain` grep-tag wording in mount.R corrected to "scope
+  cascade".
 
 ## Commit plan (one concept per commit, on this branch)
 
@@ -294,4 +295,4 @@ re-confirm on bump. The dev checkout lives at
    (mini_store.R, mount.R).
 4. ✅ Inner mounts stay on raw `session` (corrected from the issue's plan).
 5. ✅ Gated tests (test-scope.R).
-6. ⬜ ARCHITECTURE.md cleanup (scope.R roxygen already done).
+6. ✅ ARCHITECTURE.md cleanup + stale `subdomain` grep-tag wording.
