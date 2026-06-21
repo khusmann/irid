@@ -40,12 +40,13 @@
 #'
 #' @param session A Shiny session, a child scope proxy, or `NULL` in tests.
 #' @param id Scope identifier for the shiny#4372 child scope (a non-empty
-#'   string; the caller's element/wrapper counter token). Unused on the
-#'   fallback path. Generated if `NULL`.
+#'   string; the caller's element/wrapper counter token). Required — every
+#'   call site already has a unique counter token. Unused on the fallback
+#'   path, but always supplied so the scope's identity is explicit.
 #' @return A list with `session`, `register_observer(obs)`,
 #'   `with_scope(expr)`, and `destroy()`.
 #' @keywords internal
-make_scope <- function(session, id = NULL) {
+make_scope <- function(session, id) {
   # shiny#4372: feature-detect the scoped-teardown API. `makeScope` predates
   # #4372 (module namespacing), so it is NOT the marker — `onDestroy`/`destroy`
   # are the new methods, and the child proxy's `onDestroy` is what reactiveVal
@@ -57,7 +58,6 @@ make_scope <- function(session, id = NULL) {
   if (has_scope) {
     # shiny#4372: child scope auto-tracks observers AND reactiveVals
     # constructed under its reactive domain; `destroy()` cascades to both.
-    if (is.null(id)) id <- basename(tempfile("iridscope"))
     child <- session$makeScope(id)
     list(
       session = child,

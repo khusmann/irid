@@ -1,6 +1,6 @@
 flushReact <- function() shiny:::flushReact()
 
-new_scope <- function() irid:::make_scope(NULL)
+new_scope <- function() irid:::make_scope(NULL, "test")
 
 # --- Constructor validation --------------------------------------------------
 

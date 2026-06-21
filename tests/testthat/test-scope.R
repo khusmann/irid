@@ -19,7 +19,7 @@ shiny_has_scope <- function() {
 # --- Fallback path (no #4372) ------------------------------------------------
 
 test_that("fallback scope tracks and tears down registered observers", {
-  scope <- irid:::make_scope(NULL)
+  scope <- irid:::make_scope(NULL, "test")
   destroyed <- 0L
   fake_obs <- list(destroy = function() destroyed <<- destroyed + 1L)
   scope$register_observer(fake_obs)
@@ -29,12 +29,12 @@ test_that("fallback scope tracks and tears down registered observers", {
 })
 
 test_that("fallback with_scope is identity (forces and returns the value)", {
-  scope <- irid:::make_scope(NULL)
+  scope <- irid:::make_scope(NULL, "test")
   expect_equal(scope$with_scope(40L + 2L), 42L)
 })
 
 test_that("fallback scope$session is the passed session", {
-  expect_null(irid:::make_scope(NULL)$session)
+  expect_null(irid:::make_scope(NULL, "test")$session)
 })
 
 # --- shiny#4372 path: reclamation (gated) ------------------------------------

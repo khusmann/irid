@@ -4,14 +4,15 @@
 \alias{make_scope}
 \title{Per-item / per-case reactive scope}
 \usage{
-make_scope(session, id = NULL)
+make_scope(session, id)
 }
 \arguments{
 \item{session}{A Shiny session, a child scope proxy, or \code{NULL} in tests.}
 
 \item{id}{Scope identifier for the shiny#4372 child scope (a non-empty
-string; the caller's element/wrapper counter token). Unused on the
-fallback path. Generated if \code{NULL}.}
+string; the caller's element/wrapper counter token). Required — every
+call site already has a unique counter token. Unused on the fallback
+path, but always supplied so the scope's identity is explicit.}
 }
 \value{
 A list with \code{session}, \code{register_observer(obs)},
