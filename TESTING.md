@@ -5,10 +5,6 @@ named for the code it exercises and with descriptive `test_that()` labels. This
 document is the **testing-infrastructure guide**: how the suite is organized, how
 to run it, and how the browser (e2e) layer and coverage are wired.
 
-> History: this file used to also carry an exhaustive prose checklist of expected
-> behaviors. That duplicated the test suite, had nothing running it, and drifted
-> from the code — so it was retired. The tests are the source of truth.
-
 ## File layout and naming
 
 **Unit tests** — one file per source module, named verbatim after it with an
