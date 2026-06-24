@@ -78,7 +78,13 @@ Walks the tag tree recursively and produces:
     with a single text node. Reactive text children use the anchor-pair
     form so they remain valid inside restricted-content parents
     (`<option>`, `<textarea>`, ...) where a `<span>` wrapper would be
-    stripped by the HTML parser.
+    stripped by the HTML parser. The binding's return is validated at
+    mount (`coerce_text_child`): it must be a single text value (length-1
+    atomic, coerced to character) or `NULL` — a returned tag, list, or
+    multi-element vector errors, since the client coerces with
+    `String(val)` and would otherwise render garbage (`"[object Object]"`).
+    Wrap reactive *tags* in a control-flow primitive (`When`/`Match`/`Each`)
+    rather than returning them as text.
   - `target = "widget"` rows are `{id, target, attr, fn}` — the binding
     routes per-key updates to the widget instance's `update(key, value)`
     hook.

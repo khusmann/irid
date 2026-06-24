@@ -19,6 +19,8 @@ static HTML.
 - [ ] Reactive attributes are removed from the output tag (only static attrs remain)
 - [ ] Event attributes are removed from the output tag
 - [ ] Reactive text child becomes a `<span>` binding with `attr = "textContent"`
+- [ ] Reactive text child returning a tag / list / multi-element vector errors
+      at mount (`coerce_text_child`); length-1 atomics and `NULL` are accepted
 - [ ] `When` node produces a control-flow entry with `type = "when"`
 - [ ] `Each` node produces a control-flow entry with `type = "each"` and `by`
 - [ ] `Index` node produces a control-flow entry with `type = "index"`
