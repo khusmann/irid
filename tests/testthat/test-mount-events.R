@@ -2,18 +2,6 @@
 # dispatch (0/1/2-arg handlers) and the config-only (handler-less) wire that
 # registers a client listener but no server observer.
 
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
-
 mount_node <- function(node) {
   s <- new_fake_session()
   result <- process_tags(node)
@@ -79,7 +67,7 @@ test_that("a config-only wire registers a client listener but no observer", {
   m$handle$destroy()
 })
 
-test_that("irid.debug.latency adds a delay but the handler still fires", {
+test_that("irid.debug.latency does not suppress the handler", {
   fired <- 0L
   m <- mount_node(shiny::tags$button(onClick = function() fired <<- fired + 1L))
   id <- event_id(m$result)

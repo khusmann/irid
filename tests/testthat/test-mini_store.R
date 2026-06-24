@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 new_scope <- function() irid:::make_scope(NULL, "test")
 
 new_mini <- function(initial) {

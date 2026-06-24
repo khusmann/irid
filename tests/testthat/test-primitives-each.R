@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 new_scope <- function() irid:::make_scope(NULL, "test")
 
 # --- Constructor validation --------------------------------------------------
@@ -204,20 +202,6 @@ test_that("mini-store propagator no-ops when parent value becomes a scalar", {
 # fake session is intentionally minimal — it only captures the message
 # stream so we can assert "remove + insert + order" came through on a
 # shape transition.
-
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(
-      type = type, message = message
-    )
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
 
 mount_each <- function(items, fn, by = NULL) {
   session <- new_fake_session()

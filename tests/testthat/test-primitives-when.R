@@ -2,8 +2,6 @@
 # process_tags extraction, and the mount-time observer lifecycle: which branch
 # renders, the short-circuit that protects inner state, branch-switch teardown.
 
-flushReact <- function() shiny:::flushReact()
-
 # --- Constructor validation --------------------------------------------------
 
 test_that("When accepts a condition + bodies", {
@@ -55,18 +53,6 @@ test_that("When emits a comment-anchor pair (no wrapper element)", {
 })
 
 # --- Mount lifecycle ---------------------------------------------------------
-
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
 
 mount_when <- function(node) {
   session <- new_fake_session()

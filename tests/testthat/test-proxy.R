@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 # --- Construction & argument validation --------------------------------------
 
 test_that("returns a callable with class reactiveProxy/function", {

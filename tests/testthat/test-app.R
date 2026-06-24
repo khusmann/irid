@@ -2,18 +2,6 @@
 # renderIrid, and the irid_send_config helper. Driven without a browser via
 # MockShinySession / testServer.
 
-new_capturing_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
-
 render_app_ui <- function(app) {
   req <- list(
     REQUEST_METHOD = "GET", PATH_INFO = "/", QUERY_STRING = "",
@@ -27,7 +15,7 @@ render_app_ui <- function(app) {
 # --- irid_send_config --------------------------------------------------------
 
 test_that("irid_send_config sends irid-config with the stale-timeout option", {
-  s <- new_capturing_session()
+  s <- new_fake_session()
   withr::with_options(
     list(irid.stale_timeout = 500),
     irid:::irid_send_config(s)
@@ -38,7 +26,7 @@ test_that("irid_send_config sends irid-config with the stale-timeout option", {
 })
 
 test_that("irid_send_config defaults the stale timeout to 200", {
-  s <- new_capturing_session()
+  s <- new_fake_session()
   withr::with_options(
     list(irid.stale_timeout = NULL),
     irid:::irid_send_config(s)
@@ -79,6 +67,7 @@ test_that("iridApp UI and server passes produce matching element ids", {
 
   # The server side walks fn() through the same deterministic process_tags.
   binding_ids <- vapply(process_tags(fn())$bindings, function(b) b$id, character(1))
+  expect_gt(length(binding_ids), 0L)  # guard against a vacuous all() pass
   expect_true(all(binding_ids %in% ui_ids))
 })
 
@@ -87,7 +76,7 @@ test_that("iridApp server sends config synchronously and wires the tree", {
   fn <- function() shiny::tags$input(value = rv)
   app <- iridApp(fn)
 
-  s <- new_capturing_session()
+  s <- new_fake_session()
   server_fn <- app$serverFuncSource()
   shiny::isolate(server_fn(s$input, s$output, s))
   s$flushReact()

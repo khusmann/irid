@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 # --- Construction & shape -----------------------------------------------------
 
 test_that("scalar leaf reads its initial value", {

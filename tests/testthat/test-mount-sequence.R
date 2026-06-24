@@ -6,19 +6,6 @@
 # of ITS OWN channel, so a sibling channel firing in the same flush — another
 # prop, or a notification — cannot make a current echo look stale.
 
-new_capturing_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<-
-      list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
-
 attr_msgs <- function(session) {
   Filter(function(m) m$type == "irid-attr", session$msgs())
 }
@@ -26,7 +13,7 @@ attr_msgs <- function(session) {
 # Mount a widget, drain the initial (programmatic) flush, and return a context
 # whose `$drain()` returns only the irid-attr echoes produced after `expr`.
 mount_and_settle <- function(node) {
-  s <- new_capturing_session()
+  s <- new_fake_session()
   result <- process_tags(node)
   handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
   s$flushReact()
@@ -168,7 +155,7 @@ test_that("widget event messages carry kind and a namespaced inputId", {
     props = list(v = v),
     events = list(ping = function(e) NULL)
   )
-  s <- new_capturing_session()
+  s <- new_fake_session()
   result <- process_tags(node)
   handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
 

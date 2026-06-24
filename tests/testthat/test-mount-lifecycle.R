@@ -8,20 +8,6 @@
 # echoes irid-attr; after destroy, a live observer would still echo — so silence
 # proves teardown.
 
-flushReact <- function() shiny:::flushReact()
-
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
-
 # irid-attr echoes for a given attr name.
 attrs <- function(s, attr) {
   Filter(

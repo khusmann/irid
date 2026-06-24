@@ -38,18 +38,6 @@ test_that("coerce_text_child rejects lists", {
 
 # --- extraction + mount of a reactive text child -----------------------------
 
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
-
 test_that("a reactive text child becomes a target='text' binding + anchor pair", {
   res <- process_tags(shiny::tags$span(function() "hi"))
   expect_length(res$bindings, 1L)
