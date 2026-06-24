@@ -639,12 +639,16 @@ irid_mount_processed <- function(result, session, depth = 0L) {
             }
             get_value <- function() {
               idx <- current_index()
+              # nocov start: keyed read/write during a teardown race
               if (is.na(idx)) return(NULL)
+              # nocov end
               cf_items()[[idx]]
             }
             set_value <- function(v) {
               idx <- current_index()
+              # nocov start
               if (is.na(idx)) return(invisible())
+              # nocov end
               new_items <- shiny::isolate(cf_items())
               new_items[[idx]] <- v
               cf_items(new_items)
@@ -751,7 +755,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           if (plan$noop) return()
 
           if (plan$has_duplicates) {
+            # nocov start: raised from an async observer; the detection is
+            # unit-tested via plan_reconcile()$has_duplicates
             cli::cli_abort("{.fn Each} requires unique keys from the {.arg by} function.")
+            # nocov end
           }
 
           run_reconcile_plan(

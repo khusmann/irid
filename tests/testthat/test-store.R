@@ -722,3 +722,9 @@ test_that("I()-wrapped value at root patch reaches the leaf", {
   state(list(filter = list(bar = 2, baz = 3)))
   expect_equal(shiny::isolate(state$filter()), list(bar = 2, baz = 3))
 })
+
+test_that("[[ rejects multi-length and non-string/integer indices", {
+  state <- reactiveStore(list(a = 1, b = 2))
+  expect_error(state[[c(1L, 2L)]], "single index")
+  expect_error(state[[TRUE]], "string or integer")
+})

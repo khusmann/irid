@@ -80,3 +80,17 @@ test_that("multiple Output nodes get distinct ids", {
   ids <- vapply(res$shiny_outputs, function(s) s$id, character(1))
   expect_equal(length(unique(ids)), 2L)
 })
+
+# --- mount ------------------------------------------------------------------
+
+test_that("mounting assigns each Output's render_call to session$output", {
+  s <- shiny::MockShinySession$new()
+  res <- process_tags(
+    Output(shiny::renderText, shiny::textOutput, function() "hello")
+  )
+  handle <- shiny::isolate(irid:::irid_mount_processed(res, s))
+  id <- res$shiny_outputs[[1]]$id
+  # The render_call was installed under its id and renders the value.
+  expect_equal(s$getOutput(id), "hello")
+  handle$destroy()
+})

@@ -397,3 +397,13 @@ test_that("synchronous local write does not double-fire on flush", {
 
   obs$destroy()
 })
+
+test_that("shape_signature treats non-records as scalars (NULL signature)", {
+  expect_null(irid:::shape_signature(I(list(a = 1))))  # AsIs opts out
+  expect_null(irid:::shape_signature(list()))          # empty
+  expect_null(irid:::shape_signature(list(1, 2)))      # unnamed
+  expect_null(irid:::shape_signature(42))              # atomic scalar
+  # A named record yields a structural signature keyed by name.
+  sig <- irid:::shape_signature(list(a = 1, b = list(c = 2)))
+  expect_equal(names(sig), c("a", "b"))
+})

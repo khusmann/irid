@@ -328,12 +328,12 @@ PlotlyOutput <- function(
   onRelayout          = NULL,
   container           = NULL
 ) {
-  if (!requireNamespace("plotly", quietly = TRUE)) {
+  if (!requireNamespace("plotly", quietly = TRUE)) {   # nocov start
     cli::cli_abort(c(
       "{.fn PlotlyOutput} requires the {.pkg plotly} package.",
       "i" = 'Install it with {.run install.packages("plotly")}.'
     ))
-  }
+  }                                                    # nocov end
   check_function(spec)
 
   state <- list(...)

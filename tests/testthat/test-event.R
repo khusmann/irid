@@ -107,3 +107,11 @@ test_that("merge dispatches through the base generic", {
   out <- merge(wire(timing = wire_debounce(200)), function() NULL)
   expect_s3_class(out, "irid_wire")
 })
+
+test_that("as_wire normalizes NULL/function/wire and rejects anything else", {
+  expect_s3_class(irid:::as_wire(NULL), "irid_wire")
+  expect_s3_class(irid:::as_wire(function() NULL), "irid_wire")
+  w <- wire(timing = wire_immediate())
+  expect_identical(irid:::as_wire(w), w)
+  expect_error(irid:::as_wire(42), "function or")
+})
