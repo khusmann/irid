@@ -40,11 +40,31 @@ What this number hides:
 - **84.9% is the e2e-excluded number.** app.R and the plotly client paths look
   worse than they are in practice because their real coverage lives in e2e.
 
-## 2. `TESTING.md` is stale (fix before adding tests)
+## 2. `TESTING.md` is stale — and we retire it, not rebuild it
 
 `TESTING.md` predates several design changes and now describes primitives and
-shapes that no longer exist. It must be reconciled with the code first —
-otherwise we'd write tests against a fictional API. Confirmed drift:
+shapes that no longer exist. The drift is the symptom, not the disease: a
+hand-maintained prose checklist that mirrors the test suite has no compiler and
+nothing that runs it, so it *will* drift again. Once the behaviors are encoded as
+tests with descriptive `test_that()` names, **the test files are the source of
+truth** and the checklist is pure maintenance debt.
+
+So the decision for 0.3.0 is: **do not rebuild the behavior checklist.** Treat it
+as a throwaway tracker during the hardening (or just track against §3–§4 of this
+doc and the test files, which overlap), then at the end **slim `TESTING.md` down
+to a testing-*infrastructure* guide** and delete the exhaustive checklist:
+
+- **Keep** the durable infra content (today's lines ~469–488): the e2e naming
+  convention (`test-<area>-e2e.R`), `skip_unless_e2e()` gating, the `IRID_E2E`
+  env var, the CI job split, how to run e2e locally — plus JS-harness run
+  instructions if §4 Option A lands. None of this lives in any test file, and
+  `CLAUDE.md` points here for orientation.
+- **Delete** the behavior checklist (today's lines ~1–468). The test suite
+  replaces it.
+
+This also removes the busywork of reconciling every stale checkbox — we only
+touch the lines we're keeping. The confirmed drift below is recorded so the
+*tests* we write target the shipped API, not so we fix it in place:
 
 - **`Index` is not a primitive.** It is gone from the code (no export, nothing in
   `primitives.R`; remaining "Index" hits in the source are the English word).
@@ -57,13 +77,8 @@ otherwise we'd write tests against a fictional API. Confirmed drift:
   lines (22–23) already describe the correct behavior; the old `<span>` line
   contradicts them and must go.
 - **`index_rv` naming.** `TESTING.md` refers to `index_rv`; the code/architecture
-  use the `pos` / `pos_rv` accessor. Rename in the doc.
-
-Action: rewrite `TESTING.md` so the checklist matches the shipped API, fold the
-`Index` checks into the `Each` positional section, and **add checkbox state** —
-the current doc is a flat list with nothing marked done, so it can't tell us
-what's covered. The reorganized doc becomes the source of truth we tick off as
-we close the gaps in §3–§4.
+  use the `pos` / `pos_rv` accessor. (Recorded for the `Each` tests, not for a
+  doc rename — the section is being deleted.)
 
 ## 3. R-side gaps (priority order)
 
@@ -130,49 +145,65 @@ coercion: `list(40, 200)` → numeric range, `NA` → `NULL`, date-axis stays
 character, the `force()` capture-loop fix). This lifts plotly.R coverage without
 needing the browser.
 
-## 4. Client-side (JS) — the real blind spot
+## 4. Client-side (JS) — the real blind spot (tracked in #30)
 
-This is the largest gap and the biggest CRAN-confidence risk. Two viable paths;
-**pick one before implementation** (see Decision below):
+This is the largest gap and the biggest CRAN-confidence risk: the fragile logic
+in `irid.js` / `plotly-irid.js` is exercised **only** by the browser e2e suite,
+which runs in a separate, browser-gated CI job — a regression in the
+diffing/sequencing logic lands green if that job flakes or is skipped.
+[Issue #30](https://github.com/khusmann/irid/issues/30) already scopes this work;
+it supersedes the vitest-vs-e2e framing an earlier draft of this plan used.
 
-**Option A — JS unit tests (new tooling).** Add a minimal `package.json` +
-vitest/jsdom harness under a build-ignored dir, factor the pure logic out of
-`irid.js` (echo-gate decision, payload construction, anchor walk, ordering-queue
-`drainQueue`) into testable units. Highest-value targets, all currently
-untested except via e2e:
+**Mechanism: the `V8` R package** (`Suggests: V8`), *not* a node/vitest
+toolchain. Tests `ct$source()` the helper file and call the pure functions
+directly, asserting from R — so they stay in testthat, under one
+`devtools::test()` and one CI job, consistent with the project's no-JS-build-step
+principle. (The one place node + fake timers would beat V8 is throttle/debounce
+*timing*; leave that to e2e unless we decide it's worth covering.)
 
-- echo gating: stale / current-same-value / server-transform / programmatic;
-  per-channel sequence; widget `value_meta` per-key gate.
-- `irid-attr` property-vs-attribute dispatch; `false`/`null` → `removeAttribute`.
-- comment-anchor registry: populate, lookup-miss rescan, register/deregister on
-  insert/remove, reorder preserves entries.
-- per-element ordering queue: preemptive flush, drop-empty-slot, ordering beats
-  backpressure, per-element isolation.
-- payload construction: string/number/boolean fields, `valueAsNumber`,
-  swallowed property-access errors.
+**Discipline — audit before extracting (#30 step 0).** For each candidate,
+confirm it's a real gap first: which `test-plotly-e2e.R` rows already drive the
+helper end-to-end, and whether a pure-R twin is already tested. Only extract +
+unit-test where coverage is thin **and** the logic is bug-prone. The
+sequence/stale-echo gate has no R counterpart and is the clearest genuine gap.
 
-Cost: introduces a JS toolchain and `.Rbuildignore` entries; must stay out of
-the built package so CRAN never sees Node.
+**Refactor cost.** The pure helpers are module-scoped inside IIFE/factory
+closures and currently unreachable. The work is extracting them into a
+separately-loadable unit on a shared namespace (browser loads it as an extra
+script dep; V8 `source()`s the same file) — a second script dep + namespace seam.
+Prototype the seam on one helper (e.g. `idsToIndices`) to derisk before
+committing.
 
-**Option B — lean on e2e, broaden it.** Keep zero JS tooling; add e2e cases for
-the highest-risk client behaviors not yet covered (stale-indicator show/hide
-timing, optimistic-update echo under latency, comment-anchor edge cases in
-`<select>`/`<tbody>`). Cheaper to set up, but slower, browser-bound, CRAN-skipped,
-and weaker at pinning down pure-logic branches.
+**In scope — unit-test (pure, operate on plain objects):**
 
-Recommendation: **A for the pure-logic cores** (echo gate, ordering queue,
-anchor walk, payload builder — they're deterministic and cheap to unit test),
-**plus a few targeted B cases** for the genuinely integration-shaped behaviors
-(stale indicator timing, restricted-parent parsing). This is where most
-remaining `TESTING.md` checkboxes live.
+- core: the **stale-echo / sequence gate** (`shouldSkip` + `markStale` /
+  `clearStale` / `onEventSent`) — the subtlety behind the `TODO(#28)`
+  notify-first ordering constraint; pinning it makes the #28 rework safer.
+- plotly: `approxEq`, `idsToIndices`, `idsFromPoints`, `readVisibility`,
+  `typedVisibility` / `stringVisibility`, and each translation-table entry's
+  `fromRelayout` / `matchesCurrent` / `writeSpec`.
+
+**Out of scope — leave to e2e** (DOM / `Plotly.*` / Shiny glue; mocking
+faithfully is more work and less trustworthy than a real browser): anchor
+registry (`indexAnchors` / `lookupAnchors`), `parseFragment` / `detachRange`,
+`mountWidget` / `destroyWidgetsIn`, Shiny input plumbing; plotly `apply` /
+`applyDeferred` / `render` / `attachListeners` / `destroy`.
+
+**Plus a few targeted e2e** for genuinely integration-shaped behaviors not yet
+covered: stale-indicator show/hide timing, optimistic-echo under latency,
+comment-anchor edge cases in `<select>` / `<tbody>`.
+
+Deliverables (from #30): coverage audit → V8 seam prototype on one helper →
+unit tests for the in-scope plotly helpers → unit tests for the core
+sequence/stale-echo gate.
 
 ## 5. CRAN-readiness checklist (non-coverage)
 
 - `R CMD check` clean (no NOTES/WARNINGs) with e2e skipped — confirm the default
   `devtools::test()` never boots Chrome (`skip_unless_e2e()` already gates this;
   verify after additions).
-- Every new test that needs a Suggests pkg (`DT`, `plotly`, `bslib`, …) guards
-  with `skip_if_not_installed()`.
+- Every new test that needs a Suggests pkg (`DT`, `plotly`, `bslib`, `V8`, …)
+  guards with `skip_if_not_installed()`. Add `V8` to `Suggests` if §4 lands.
 - e2e files keep the `test-<area>-e2e.R` suffix so CI's `filter = "e2e"` picks
   them up with no list to maintain.
 - Re-run covr after each phase; record the new overall number in `NEWS.md` under
@@ -183,19 +214,22 @@ remaining `TESTING.md` checkboxes live.
 
 ## 6. Sequencing
 
-1. Reconcile `TESTING.md` with the code (§2) + add checkbox state. *(doc-only)*
-2. P0 `test-app.R` (§3) — biggest coverage hole, pure R.
-3. P1 `test-when.R` + P2 mount `$destroy()` (§3).
-4. P4 plotly pure-R helpers (§3).
-5. Decide §4 path; implement JS unit cores (A) and/or targeted e2e (B).
-6. P3 scope #4372 `skip_if` test (§3).
+1. P0 `test-app.R` (§3) — biggest coverage hole, pure R.
+2. P1 `test-when.R` + P2 mount `$destroy()` (§3).
+3. P4 plotly pure-R helpers (§3).
+4. §4 / #30: V8 seam prototype → in-scope JS unit tests + targeted e2e.
+5. P3 scope #4372 `skip_if` test (§3).
+6. **Retire `TESTING.md`** (§2): delete the behavior checklist, keep/slim the
+   infra guide, add JS-harness run notes if §4 Option A landed.
 7. covr re-run, NEWS entry, version bump → release.
 
 Each numbered step is one commit (per the project's "one concept per commit"
-rule). Steps 2–4 and 6 are independent and can land in any order.
+rule). Steps 1–3 and 5 are independent and can land in any order; step 6 comes
+last so the retired doc reflects the final test layout.
 
 ## Open decisions (need sign-off before impl)
 
-- **§4 path**: A (JS tooling) vs B (e2e-only) vs the recommended hybrid.
 - **§3 P3**: gate a #4372 test with `skip_if`, or defer to e2e/manual for 0.3.0.
 - **Coverage gate** (§5): is ≥90% R-side the right bar for the release?
+
+(§4's mechanism is settled — `V8`, per #30 — so it's no longer an open question.)
