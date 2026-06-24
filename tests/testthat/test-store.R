@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 # --- Construction & shape -----------------------------------------------------
 
 test_that("scalar leaf reads its initial value", {
@@ -721,4 +719,10 @@ test_that("I()-wrapped value at root patch reaches the leaf", {
   state <- reactiveStore(list(filter = I(list(foo = 1))))
   state(list(filter = list(bar = 2, baz = 3)))
   expect_equal(shiny::isolate(state$filter()), list(bar = 2, baz = 3))
+})
+
+test_that("[[ rejects multi-length and non-string/integer indices", {
+  state <- reactiveStore(list(a = 1, b = 2))
+  expect_error(state[[c(1L, 2L)]], "single index")
+  expect_error(state[[TRUE]], "string or integer")
 })

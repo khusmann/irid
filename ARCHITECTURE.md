@@ -1038,4 +1038,6 @@ built in a construction loop don't all resolve to the last one.
 
 ## Testing
 
-See [TESTING.md](TESTING.md) for the full test plan.
+See [TESTING.md](TESTING.md) for the test-suite layout, naming conventions, and
+how to run the unit and e2e tests. The behavior spec itself lives in the test
+files under `tests/testthat/`.

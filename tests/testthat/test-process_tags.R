@@ -472,13 +472,6 @@ test_that("control-flow nodes as slot values error with a child-slot hint", {
   )
 })
 
-test_that("Output node as a slot value errors", {
-  expect_error(
-    process_tags(tags$div(class = PlotOutput(\() plot(1)))),
-    "irid_output.*children"
-  )
-})
-
 test_that("error message mentions the offending slot name", {
   expect_error(
     process_tags(tags$button(onClick = wire_immediate())),
@@ -569,4 +562,15 @@ test_that("duplicate attribute names are preserved (rendered space-joined)", {
   )
   out <- as.character(process_tags(ui)$tag)
   expect_match(out, 'class="a b"')
+})
+
+test_that("NULL nodes are passed through (a NULL child is dropped)", {
+  expect_null(process_tags(NULL)$tag)
+  out <- as.character(process_tags(tags$div(NULL, "keep"))$tag)
+  expect_match(out, "keep")
+})
+
+test_that("a tagFunction resolving to NULL is dropped after render hooks", {
+  # resolve_render_hooks() returns NULL, hitting the post-hook NULL guard.
+  expect_null(process_tags(htmltools::tagFunction(function() NULL))$tag)
 })

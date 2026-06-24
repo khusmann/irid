@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 new_scope <- function() irid:::make_scope(NULL, "test")
 
 # --- Constructor validation --------------------------------------------------
@@ -204,20 +202,6 @@ test_that("mini-store propagator no-ops when parent value becomes a scalar", {
 # fake session is intentionally minimal — it only captures the message
 # stream so we can assert "remove + insert + order" came through on a
 # shape transition.
-
-new_fake_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(
-      type = type, message = message
-    )
-    invisible()
-  }
-  s$msgs <- function() store$msgs
-  s
-}
 
 mount_each <- function(items, fn, by = NULL) {
   session <- new_fake_session()
@@ -623,4 +607,62 @@ test_that("plan_reconcile: keyed tail append (no reorder) omits order", {
   expect_equal(p$added, "d")
   expect_equal(p$kept, c("a", "b", "c"))
   expect_null(p$order)
+})
+
+# --- callback arity + keyed duplicate keys -----------------------------------
+
+test_that("Each calls a 0-arg callback once per item", {
+  calls <- 0L
+  m <- mount_each(shiny::reactiveVal(list(1, 2, 3)), function() {
+    calls <<- calls + 1L
+    shiny::tags$span()
+  })
+  flushReact()
+  expect_equal(calls, 3L)
+  m$handle$destroy()
+})
+
+test_that("Each passes a position accessor to a 2-arg keyed callback", {
+  items <- shiny::reactiveVal(list(list(id = "a"), list(id = "b")))
+  positions <- list()
+  m <- mount_each(
+    items,
+    function(item, pos) {
+      positions[[length(positions) + 1L]] <<- shiny::isolate(pos())
+      shiny::tags$span()
+    },
+    by = function(x) x$id
+  )
+  flushReact()
+  expect_equal(sort(unlist(positions)), c(1L, 2L))
+  m$handle$destroy()
+})
+
+test_that("Each positional scalar accessor writes back through the parent", {
+  items <- shiny::reactiveVal(list("x", "y"))
+  setters <- list()
+  m <- mount_each(items, function(item) {
+    setters[[length(setters) + 1L]] <<- item
+    shiny::tags$span()
+  })
+  flushReact()
+  setters[[1]]("X") # write through slot 1's accessor
+  flushReact()
+  expect_equal(shiny::isolate(items()), list("X", "y"))
+  m$handle$destroy()
+})
+
+test_that("plan_reconcile flags duplicate keys", {
+  # The keyed reconciler detects duplicate by() keys; the Each observer turns
+  # this flag into a user-facing error.
+  dup <- irid:::plan_reconcile(
+    old_ids = character(0), new_ids = c("a", "a"),
+    old_sigs = list(), new_sigs = list(a = "s")
+  )
+  expect_true(dup$has_duplicates)
+  uniq <- irid:::plan_reconcile(
+    old_ids = character(0), new_ids = c("a", "b"),
+    old_sigs = list(), new_sigs = list(a = "s", b = "s")
+  )
+  expect_false(uniq$has_duplicates)
 })

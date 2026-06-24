@@ -263,11 +263,11 @@ TableOutput <- function(fn, ...) {
 #' @return A irid output node.
 #' @export
 DTOutput <- function(fn, ...) {
-  if (!requireNamespace("DT", quietly = TRUE)) {
+  if (!requireNamespace("DT", quietly = TRUE)) {   # nocov start
     cli::cli_abort(c(
       "The {.pkg DT} package is required for {.fn DTOutput}.",
       "i" = 'Install it with {.run install.packages("DT")}.'
     ))
-  }
+  }                                                # nocov end
   Output(DT::renderDT, DT::DTOutput, fn, ...)
 }

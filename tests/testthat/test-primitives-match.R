@@ -1,5 +1,3 @@
-flushReact <- function() shiny:::flushReact()
-
 # --- Constructor validation --------------------------------------------------
 
 test_that("Match requires a leading callable", {
@@ -101,4 +99,88 @@ test_that("is_record distinguishes records from scalars/atomics", {
   expect_false(irid:::is_record("scalar"))             # string
   expect_false(irid:::is_record(42))                   # numeric
   expect_false(irid:::is_record(NULL))                 # null
+})
+
+# --- Mount lifecycle ---------------------------------------------------------
+
+mount_match <- function(node) {
+  s <- new_fake_session()
+  result <- process_tags(node)
+  handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
+  list(
+    session = s,
+    handle = handle,
+    swaps = function() Filter(function(m) m$type == "irid-swap", s$msgs())
+  )
+}
+
+test_that("Match renders the first matching case", {
+  m <- mount_match(Match(
+    \() "b",
+    Case("a", \() tags$p("A")),
+    Case("b", \() tags$p("B"))
+  ))
+  flushReact()
+  sw <- m$swaps()
+  expect_length(sw, 1L)
+  expect_match(sw[[1]]$message$html, "B")
+  m$handle$destroy()
+})
+
+test_that("Match emits an empty swap when no case matches and no Default", {
+  m <- mount_match(Match(\() "z", Case("a", \() tags$p("A"))))
+  flushReact()
+  sw <- m$swaps()
+  expect_length(sw, 1L)
+  expect_equal(sw[[1]]$message$html, "")
+  m$handle$destroy()
+})
+
+test_that("Match short-circuits while the active case is unchanged", {
+  v <- shiny::reactiveVal("a1")
+  m <- mount_match(Match(
+    v,
+    Case(\(x) startsWith(x, "a"), \() tags$p("A")),
+    Default(\() tags$p("other"))
+  ))
+  flushReact()
+  n <- length(m$swaps())
+  v("a2") # still matches the first case
+  flushReact()
+  expect_equal(length(m$swaps()), n) # no remount
+  m$handle$destroy()
+})
+
+test_that("Match destroys the previous case when the active case changes", {
+  v <- shiny::reactiveVal("a")
+  m <- mount_match(Match(
+    v,
+    Case("a", \() tags$p("A")),
+    Case("b", \() tags$p("B"))
+  ))
+  flushReact()
+  expect_match(m$swaps()[[1]]$message$html, "A")
+
+  v("b")
+  flushReact()
+  sw <- m$swaps()
+  expect_length(sw, 2L)
+  expect_match(sw[[2]]$message$html, "B")
+  m$handle$destroy()
+})
+
+test_that("Match projects a record case body as a mini-store", {
+  rec <- shiny::reactiveVal(list(label = "hi", n = 1))
+  binding <- NULL
+  m <- mount_match(Match(
+    rec,
+    Case(\(v) TRUE, function(v) {
+      binding <<- v
+      tags$span(`data-label` = function() v$label())
+    })
+  ))
+  flushReact()
+  expect_s3_class(binding, "reactiveStore")
+  expect_equal(shiny::isolate(binding$label()), "hi")
+  m$handle$destroy()
 })
