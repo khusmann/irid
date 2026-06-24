@@ -3,7 +3,8 @@
 ## Orientation
 
 - Read `ARCHITECTURE.md` before searching through the project
-- Read `TESTING.md` when orienting yourself on testing
+- Read `TESTING.md` for suite layout and how to run tests; the behavior spec
+  lives in the test files under `tests/testthat/`
 - Examples live in `examples/*` and `vignettes/articles/examples.Rmd`
 
 ## Project status
