@@ -31,7 +31,7 @@ R-side line coverage (covr, `type = "tests"`, e2e suite excluded):
 | ---------------- | -------- | -------------------------------------------------- |
 | `app.R`          | **0%**   | `iridApp` / `iridOutput` / `renderIrid` / `irid_send_config` — entry points, only ever touched by e2e |
 | `plotly.R`       | 68%      | coercion + state-prop helpers; rest is e2e-only    |
-| `scope.R`        | 71%      | shiny#4372 seam; fallback path tested, #4372 path not |
+| `scope.R`        | 71%      | not a gap — #4372 path is tested but gated-skips on CRAN shiny |
 | `primitives.R`   | 73%      | `When` lifecycle largely untested (see below)       |
 | `mount.R`        | 81%      | biggest/most complex file; `$destroy()` propagation thin |
 | `event.R`        | 93%      |                                                    |
@@ -185,20 +185,16 @@ Mirror the mount/destroy assertion style in `test-primitives-each.R` /
 - Each: destroying destroys all per-item child mounts;
 - nested control flows: destroy propagates recursively.
 
-### P3 — `scope.R` #4372 path (71%)
+### `scope.R` #4372 path — already covered, no work
 
-The fallback (pre-#4372) path is tested; the feature-detected #4372 branch is
-not, because CRAN shiny doesn't carry the PR. Decide one of:
+The apparent 71% is **not a gap**: `test-scope.R` already has a full
+`skip_if_not(shiny_has_scope())`-gated #4372 suite (branch selection,
+`reactiveVal` reclamation, mini-store leaves, slot accessors, user-observer
+teardown). Those tests *skip* on CRAN shiny (which lacks the PR), so their lines
+don't count in a CRAN-shiny covr run; they run automatically once a #4372 shiny
+is installed. Nothing to add — listed here only to explain the number.
 
-- gate a test on a feature-detect (`skip_if` shiny lacks `makeScope` child
-  teardown) so it runs on a dev shiny and skips on CRAN; or
-- accept the fallback-only coverage for 0.3.0 and note the #4372 path as
-  e2e/manual until shiny ships it.
-
-Recommend the first — a cheap `skip_if`-gated test keeps the seam honest as
-shiny evolves. Tag it `# shiny#4372:` like the code sites.
-
-### P4 — `plotly.R` non-e2e helpers (68%)
+### P3 — `plotly.R` non-e2e helpers (68%)
 
 `coerce_plotly_value` / `coerce_state_prop` / `to_plotly_spec` and the
 name-validation paths are pure R and should be unit-tested directly (wire-shape
@@ -311,7 +307,7 @@ order.
    `test-primitives-*.R`; `test-mini-store.R` → `test-mini_store.R`.
 2. P0 `test-app.R` — biggest coverage hole, pure R.
 3. P1 `test-primitives-when.R` + P2 mount `$destroy()`.
-4. P4 plotly pure-R helpers; P3 scope #4372 `skip_if` test.
+4. P3 plotly pure-R helpers.
 5. covr re-run; NEWS dev-entry note.
 
 **PR 2 — client-side / JS (separate branch, closes #30).** Add `V8` to
@@ -322,8 +318,7 @@ order.
 8. Retire `TESTING.md` (§2) — last, so the slimmed infra guide reflects the final
    layout and includes the V8-harness run notes.
 
-## Open decisions (need sign-off before impl)
+## Open decisions
 
-- **§3 P3**: gate a #4372 test with `skip_if`, or defer to e2e/manual.
-
-(§4's mechanism is settled — `V8`, per #30.)
+None outstanding. (§4's mechanism is settled — `V8`, per #30; the scope #4372
+path is already covered by gated tests.) Ready to start PR 1 at §5 step 1.
