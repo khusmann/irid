@@ -1,12 +1,27 @@
 # Test hardening plan — 0.3.0 CRAN release
 
-Status of this doc: **proposal, pending approval.** Implementation happens on
-this branch (`test-hardening-0.3.0`) once the plan is signed off.
+Status of this doc: **proposal, pending approval.**
 
 Target: cut `irid` 0.3.0 to CRAN with a test suite we trust. Today the suite is
 solid where it exists but has a few load-bearing blind spots, and the plan
 doc (`TESTING.md`) has drifted from the code. This document records the current
 state, the gaps, and a prioritized path to close them.
+
+**Split across two PRs:**
+
+- **PR 1 — R-side (this branch, `test-hardening-0.3.0`).** Everything in §3 plus
+  the covr re-run. Pure R, no browser, no new JS tooling.
+- **PR 2 — client-side / JS (separate branch, closes #30).** §4: the V8 JS-unit
+  work, the targeted e2e additions, and retiring `TESTING.md` to an infra-only
+  guide.
+
+**Scope: no release.** This is suite-hardening only — **no version bump, no CRAN
+submission.** "0.3.0" names the *target release these tests are for*, not a cut
+we make here; the `0.2.0.9000` → `0.3.0` bump and submission are a separate later
+step.
+
+The rest of this doc is organized by concern (§3 R-side, §4 client-side); see §5
+for the per-PR sequencing.
 
 ## 1. Where we are today
 
@@ -51,14 +66,16 @@ truth** and the checklist is pure maintenance debt.
 
 So the decision for 0.3.0 is: **do not rebuild the behavior checklist.** Treat it
 as a throwaway tracker during the hardening (or just track against §3–§4 of this
-doc and the test files, which overlap), then at the end **slim `TESTING.md` down
-to a testing-*infrastructure* guide** and delete the exhaustive checklist:
+doc and the test files, which overlap), then **slim `TESTING.md` down to a
+testing-*infrastructure* guide** and delete the exhaustive checklist. This is a
+**PR 2 step** — done last, once the V8 harness exists, so the slimmed guide can
+include its run notes and reflect the final test layout:
 
 - **Keep** the durable infra content (today's lines ~469–488): the e2e naming
   convention (`test-<area>-e2e.R`), `skip_unless_e2e()` gating, the `IRID_E2E`
-  env var, the CI job split, how to run e2e locally — plus JS-harness run
-  instructions if §4 Option A lands. None of this lives in any test file, and
-  `CLAUDE.md` points here for orientation.
+  env var, the CI job split, how to run e2e locally — plus the V8 JS-harness run
+  instructions (§4). None of this lives in any test file, and `CLAUDE.md` points
+  here for orientation.
 - **Delete** the behavior checklist (today's lines ~1–468). The test suite
   replaces it.
 
@@ -82,6 +99,25 @@ touch the lines we're keeping. The confirmed drift below is recorded so the
 
 ## 3. R-side gaps (priority order)
 
+### Test-file organization — `test-primitives-*.R`
+
+The control-flow primitives (`primitives.R`: `When` / `Each` / `Match` /
+`Output`) get one test file each under a shared `test-primitives-*` prefix, so
+the suite mirrors the module and the primitive tests group together:
+
+- `test-each.R` → **`test-primitives-each.R`**
+- `test-match.R` → **`test-primitives-match.R`**
+- new **`test-primitives-when.R`** (the `When` gap, P1 below)
+- optional **`test-primitives-output.R`** — `Output` extraction is currently a
+  single line in `test-process_tags.R` and `DTOutput`-errors-without-DT (a stale
+  `TESTING.md` item) isn't clearly covered; consolidate the `Output` /
+  `PlotOutput` / `TableOutput` / `DTOutput` extraction checks here.
+
+Support modules keep file ↔ module naming (`test-mini-store.R`, `test-scope.R`,
+`test-store.R`) — they're not exported primitives. The two renames are a
+mechanical commit on their own (no content change); the rest of §3 then adds to
+the renamed files.
+
 ### P0 — `app.R` entry points (0% → covered)
 
 No new file exists for this. Add `test-app.R`:
@@ -101,9 +137,9 @@ possible so they run as plain unit tests (no browser), matching how
 
 ### P1 — `When` lifecycle (`primitives.R` 73%)
 
-There is no `test-when.R`; `When` is only used incidentally as a fixture
-elsewhere. `TESTING.md` lists the full `When` contract but none of it is
-asserted. Add `test-when.R` covering:
+There is no `When` test; it's only used incidentally as a fixture elsewhere.
+`TESTING.md` lists the full `When` contract but none of it is asserted. Add
+`test-primitives-when.R` covering:
 
 - renders `yes` on `TRUE`, `otherwise` on `FALSE`, nothing on `FALSE` with no
   `otherwise`;
@@ -112,7 +148,8 @@ asserted. Add `test-when.R` covering:
 - switching branches destroys the previous mount and creates a new one;
 - inner reactive state survives a condition re-eval that stays the same.
 
-Mirror the mount/destroy assertion style in `test-each.R` / `test-match.R`.
+Mirror the mount/destroy assertion style in `test-primitives-each.R` /
+`test-primitives-match.R`.
 
 ### P2 — mount `$destroy()` propagation (`mount.R` 81%)
 
@@ -145,7 +182,11 @@ coercion: `list(40, 200)` → numeric range, `NA` → `NULL`, date-axis stays
 character, the `force()` capture-loop fix). This lifts plotly.R coverage without
 needing the browser.
 
-## 4. Client-side (JS) — the real blind spot (tracked in #30)
+## 4. Client-side (JS) — the real blind spot (PR 2, tracked in #30)
+
+> **Not in this branch.** Everything in this section ships in a separate PR that
+> closes #30. It is kept here so the full 0.3.0 picture lives in one doc.
+
 
 This is the largest gap and the biggest CRAN-confidence risk: the fragile logic
 in `irid.js` / `plotly-irid.js` is exercised **only** by the browser e2e suite,
@@ -189,47 +230,75 @@ registry (`indexAnchors` / `lookupAnchors`), `parseFragment` / `detachRange`,
 `mountWidget` / `destroyWidgetsIn`, Shiny input plumbing; plotly `apply` /
 `applyDeferred` / `render` / `attachListeners` / `destroy`.
 
-**Plus a few targeted e2e** for genuinely integration-shaped behaviors not yet
-covered: stale-indicator show/hide timing, optimistic-echo under latency,
-comment-anchor edge cases in `<select>` / `<tbody>`.
-
 Deliverables (from #30): coverage audit → V8 seam prototype on one helper →
 unit tests for the in-scope plotly helpers → unit tests for the core
 sequence/stale-echo gate.
 
-## 5. CRAN-readiness checklist (non-coverage)
+### 4a. Targeted e2e additions
 
-- `R CMD check` clean (no NOTES/WARNINGs) with e2e skipped — confirm the default
-  `devtools::test()` never boots Chrome (`skip_unless_e2e()` already gates this;
-  verify after additions).
-- Every new test that needs a Suggests pkg (`DT`, `plotly`, `bslib`, `V8`, …)
-  guards with `skip_if_not_installed()`. Add `V8` to `Suggests` if §4 lands.
-- e2e files keep the `test-<area>-e2e.R` suffix so CI's `filter = "e2e"` picks
-  them up with no list to maintain.
-- Re-run covr after each phase; record the new overall number in `NEWS.md` under
-  the 0.3.0 entry. Set a release gate (proposal: **≥90% R-side**, app.R and
-  `When` no longer near-zero).
-- Bump `DESCRIPTION` `0.2.0.9000` → `0.3.0` as part of the release commit (not in
-  this hardening work).
+The existing e2e suite covers event filtering (`test-event-filter-e2e.R`), the
+per-element ordering queue (`test-event-order-e2e.R`), async widget construction
+(`test-widget-async-e2e.R`), and the plotly round-trip (`test-plotly-e2e.R`).
+The gaps below are **genuinely integration-shaped** — timing, focus/cursor, or
+the browser's HTML parser — so a real browser is the only faithful test; the V8
+units (§4) pin the *decision* logic, these prove the *behavior*. None require
+the JS refactor, so they could land independently of the V8 work.
 
-## 6. Sequencing
+Prioritized:
 
-1. P0 `test-app.R` (§3) — biggest coverage hole, pure R.
-2. P1 `test-when.R` + P2 mount `$destroy()` (§3).
-3. P4 plotly pure-R helpers (§3).
-4. §4 / #30: V8 seam prototype → in-scope JS unit tests + targeted e2e.
-5. P3 scope #4372 `skip_if` test (§3).
-6. **Retire `TESTING.md`** (§2): delete the behavior checklist, keep/slim the
-   infra guide, add JS-harness run notes if §4 Option A landed.
-7. covr re-run, NEWS entry, version bump → release.
+- **P1 — stale UI indicator** (`test-stale-e2e.R`, new). Zero coverage today and
+  pure timing/DOM/Shiny lifecycle. Cases: no indicator on initial load; no
+  indicator when the server responds within `irid.stale_timeout`; indicator
+  appears after the timeout on a slow handler; clears on `shiny:idle`; the
+  debounced clear bridges idle gaps under rapid typing; a follow-up flush
+  (`shiny:busy`) cancels the pending clear (no flicker); `irid.stale_timeout =
+  NULL` disables it. Use `irid.debug.latency` to drive slowness.
+- **P1 — optimistic / controlled inputs under latency** (`test-optimistic-e2e.R`,
+  new). The controlled-input promise, browser-only because it's about focus and
+  the cursor: typing fast under latency loses no characters and the cursor never
+  jumps; a server transform (truncate/uppercase) snaps the field on arrival; a
+  programmatic clear applies even while the element is focused. (V8 pins
+  `shouldSkip`; this proves the real focus/race outcome.)
+- **P2 — control flow in restricted-content parents** (`test-controlflow-e2e.R`,
+  new). A browser HTML-parser fact, unmockable: `Each` over `<option>` renders
+  inside `<select>` (no wrapper `<div>` injected); `Each` over `<tr>` renders
+  inside `<tbody>`. Add one DOM-mutation lifecycle case here too — a keyed
+  `Each` reorder preserves element identity (e.g. a focused input or a widget
+  inside the row survives the move).
+- **P3 — module-scoped widget round-trip** (extend an existing widget e2e). The
+  regression called out in `ARCHITECTURE.md` / `dev/spikes/widget-module-ns.R`:
+  a widget inside `renderIrid` inside a `moduleServer` — `setProp` / `sendEvent`
+  round-trip under namespacing. Guards against the client rebuilding an
+  un-namespaced stream key.
+
+## 5. Sequencing
 
 Each numbered step is one commit (per the project's "one concept per commit"
-rule). Steps 1–3 and 5 are independent and can land in any order; step 6 comes
-last so the retired doc reflects the final test layout.
+rule). New tests that need a Suggests pkg (`DT`, `plotly`, `V8`, …) guard with
+`skip_if_not_installed()`; e2e files keep the `test-<area>-e2e.R` suffix so CI's
+`filter = "e2e"` picks them up. Re-run covr at the end of each PR and note the
+new overall number in the `NEWS.md` dev entry — target (not a hard gate)
+**≥90% R-side**, with `app.R` and `When` no longer near-zero.
+
+**PR 1 — R-side (this branch).** Steps 2–4 are independent and can land in any
+order.
+
+1. Rename `test-each.R` / `test-match.R` → `test-primitives-*.R` (mechanical).
+2. P0 `test-app.R` — biggest coverage hole, pure R.
+3. P1 `test-primitives-when.R` + P2 mount `$destroy()`.
+4. P4 plotly pure-R helpers; P3 scope #4372 `skip_if` test.
+5. covr re-run; NEWS dev-entry note.
+
+**PR 2 — client-side / JS (separate branch, closes #30).** Add `V8` to
+`Suggests`.
+
+6. §4 / #30: V8 seam prototype → in-scope JS unit tests.
+7. §4a targeted e2e additions.
+8. Retire `TESTING.md` (§2) — last, so the slimmed infra guide reflects the final
+   layout and includes the V8-harness run notes.
 
 ## Open decisions (need sign-off before impl)
 
-- **§3 P3**: gate a #4372 test with `skip_if`, or defer to e2e/manual for 0.3.0.
-- **Coverage gate** (§5): is ≥90% R-side the right bar for the release?
+- **§3 P3**: gate a #4372 test with `skip_if`, or defer to e2e/manual.
 
-(§4's mechanism is settled — `V8`, per #30 — so it's no longer an open question.)
+(§4's mechanism is settled — `V8`, per #30.)
