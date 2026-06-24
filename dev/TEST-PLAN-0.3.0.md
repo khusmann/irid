@@ -12,8 +12,8 @@ state, the gaps, and a prioritized path to close them.
 - **PR 1 — R-side (this branch, `test-hardening-0.3.0`).** Everything in §3 plus
   the covr re-run. Pure R, no browser, no new JS tooling.
 - **PR 2 — client-side / JS (separate branch, closes #30).** §4: the V8 JS-unit
-  work, the targeted e2e additions, and retiring `TESTING.md` to an infra-only
-  guide.
+  work, the targeted e2e additions, and a small update to the (already
+  infra-only) `TESTING.md` adding the V8-harness run notes.
 
 **Scope: no release.** This is suite-hardening only — **no version bump, no CRAN
 submission.** "0.3.0" names the *target release these tests are for*, not a cut
@@ -67,15 +67,16 @@ truth** and the checklist is pure maintenance debt.
 So the decision for 0.3.0 is: **do not rebuild the behavior checklist.** Treat it
 as a throwaway tracker during the hardening (or just track against §3–§4 of this
 doc and the test files, which overlap), then **slim `TESTING.md` down to a
-testing-*infrastructure* guide** and delete the exhaustive checklist. This is a
-**PR 2 step** — done last, once the V8 harness exists, so the slimmed guide can
-include its run notes and reflect the final test layout:
+testing-*infrastructure* guide** and delete the exhaustive checklist. Do this in
+**PR 1** — the checklist is already stale, and the test suite + this plan
+supersede it, so there's no reason to wait. PR 2 then just appends the V8-harness
+run notes when that harness lands.
 
 - **Keep** the durable infra content (today's lines ~469–488): the e2e naming
   convention (`test-<area>-e2e.R`), `skip_unless_e2e()` gating, the `IRID_E2E`
-  env var, the CI job split, how to run e2e locally — plus the V8 JS-harness run
-  instructions (§4). None of this lives in any test file, and `CLAUDE.md` points
-  here for orientation.
+  env var, the CI job split, how to run e2e locally. Add the new
+  `test-<source-file>-<component>.R` unit-file convention (§3) here too. None of
+  this lives in any test file, and `CLAUDE.md` points here for orientation.
 - **Delete** the behavior checklist (today's lines ~1–468). The test suite
   replaces it.
 
@@ -308,15 +309,16 @@ order.
 2. P0 `test-app.R` — biggest coverage hole, pure R.
 3. P1 `test-primitives-when.R` + P2 mount `$destroy()`.
 4. P3 plotly pure-R helpers.
-5. covr re-run; NEWS dev-entry note.
+5. Retire `TESTING.md` (§2): delete the behavior checklist, slim to the infra
+   guide, add the `test-<source-file>-<component>.R` convention.
+6. covr re-run; NEWS dev-entry note.
 
 **PR 2 — client-side / JS (separate branch, closes #30).** Add `V8` to
 `Suggests`.
 
-6. §4 / #30: V8 seam prototype → in-scope JS unit tests.
-7. §4a targeted e2e additions.
-8. Retire `TESTING.md` (§2) — last, so the slimmed infra guide reflects the final
-   layout and includes the V8-harness run notes.
+7. §4 / #30: V8 seam prototype → in-scope JS unit tests.
+8. §4a targeted e2e additions.
+9. Update `TESTING.md` infra guide with the V8-harness run notes.
 
 ## Open decisions
 
