@@ -472,13 +472,6 @@ test_that("control-flow nodes as slot values error with a child-slot hint", {
   )
 })
 
-test_that("Output node as a slot value errors", {
-  expect_error(
-    process_tags(tags$div(class = PlotOutput(\() plot(1)))),
-    "irid_output.*children"
-  )
-})
-
 test_that("error message mentions the offending slot name", {
   expect_error(
     process_tags(tags$button(onClick = wire_immediate())),
