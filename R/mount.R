@@ -23,6 +23,37 @@
 #'
 #' @keywords internal
 #' @noRd
+#' Validate and coerce a reactive text child's return value
+#'
+#' A reactive text child renders as a single text node (`target = "text"`).
+#' The client coerces with `String(val)`, so a non-text return silently
+#' produces garbage — an HTML tag becomes `"[object Object]"`, a vector
+#' becomes a comma-joined blob. Catch it here with a clear error instead.
+#'
+#' Accepts `NULL` and length-1 atomics (coerced to character); rejects tags,
+#' lists, and multi-element vectors. Wrap reactive tags in a control-flow
+#' primitive (`When`/`Match`/`Each`) rather than returning them as text.
+#'
+#' @keywords internal
+#' @noRd
+coerce_text_child <- function(val) {
+  if (is.null(val) || (is.atomic(val) && length(val) <= 1L)) {
+    return(as.character(val))
+  }
+  what <- if (inherits(val, c("shiny.tag", "shiny.tag.list"))) {
+    "an HTML tag - wrap reactive tags in When/Match/Each instead"
+  } else if (length(val) > 1L) {
+    paste0("a length-", length(val), " ", class(val)[1], " vector")
+  } else {
+    paste0("a ", class(val)[1])
+  }
+  stop(
+    "A reactive text child must return a single text value (or NULL), not ",
+    what, ".",
+    call. = FALSE
+  )
+}
+
 irid_queue_widget_attr <- function(session, id, attr, value,
                                    sequence = NULL, channel = NULL) {
   pending <- session$userData$irid_widget_pending
@@ -466,6 +497,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # Coalesced per-widget; drained as one `values` map at flush end.
         irid_queue_widget_attr(session, b$id, b$attr, val, seq, channel)
       } else {
+        if (b$target == "text") val <- coerce_text_child(val)
         msg <- switch(b$target,
           dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
           text = list(id = b$id, target = "text",                value = val)
