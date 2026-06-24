@@ -99,24 +99,48 @@ touch the lines we're keeping. The confirmed drift below is recorded so the
 
 ## 3. R-side gaps (priority order)
 
-### Test-file organization — `test-primitives-*.R`
+### Test-file organization — `test-<source-file>-<component>.R`
 
-The control-flow primitives (`primitives.R`: `When` / `Each` / `Match` /
-`Output`) get one test file each under a shared `test-primitives-*` prefix, so
-the suite mirrors the module and the primitive tests group together:
+Every test file is named for the **R source module it primarily exercises**:
+`test-<source-file>` using the source basename **verbatim** (underscores and
+all — `process_tags.R` → `test-process_tags`, `mini_store.R` →
+`test-mini_store`), with an optional `-<component>` suffix where the hyphen is the
+*only* separator that introduces a sub-area. Most of the suite already follows
+this (`test-mount-sequence.R`, `test-store.R`, `test-process_tags.R`, …); two
+kinds of outlier need fixing — the `primitives.R` tests named by component with
+no module prefix (`test-each.R` / `test-match.R`), and `test-mini-store.R` which
+hyphenates a name that's underscored in the source.
+
+Normalize them and fill the module's gaps so all of `primitives.R`'s exports
+(`When` / `Each` / `Match` / `Output`) sit together:
 
 - `test-each.R` → **`test-primitives-each.R`**
 - `test-match.R` → **`test-primitives-match.R`**
+- `test-mini-store.R` → **`test-mini_store.R`** (match `mini_store.R` verbatim)
 - new **`test-primitives-when.R`** (the `When` gap, P1 below)
-- optional **`test-primitives-output.R`** — `Output` extraction is currently a
-  single line in `test-process_tags.R` and `DTOutput`-errors-without-DT (a stale
-  `TESTING.md` item) isn't clearly covered; consolidate the `Output` /
+- new **`test-primitives-output.R`** — `Output` extraction is currently a single
+  line in `test-process_tags.R`, and `DTOutput`-errors-without-DT (a stale
+  `TESTING.md` item) isn't clearly covered. Move the `Output` /
   `PlotOutput` / `TableOutput` / `DTOutput` extraction checks here.
 
-Support modules keep file ↔ module naming (`test-mini-store.R`, `test-scope.R`,
-`test-store.R`) — they're not exported primitives. The two renames are a
-mechanical commit on their own (no content change); the rest of §3 then adds to
-the renamed files.
+New files added by §3 follow the same rule: P2's mount `$destroy()` work lands in
+**`test-mount-lifecycle.R`** (joins the existing `test-mount-*` family), and
+P0 in **`test-app.R`**.
+
+Already conformant, no change: `test-mount-*`, `test-event.R`, `test-proxy.R`,
+`test-scope.R`, `test-store.R`, `test-process_tags.R`, `test-plotly.R`,
+`test-widget*.R` (the widget feature spans `widget.R` + `mount.R`; the
+`test-widget-*` group is its natural home). e2e files keep the
+`test-<area>-e2e.R` suffix the CI filter depends on.
+
+Optional, only if it earns its churn: `test-process_tags.R` (572 lines / 53
+tests) and `test-store.R` (724 / 77) are large enough to split by component
+(e.g. `test-process_tags-events.R` / `-bindings.R` / `-controlflow.R`). Flag and
+decide per-file rather than splitting reflexively — a cohesive module is fine in
+one file.
+
+The renames are a mechanical first commit (no content change); the rest of §3
+then adds to the renamed/new files.
 
 ### P0 — `app.R` entry points (0% → covered)
 
@@ -283,7 +307,8 @@ new overall number in the `NEWS.md` dev entry — target (not a hard gate)
 **PR 1 — R-side (this branch).** Steps 2–4 are independent and can land in any
 order.
 
-1. Rename `test-each.R` / `test-match.R` → `test-primitives-*.R` (mechanical).
+1. Renames (mechanical, no content change): `test-each.R` / `test-match.R` →
+   `test-primitives-*.R`; `test-mini-store.R` → `test-mini_store.R`.
 2. P0 `test-app.R` — biggest coverage hole, pure R.
 3. P1 `test-primitives-when.R` + P2 mount `$destroy()`.
 4. P4 plotly pure-R helpers; P3 scope #4372 `skip_if` test.
