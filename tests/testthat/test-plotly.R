@@ -208,3 +208,35 @@ test_that("PlotlyOutput rejects a non-function spec and unknown state args", {
     "Unknown named state argument"
   )
 })
+
+# --- constructor happy path -------------------------------------------------
+
+test_that("PlotlyOutput builds an irid_widget with spec/state props, events, deps", {
+  skip_if_not_installed("plotly")
+  xr <- shiny::reactiveVal(NULL)
+  w <- PlotlyOutput(
+    spec = function() {
+      plotly::plot_ly(x = 1:3, y = 1:3, type = "scatter", mode = "markers")
+    },
+    xaxis_range = xr,
+    onClick = function(e) NULL
+  )
+  expect_s3_class(w, "irid_widget")
+  expect_equal(w$name, "plotly")
+
+  # spec is a callable prop that serializes to a JSON string; bound state keys
+  # are shipped explicitly (so a NULL-initialized arg survives R list semantics).
+  expect_true(all(c("spec", "__irid_state_keys", "xaxis_range") %in% names(w$props)))
+  expect_true(is.function(w$props$spec))
+  expect_type(shiny::isolate(w$props$spec()), "character")
+  expect_equal(w$props$`__irid_state_keys`, list("xaxis_range"))
+
+  # NULL discrete handlers drop out; the supplied onClick survives as `click`.
+  expect_true("click" %in% names(w$events))
+  expect_false("hover" %in% names(w$events))
+
+  # plotly.js bundle + the irid-plotly factory script travel as deps.
+  dep_names <- vapply(w$deps, function(d) d$name, character(1))
+  expect_true("plotly-main" %in% dep_names)
+  expect_true("irid-plotly" %in% dep_names)
+})
