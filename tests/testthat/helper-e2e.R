@@ -25,8 +25,8 @@ skip_unless_e2e <- function() {
 # Central timeout budget. Every wait below routes its seconds through here so a
 # slow runner can be absorbed with one knob instead of editing each call: set
 # E2E_TIMEOUT_SCALE (e.g. "3" in CI) to multiply every timeout. Generous
-# timeouts don't slow the happy path — the browser-side waits return the instant
-# their condition holds, so a big ceiling is pure insurance against a cold runner.
+# timeouts don't slow the happy path — a wait returns within one poll interval of
+# its condition holding, so a big ceiling is pure insurance against a cold runner.
 e2e_timeout <- function(sec) {
   scale <- suppressWarnings(as.numeric(Sys.getenv("E2E_TIMEOUT_SCALE", "1")))
   if (is.na(scale) || scale <= 0) scale <- 1
@@ -189,7 +189,7 @@ e2e_eval <- function(app, js, await = TRUE) {
 e2e_fail <- function(app, what, err = NULL) {
   dir <- Sys.getenv("E2E_ARTIFACTS", unset = tempdir())
   dir.create(dir, showWarnings = FALSE, recursive = TRUE)
-  shot <- file.path(dir, sprintf("e2e-fail-%s.png", as.integer(Sys.time())))
+  shot <- tempfile(pattern = "e2e-fail-", tmpdir = dir, fileext = ".png")
   shot <- tryCatch({ app$session$screenshot(shot); shot },
                    error = function(e) NULL)
   console <- utils::tail(app$caps$console, 30)

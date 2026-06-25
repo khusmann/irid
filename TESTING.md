@@ -71,8 +71,8 @@ and it never came" instead of a baffling downstream assertion.
 
 **Timeout budget.** Every wait routes its seconds through `e2e_timeout()`, scaled
 by `E2E_TIMEOUT_SCALE` (default `1`). CI sets it to `3` to absorb a cold runner
-without editing each call; generous ceilings don't slow the happy path because
-the browser-side waits return as soon as their condition holds.
+without editing each call; generous ceilings don't slow the happy path because a
+wait returns within one poll interval of its condition holding.
 
 Tests that need a suggested package guard with `skip_if_not_installed()` (`DT`,
 `plotly`, `bslib`, …). The shiny#4372 scoped-teardown tests in `test-scope.R`
