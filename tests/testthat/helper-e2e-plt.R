@@ -60,6 +60,18 @@ e2e_plt_emit <- function(app, event, payload = NULL, gd = PLOTLY_GD) {
     gd, to_js_str(event), pl
   ))
 }
+# Wait until plotly's drag layer is actually interactive: the `.nsewdrag` hit
+# rect exists and has non-zero size. This is the real precondition a drag-select
+# needs — `e2e_plt_await` confirms the data/traces rendered, but the drag layer is
+# laid out a beat later, which is what the old `e2e_settle(1)` was blindly waiting
+# out. Keys on the concrete signal instead of a fixed sleep.
+e2e_plt_drag_ready <- function(app, gd = PLOTLY_GD, timeout = 15) {
+  e2e_wait_until(app, sprintf(
+    "(function(){var d=document.querySelector('%s .nsewdrag');return d && d.getBoundingClientRect().width > 0 && d.getBoundingClientRect().height > 0;})()",
+    gd
+  ), timeout = timeout)
+}
+
 # A real drag-select over a fraction of the plot interior. Aims at `.nsewdrag`
 # (offset in from the edges) so the drag lands on the plot area, not an axis;
 # `dragmode` must be a select tool.

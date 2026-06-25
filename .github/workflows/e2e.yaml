@@ -18,6 +18,8 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       IRID_E2E: "1"            # opt the suite in (the only trigger; not CI=)
+      E2E_TIMEOUT_SCALE: "3"   # absorb a cold runner: 3x every wait budget
+      E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts  # failure screenshots
     steps:
       - uses: actions/checkout@v4
 
@@ -43,3 +45,13 @@ jobs:
       # nothing else; stop_on_failure makes a test failure fail the job.
       - name: Run e2e suite
         run: Rscript -e 'devtools::test(filter = "e2e", stop_on_failure = TRUE)'
+
+      # On failure, e2e_fail() drops a screenshot per timeout into E2E_ARTIFACTS.
+      # Upload them so an intermittent CI failure is diagnosable without a re-run.
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-screenshots
+          path: e2e-artifacts/
+          if-no-files-found: ignore
