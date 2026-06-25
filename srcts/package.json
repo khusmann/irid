@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "irid client runtime (TypeScript source). Built artifacts are vendored into ../inst — see dev/srcts-migration.md.",
+  "description": "irid client runtime (TypeScript source). Built artifacts are vendored into ../inst; see TESTING.md.",
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "node esbuild.mjs",

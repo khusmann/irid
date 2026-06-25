@@ -1,5 +1,5 @@
 # Typechecks, tests, and builds the TypeScript client (srcts/), and verifies the
-# vendored bundles in inst/ are up to date. See dev/srcts-migration.md.
+# vendored bundles in inst/ are up to date. See TESTING.md (Client tests).
 #
 # R-CMD-check / e2e run against the COMMITTED inst/ bundles and need no node — only
 # this job touches the toolchain.

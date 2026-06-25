@@ -61,8 +61,8 @@ carrying it is installed.
 
 ## Client tests (TypeScript)
 
-The client is TypeScript under `srcts/`, built to `inst/` with esbuild (see
-`dev/srcts-migration.md`). Its pure decision logic is unit-tested with **vitest**;
+The client is TypeScript under `srcts/`, built to `inst/` with esbuild. Its pure
+decision logic is unit-tested with **vitest**;
 DOM / `Plotly.*` / Shiny-glue behavior stays in the R e2e suite (faithfully mocking
 it is less trustworthy than a real browser).
 

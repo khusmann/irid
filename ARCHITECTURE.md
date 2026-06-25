@@ -29,7 +29,7 @@ inst/widgets/<name>/
 srcts/             TypeScript source for the client — the single source vendored
                    into inst/ (eventually shared with a Python server). Built with
                    esbuild, typechecked with tsc, unit-tested with vitest; see
-                   dev/srcts-migration.md and TESTING.md.
+                   TESTING.md.
   src/protocol.ts        Typed wire protocol + public client API (type-only)
   src/core/*             core runtime (seq, payload, anchors, ratelimit, stale,
                          widgets, handlers, index) -> inst/js/irid.js

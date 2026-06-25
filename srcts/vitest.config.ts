@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 // vitest runs node-env (no jsdom): it covers the pure decision logic + timing
 // only. DOM-bound modules (anchors/handlers/stale/widgets) stay e2e-only — see
-// "Test scope" in dev/srcts-migration.md.
+// "Client tests" in TESTING.md.
 export default defineConfig({
   test: {
     environment: "node",
@@ -15,7 +15,7 @@ export default defineConfig({
       // + timing. The DOM-bound modules (anchors/handlers/index/stale/widgets,
       // plotly/index, payload's DOM reads) are covered by the e2e suite and would
       // otherwise dilute the number to a misleading value (cf. covr not seeing JS
-      // on the R side). See "Test scope" in dev/srcts-migration.md.
+      // on the R side). See "Client tests" in TESTING.md.
       include: [
         "src/core/seq.ts",
         "src/core/ratelimit.ts",
