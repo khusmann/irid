@@ -1,0 +1,239 @@
+# Design: TypeScript client (`srcts/`) with a vendored build artifact
+
+## Status
+
+Proposed. Supersedes the V8-based approach in **#30** (unit-testing the pure JS
+decision logic): once the client is TypeScript with a native test runner, the V8
+harness is the thing we'd throw away, so #30 is folded into this work rather than
+done first. See *Relationship to #30* below.
+
+## Why
+
+The irid client (`inst/js/irid.js`, `inst/widgets/plotly/plotly-irid.js`) is
+server-language-agnostic: it speaks a JSON wire protocol over Shiny's custom-message
+transport, and the JS-side `Shiny` object is identical under Shiny-for-R and
+Shiny-for-Python. The near-term goal is a **Python server package alongside the R
+one**, both driving the *same* client. That makes the client a shared artifact,
+which changes the calculus that originally chose "no JS build step":
+
+1. **A typed wire-protocol contract is the prize.** The message shapes
+   (`irid-attr`, `irid-events`, the sequence/channel gating, `value_meta`, the
+   widget batch shape, …) currently live only in `ARCHITECTURE.md` prose and are
+   enforced nowhere. With two server implementations that must agree on the wire,
+   a single `protocol.ts` becomes the source of truth both servers target.
+2. **Native testing.** vitest tests the pure decision logic *and* the
+   throttle/debounce/coalesce timing logic (with fake timers) — the latter is the
+   one area #30 explicitly punted on because V8 can't drive it.
+3. **One source, two consumers.** The built client is vendored into both the R
+   and Python packages, eliminating a second hand-maintained copy.
+
+This is exactly the pattern Posit uses one layer down: `rstudio/shiny` keeps its
+client in TypeScript (`srcts/`), builds to `inst/www/shared/shiny.min.js`, and
+`py-shiny` vendors the built assets. We mirror it.
+
+## The cost we are accepting
+
+We give up the "edit `inst/js/irid.js` and it ships" simplicity. In its place:
+
+- a node toolchain for contributors who touch the client,
+- a build + vendor pipeline,
+- **committed build artifacts** (so the R package installs without node) plus a CI
+  freshness check.
+
+This is justified by the multi-server goal, not by testing alone — V8 (#30) would
+have gotten us testing without the build step. The trigger is the Python port being
+a real near-term goal.
+
+## Toolchain
+
+- **TypeScript** — source language; `tsc --noEmit` for typecheck in CI.
+- **esbuild** — bundle each entry point to a browser-ready **IIFE** file. One fast
+  dependency, trivial config. (Rejected: webpack/rollup — heavier for no gain here;
+  tsc-only per-file emit — keeps a global-script model that makes real modules and
+  vitest awkward, and module sharing is the whole point.)
+- **vitest** — unit tests (uses esbuild under the hood, so TS "just works"; ships
+  fake timers for the timing logic).
+
+No minification initially. Bundle to **readable JS + a source map**; revisit
+minification only if payload is ever measured to matter. The R dependency functions
+keep pointing at the same output paths, so the htmlDependency wiring is unchanged.
+
+## Source of truth & vendoring
+
+**Decided:** eventual destination is a **monorepo** where `srcts/` is the single
+source both the R and Python packages vendor from. For now, `srcts/` lives in *this*
+repo and the build vendors into `inst/js/` and `inst/widgets/plotly/`. The TS is kept
+strictly **server-agnostic** (no R-specific assumptions) so the eventual lift into the
+monorepo is a move, not a rewrite. The Python package will vendor the same built
+artifacts once that restructure happens.
+
+## Layout
+
+```
+srcts/
+  package.json
+  tsconfig.json            # strict; noEmit (typecheck only — esbuild does the emit)
+  vitest.config.ts
+  esbuild.mjs              # builds both entries to inst/
+  src/
+    protocol.ts            # THE wire-protocol types (shared contract)
+    shiny.d.ts             # minimal ambient `Shiny` / jQuery `$` declarations
+    core/
+      seq.ts               # sequence / stale-echo gate (pure)        [#30 core]
+      payload.ts           # buildPayload, attachPayloadMeta
+      anchors.ts           # comment-anchor registry + range ops
+      ratelimit.ts         # throttle/debounce/coalesce + per-element ordering queue
+      stale.ts             # stale-indicator timers (DOM + setTimeout)
+      widgets.ts           # defineWidget, mountWidget, pendingInits
+      handlers.ts          # irid-attr / -swap / -mutate / -events / -config / -widget-init
+      index.ts             # assembles window.irid + registers handlers  (entry)
+    widgets/
+      plotly/
+        pure.ts            # approxEq, idsToIndices, idsFromPoints, visibility,
+                           # rangeSpec/scalarSpec/selectionSpec/visibilitySpec  [#30 plotly]
+        index.ts           # factory: Plotly.react/relayout/restyle glue        (entry)
+    __tests__/
+      seq.test.ts
+      ratelimit.test.ts    # fake-timers (the gap V8 couldn't cover)
+      plotly-pure.test.ts
+      ...
+```
+
+Build outputs (committed):
+
+```
+inst/js/irid.js                          (+ irid.js.map)
+inst/widgets/plotly/plotly-irid.js       (+ .map)
+```
+
+`irid.css` stays a hand-authored asset in `inst/js/` (not part of the TS build).
+
+## Module decomposition (porting the two files)
+
+**`irid.js` → `srcts/src/core/*`** — split along the concerns already documented in
+ARCHITECTURE.md's *Client-Side Protocol*:
+
+- `seq.ts` — `isStaleEcho`, per-channel counter bump (pure; takes `sequences` as a
+  parameter instead of closing over a module global).
+- `payload.ts` — `buildPayload`, `attachPayloadMeta`.
+- `anchors.ts` — `indexAnchors`, `lookupAnchors`, `parseFragment`, `detachRange`.
+- `ratelimit.ts` — managed streams, throttle/debounce/coalesce, the per-element FIFO
+  ordering queue + `drainQueue`. Pure logic + timers; the prime fake-timer test target.
+- `stale.ts` — `markStale` / `clearStale` / `onEventSent` + the `shiny:idle`/`busy`
+  wiring.
+- `widgets.ts` — registry (`defined`, `pendingInits`, `widgets`), `mountWidget`,
+  `destroyWidgetsIn`.
+- `handlers.ts` — the six `Shiny.addCustomMessageHandler` registrations.
+- `index.ts` — builds `window.irid` (`defineWidget`, `sendWidgetEvent`,
+  `setWidgetProp`) and registers handlers. esbuild entry → `inst/js/irid.js`.
+
+**`plotly-irid.js` → `srcts/src/widgets/plotly/*`**:
+
+- `pure.ts` — the #30 plotly targets: `approxEq`, `idsToIndices`, `idsFromPoints`,
+  `typedVisibility`/`stringVisibility`/`readVisibility`, `slimPoints`, and the pure
+  entry-method factories (`rangeSpec`/`scalarSpec` → `{writeSpec, matchesCurrent,
+  fromRelayout}`; `selectionSpec`/`visibilitySpec` → `{writeSpec, matchesCurrent}`).
+- `index.ts` — the async factory; composes each entry's pure spec with its impure
+  `apply`/`applyDeferred` (Plotly.relayout/restyle/react + the `mutate` guard).
+  esbuild entry → `inst/widgets/plotly/plotly-irid.js`.
+
+Both entries emit IIFE bundles, so `window.irid` is still assigned the same way and
+the factory still calls `window.irid.defineWidget` — runtime behavior is byte-for-byte
+equivalent in shape, just sourced from TS.
+
+## External type surface
+
+The client touches two untyped globals: `Shiny` (the Shiny client object) and `$`
+(jQuery, for `shiny:idle`/`busy` and `Shiny.unbindAll`/`bindAll` adjacency). Add a
+minimal hand-written `shiny.d.ts` declaring only the members we use
+(`addCustomMessageHandler`, `setInputValue`, `bindAll`/`unbindAll`,
+`shinyapp.$idleTimeout`, …) plus `@types/jquery` (or a one-method `$` shim). We do
+**not** try to fully type Shiny — just our usage.
+
+## CI
+
+- **`R-CMD-check.yaml`** — unchanged; runs against the *committed* built artifacts,
+  no node needed.
+- **New `client.yaml`** (node job, on push to `main` and on PRs targeting `main`):
+  `npm ci` → `npm run typecheck` (`tsc --noEmit`) → `npm test` (vitest) →
+  `npm run build`. Then, instead of *failing* on stale artifacts, it **rebuilds and
+  commits the bundle back**: if `npm run build` produced a diff under `inst/`, the
+  Action commits it and pushes back to the source branch.
+
+  This is the key DX win — **contributors don't need the node toolchain for small
+  tweaks or comments**: edit the `.ts`, push, and the Action regenerates and pushes
+  the matching bundle automatically. Mechanics:
+  - Use `actions/checkout` with a token that can push back (and, for PRs from forks,
+    note this won't push to the fork — so keep a *fallback* `git diff --exit-code`
+    that fails the run when the auto-push can't apply, telling the contributor to run
+    `npm run build`). For same-repo branches the auto-commit path is the norm.
+  - Guard against a commit loop: the auto-commit step skips when there's no diff, and
+    the commit is authored by the Action bot. Pair with `concurrency` (cancel
+    in-progress on the same ref) and `paths`-scope so doc-only pushes don't churn.
+  - Typecheck/test still **fail** the run (only the *build artifact* is auto-repaired,
+    never test/type errors).
+- **`e2e.yaml`** — unchanged; remains the integration acceptance gate that the
+  ported client preserves real browser behavior (it boots Chrome against the built
+  artifacts via the existing chromote driver).
+- **`test-coverage.yaml`** — still R-side only; client coverage now reportable
+  separately from vitest if we want it later.
+
+## .Rbuildignore / .gitignore
+
+- `.Rbuildignore`: add `^srcts$`, `^package\.json$` if any lands at root (none
+  planned — all node config lives under `srcts/`), so the R tarball ships only the
+  built `inst/` JS.
+- `.gitignore`: add `srcts/node_modules/`. Built artifacts under `inst/` are
+  **committed** (do not ignore them).
+
+## Relationship to #30
+
+#30 chose V8 specifically to avoid a node/vitest toolchain and keep tests in
+`devtools::test()`. That tradeoff only holds while we stay no-build-step. Under this
+plan the same pure logic (the core sequence/stale-echo gate; the plotly
+identity/diff helpers and entry specs) is tested by **vitest** instead — natively
+typed, and extended to the timer logic V8 couldn't reach. Resolution: **close #30 as
+superseded by this work** (or repurpose it to track "port the pure-logic tests to
+vitest"), and reference this doc.
+
+## Phased plan (one concept per commit, feature branch)
+
+1. **Scaffold.** `srcts/` with `package.json`, `tsconfig.json` (strict),
+   `vitest.config.ts`, `esbuild.mjs`, npm scripts (`build`, `test`, `typecheck`),
+   `shiny.d.ts`. `.Rbuildignore` + `.gitignore` updates. No source ported yet.
+2. **Protocol types.** `src/protocol.ts` — the message/payload contract, derived
+   from ARCHITECTURE.md's *Client-Side Protocol* section.
+3. **Port core.** `irid.js` → `src/core/*`; esbuild emits `inst/js/irid.js`.
+   Re-run the e2e suite to confirm parity.
+4. **Port plotly.** `plotly-irid.js` → `src/widgets/plotly/*`; emits the widget JS.
+   Re-run plotly e2e.
+5. **Unit tests.** vitest for `seq`, `plotly/pure`, and `ratelimit` (fake timers) —
+   the #30 scope plus the timing logic.
+6. **CI.** Add `client.yaml` (typecheck + test + **build-and-commit-back** the
+   bundle; fail only on type/test errors, with a fork-PR `git diff` fallback).
+   Verify R-CMD-check still green against committed artifacts.
+7. **Docs.** ARCHITECTURE.md (build step + `srcts/` layout), TESTING.md (vitest
+   layer, how to run, the build-freshness gate), update the "no JS build step"
+   references, README contributor setup.
+
+## Re-confirm-on-bump caveats
+
+- esbuild IIFE output assigning `window.irid`: re-verify the global is assigned
+  before any factory script runs (load order is preserved by the htmlDependency
+  `script` vector / separate deps; the e2e suite is the check).
+- The `Shiny`/jQuery ambient surface tracks whatever Shiny version is on the page;
+  keep `shiny.d.ts` to the members actually used so a Shiny bump can't silently
+  invalidate broad type assumptions.
+
+## Coverage reporting
+
+Wire client coverage into the existing Codecov setup. vitest emits `lcov` natively
+(`--coverage`, c8/istanbul); upload it from `client.yaml` under a **`client`
+Codecov flag**, and tag the R upload `r`, so the two reports stay separate rather
+than averaging into one misleading number. Keep it **advisory** — no PR gate,
+consistent with TESTING.md's "chase meaningful branches, not the number." Cheap to
+add since Codecov is already configured for the R side.
+
+## Open decisions
+
+(None outstanding — source-of-truth and coverage resolved above.)
