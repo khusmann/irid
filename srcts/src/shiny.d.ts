@@ -1,24 +1,13 @@
-// Minimal ambient declarations for the untyped globals the irid client touches:
-// the Shiny client object and jQuery's `$` (used for shiny:idle/busy and the
-// Shiny.bindAll/unbindAll adjacency). Only the members irid actually uses — this
-// is deliberately NOT a full typing of Shiny or jQuery. Keep it import/export-free
-// so it stays an ambient (global) declaration. See dev/srcts-migration.md.
+// Bridges over the official Shiny types (@types/rstudio-shiny, pinned to a git
+// tag in package.json). Those augment `window.Shiny` with the full `ShinyClass`;
+// here we only cover the gaps they leave for irid's usage. Keep this file
+// import/export-free so it stays an ambient (global) declaration.
 
-interface ShinyInputOpts {
-  priority?: "event" | "deferred" | "immediate";
-}
+// irid's code uses the bare `Shiny` global; alias it to the official type.
+declare const Shiny: Window["Shiny"];
 
-interface ShinyClient {
-  addCustomMessageHandler(type: string, handler: (message: any) => void): void;
-  setInputValue(id: string, value: unknown, opts?: ShinyInputOpts): void;
-  bindAll(scope?: Element | Document): void;
-  unbindAll(scope: Element | Document): void;
-  shinyapp?: { $idleTimeout?: number };
-}
-
-declare const Shiny: ShinyClient;
-
-// Just the jQuery surface irid uses: $(target).on(...) / .one(...).
+// The minimal jQuery surface irid touches: $(document).on/.one, used for the
+// shiny:idle / shiny:busy events. (Not worth pulling in all of @types/jquery.)
 interface IridJQuery {
   on(event: string, handler: (...args: any[]) => void): IridJQuery;
   one(event: string, handler: (...args: any[]) => void): IridJQuery;

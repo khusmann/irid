@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "irid client runtime (TypeScript source). Built artifacts are vendored into ../inst — see dev/srcts-migration.md.",
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "node esbuild.mjs",
     "typecheck": "tsc --noEmit",
@@ -12,6 +13,7 @@
     "coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@types/rstudio-shiny": "github:rstudio/shiny#v1.11.0",
     "@vitest/coverage-v8": "^4.1.9",
     "esbuild": "^0.28.1",
     "typescript": "^6.0.3",
