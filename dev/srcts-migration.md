@@ -46,17 +46,32 @@ a real near-term goal.
 
 ## Toolchain
 
-- **TypeScript** — source language; `tsc --noEmit` for typecheck in CI.
-- **esbuild** — bundle each entry point to a browser-ready **IIFE** file. One fast
-  dependency, trivial config. (Rejected: webpack/rollup — heavier for no gain here;
-  tsc-only per-file emit — keeps a global-script model that makes real modules and
-  vitest awkward, and module sharing is the whole point.)
+- **TypeScript** — source language.
+- **esbuild** — bundle each entry point to a browser-ready **IIFE** file, `target:
+  es2019` (a sane modern-browser baseline). One fast dependency, trivial config.
+  (Rejected: webpack/rollup — heavier for no gain here; tsc-only per-file emit —
+  keeps a global-script model that makes real modules and vitest awkward, and module
+  sharing is the whole point; tsup — an esbuild wrapper that saves ~15 lines of
+  config but adds an abstraction/dep for two entries; Vite lib mode — oriented at
+  npm ESM/CJS packages, awkward for a browser IIFE.)
+- **`tsc --noEmit`** — the **typecheck**. esbuild only strips types and transpiles —
+  it does **not** type-check — so `tsc` is the only thing actually checking types.
+  These coexist by design; do not "simplify" by deleting the tsc step.
 - **vitest** — unit tests (uses esbuild under the hood, so TS "just works"; ships
   fake timers for the timing logic).
 
-No minification initially. Bundle to **readable JS + a source map**; revisit
-minification only if payload is ever measured to matter. The R dependency functions
-keep pointing at the same output paths, so the htmlDependency wiring is unchanged.
+No minification initially. Bundle to **readable JS + an external source map**;
+revisit minification only if payload is ever measured to matter. The R dependency
+functions keep pointing at the same output paths, so the htmlDependency wiring is
+unchanged.
+
+**Source maps.** Emit an external `.map` per bundle and ship **both** the `.map`
+and the `//# sourceMappingURL=…` comment (shipping the comment without the map
+404s for devtools users). Shiny has no prod/dev distinction that strips maps — it
+serves the dependency directory as static files — but browsers fetch the `.map`
+only when devtools is open, so end users never download it in normal use. The only
+cost is a few KB in the tarball/git, and irid is open-source so exposing TS sources
+via the map is a non-issue. → ship both.
 
 ## Source of truth & vendoring
 
@@ -98,6 +113,20 @@ srcts/
       plotly-pure.test.ts
       ...
 ```
+
+## Test scope (vitest)
+
+vitest runs **node-env, no jsdom**. It covers the **pure decision logic + timing**
+only — `seq`, `plotly/pure`, and `ratelimit` (fake timers). The DOM-bound modules
+(`anchors`, `handlers`, `stale`, `widgets`) stay **e2e-only**, for the same reason
+#30 gave: faithfully mocking the DOM / `Plotly.*` / Shiny glue is more work and less
+trustworthy than the real browser the chromote suite already drives.
+
+For `ratelimit` to be unit-testable without a Shiny stub, its **send and idle-state
+dependencies must be injected** (passed as callbacks) rather than calling
+`Shiny.setInputValue` / `shinyapp.$idleTimeout` directly. That's a small port-time
+refactor — extract the pure ordering-queue / throttle / debounce logic from the
+Shiny touchpoints — consistent with the "isolate the pure unit" theme.
 
 Build outputs (committed):
 
@@ -141,12 +170,22 @@ Both entries emit IIFE bundles, so `window.irid` is still assigned the same way 
 the factory still calls `window.irid.defineWidget` — runtime behavior is byte-for-byte
 equivalent in shape, just sourced from TS.
 
-## External type surface
+## Type surface
 
-The client touches two untyped globals: `Shiny` (the Shiny client object) and `$`
-(jQuery, for `shiny:idle`/`busy` and `Shiny.unbindAll`/`bindAll` adjacency). Add a
-minimal hand-written `shiny.d.ts` declaring only the members we use
-(`addCustomMessageHandler`, `setInputValue`, `bindAll`/`unbindAll`,
+**`protocol.ts` is type-only** — interfaces/types with zero runtime code. It carries
+the wire-protocol message/payload shapes **and** the public client API: the `Irid`
+interface (`defineWidget`, `sendWidgetEvent`, `setWidgetProp`) plus the widget
+**factory/handle contract** (`(el, props, sendEvent, setProp) => Handle |
+Promise<Handle>`, `Handle = { update, destroy }`) — the widget-author API is part of
+the typed prize, not just the wire. A `declare global { interface Window { irid: Irid
+} }` augmentation lets the plotly bundle reference `window.irid.defineWidget` safely.
+Being type-only, `protocol.ts` is erased at build, so both independent bundles import
+it with **no runtime duplication** — it is the one thing crossing the bundle boundary.
+
+**External globals.** The client touches two untyped globals: `Shiny` (the Shiny
+client object) and `$` (jQuery, for `shiny:idle`/`busy` and `Shiny.unbindAll`/
+`bindAll` adjacency). Add a minimal hand-written `shiny.d.ts` declaring only the
+members we use (`addCustomMessageHandler`, `setInputValue`, `bindAll`/`unbindAll`,
 `shinyapp.$idleTimeout`, …) plus `@types/jquery` (or a one-method `$` shim). We do
 **not** try to fully type Shiny — just our usage.
 
@@ -155,23 +194,16 @@ minimal hand-written `shiny.d.ts` declaring only the members we use
 - **`R-CMD-check.yaml`** — unchanged; runs against the *committed* built artifacts,
   no node needed.
 - **New `client.yaml`** (node job, on push to `main` and on PRs targeting `main`):
-  `npm ci` → `npm run typecheck` (`tsc --noEmit`) → `npm test` (vitest) →
-  `npm run build`. Then, instead of *failing* on stale artifacts, it **rebuilds and
-  commits the bundle back**: if `npm run build` produced a diff under `inst/`, the
-  Action commits it and pushes back to the source branch.
+  pin node via `setup-node` (+ `.nvmrc` / `engines`), then `npm ci` → `npm run
+  typecheck` (`tsc --noEmit`) → `npm test` (vitest, `--coverage`) → `npm run build`
+  → **`git diff --exit-code inst/`**. The diff check is a **fail-with-diff freshness
+  gate**: a PR that edits `.ts` but forgets to rebuild fails with a clear "run
+  `npm run build` and commit" message.
 
-  This is the key DX win — **contributors don't need the node toolchain for small
-  tweaks or comments**: edit the `.ts`, push, and the Action regenerates and pushes
-  the matching bundle automatically. Mechanics:
-  - Use `actions/checkout` with a token that can push back (and, for PRs from forks,
-    note this won't push to the fork — so keep a *fallback* `git diff --exit-code`
-    that fails the run when the auto-push can't apply, telling the contributor to run
-    `npm run build`). For same-repo branches the auto-commit path is the norm.
-  - Guard against a commit loop: the auto-commit step skips when there's no diff, and
-    the commit is authored by the Action bot. Pair with `concurrency` (cancel
-    in-progress on the same ref) and `paths`-scope so doc-only pushes don't churn.
-  - Typecheck/test still **fail** the run (only the *build artifact* is auto-repaired,
-    never test/type errors).
+  This is the boring, robust option: a few lines, **no token, no loop risk, no
+  wrong-commit-status problem**. The fancier *auto-commit-back* (rebuild and push
+  the bundle so contributors never need node) is deferred — see *Future
+  enhancements*.
 - **`e2e.yaml`** — unchanged; remains the integration acceptance gate that the
   ported client preserves real browser behavior (it boots Chrome against the built
   artifacts via the existing chromote driver).
@@ -209,9 +241,9 @@ vitest"), and reference this doc.
    Re-run plotly e2e.
 5. **Unit tests.** vitest for `seq`, `plotly/pure`, and `ratelimit` (fake timers) —
    the #30 scope plus the timing logic.
-6. **CI.** Add `client.yaml` (typecheck + test + **build-and-commit-back** the
-   bundle; fail only on type/test errors, with a fork-PR `git diff` fallback).
-   Verify R-CMD-check still green against committed artifacts.
+6. **CI.** Add `client.yaml` (typecheck + test + build + **fail-with-diff freshness
+   gate**; upload vitest coverage under the `client` flag). Verify R-CMD-check still
+   green against committed artifacts.
 7. **Docs.** ARCHITECTURE.md (build step + `srcts/` layout), TESTING.md (vitest
    layer, how to run, the build-freshness gate), update the "no JS build step"
    references, README contributor setup.
@@ -234,6 +266,20 @@ than averaging into one misleading number. Keep it **advisory** — no PR gate,
 consistent with TESTING.md's "chase meaningful branches, not the number." Cheap to
 add since Codecov is already configured for the R side.
 
+## Future enhancements
+
+- **Auto-commit-back the bundle.** Instead of the fail-with-diff gate, have CI
+  rebuild and push the regenerated bundle back to the branch, so contributors can
+  tweak `.ts` (comments, small fixes) without a local node toolchain. Deferred
+  because the payoff is mostly an *external-contributor* convenience (negligible
+  while solo) and the cost is real: the `GITHUB_TOKEN`-pushes-don't-re-trigger-
+  workflows gotcha forces a PAT / GitHub App token to get the rebuilt artifact
+  re-validated, plus fork-PR fallbacks, commit-loop guards, and the green-check-on-
+  the-wrong-commit problem. **Revisit at the monorepo stage**, where build
+  orchestration is already more involved and a bot identity likely exists, so the
+  marginal cost drops just as the contributor-ergonomics benefit becomes real.
+- **Client coverage gating / Codecov UI polish** — keep advisory for now.
+
 ## Open decisions
 
-(None outstanding — source-of-truth and coverage resolved above.)
+(None outstanding.)
