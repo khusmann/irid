@@ -22,6 +22,17 @@ skip_unless_e2e <- function() {
   testthat::skip_if(is.null(chromote::find_chrome()), "no Chrome found")
 }
 
+# Central timeout budget. Every wait below routes its seconds through here so a
+# slow runner can be absorbed with one knob instead of editing each call: set
+# E2E_TIMEOUT_SCALE (e.g. "3" in CI) to multiply every timeout. Generous
+# timeouts don't slow the happy path — the browser-side waits return the instant
+# their condition holds, so a big ceiling is pure insurance against a cold runner.
+e2e_timeout <- function(sec) {
+  scale <- suppressWarnings(as.numeric(Sys.getenv("E2E_TIMEOUT_SCALE", "1")))
+  if (is.na(scale) || scale <= 0) scale <- 1
+  sec * scale
+}
+
 # CI launch hardening, applied once at source time (before the first
 # ChromoteSession launches Chrome). The default 10s port-open timeout is too
 # tight for a cold GitHub runner — it intermittently aborts the very first test
@@ -29,7 +40,7 @@ skip_unless_e2e <- function() {
 # absorbs the cold start; `--disable-dev-shm-usage` keeps headless Chrome off
 # the runner's small /dev/shm (a separate startup-crash mode). No-ops locally.
 if (requireNamespace("chromote", quietly = TRUE)) {
-  options(chromote.timeout = 60)
+  options(chromote.timeout = e2e_timeout(60))
   chromote::set_chrome_args(
     unique(c(chromote::get_chrome_args(), "--disable-dev-shm-usage"))
   )
@@ -70,7 +81,7 @@ e2e_boot_fn <- function(fixture_path, pkg_root, port) {
 # boots/suite exhaust R's ~128-connection table. Timeout is generous — the child
 # runs load_all().
 e2e_wait_listening <- function(proc, timeout = 90) {
-  deadline <- Sys.time() + timeout
+  deadline <- Sys.time() + e2e_timeout(timeout)
   seen <- character()
   repeat {
     new <- tryCatch(proc$read_error_lines(), error = function(e) character())
@@ -170,15 +181,45 @@ e2e_eval <- function(app, js, await = TRUE) {
   res$result$value
 }
 
-# Poll a JS boolean expression until truthy (round-trips are async).
+# Abort a test with the full picture at the moment of failure. The driver already
+# captures the page's console + uncaught exceptions (see e2e_app); without dumping
+# them here a CI timeout is just "waiting for: <js>" with no clue why. Also grabs a
+# screenshot into E2E_ARTIFACTS (CI uploads it; falls back to tempdir locally), so
+# an intermittent failure is diagnosable from one look instead of a re-run.
+e2e_fail <- function(app, what, err = NULL) {
+  dir <- Sys.getenv("E2E_ARTIFACTS", unset = tempdir())
+  dir.create(dir, showWarnings = FALSE, recursive = TRUE)
+  shot <- file.path(dir, sprintf("e2e-fail-%s.png", as.integer(Sys.time())))
+  shot <- tryCatch({ app$session$screenshot(shot); shot },
+                   error = function(e) NULL)
+  console <- utils::tail(app$caps$console, 30)
+  excs <- app$caps$exceptions
+  stderr <- tryCatch(utils::tail(app$proc$read_error_lines(), 20),
+                     error = function(e) character())
+  stop(
+    "e2e: ", what,
+    if (!is.null(err)) paste0("\n  cause: ", conditionMessage(err)) else "",
+    "\n--- console (last 30) ---\n", paste(console, collapse = "\n"),
+    "\n--- page exceptions ---\n", paste(excs, collapse = "\n"),
+    "\n--- app stderr (last 20) ---\n", paste(stderr, collapse = "\n"),
+    "\n--- screenshot ---\n", shot %||% "(capture failed)",
+    call. = FALSE
+  )
+}
+
+# Poll a JS boolean expression until truthy. A plain R-side poll (round-trips are
+# async, so we sample) — the value here over the old version is that a timeout is
+# *loud*: it aborts via e2e_fail with the page console, exceptions, stderr, and a
+# screenshot, rather than the bare "Timeout waiting for: <js>" it used to give.
+# The predicate is guarded in-page so a not-yet-defined reference reads as false.
 e2e_wait_until <- function(app, js_bool, timeout = 30, interval = 0.2) {
-  deadline <- Sys.time() + timeout
+  deadline <- Sys.time() + e2e_timeout(timeout)
   guarded <- paste0(
     "(function(){try{return !!(", js_bool, ");}catch(e){return false;}})()"
   )
   repeat {
     if (isTRUE(e2e_eval(app, guarded))) return(invisible(TRUE))
-    if (Sys.time() > deadline) stop("Timeout waiting for: ", js_bool, call. = FALSE)
+    if (Sys.time() > deadline) e2e_fail(app, paste0("timeout waiting for: ", js_bool))
     Sys.sleep(interval)
   }
 }
@@ -208,13 +249,15 @@ e2e_install_idle <- function(app) {
 }
 
 # Wait until the server has been idle for `quiet` s (the window bridges the brief
-# busy toggle between flushes of a multi-flush reactive chain).
+# busy toggle between flushes of a multi-flush reactive chain). A server that
+# never settles in time is a real failure, not something to silently proceed
+# past, so on timeout we abort with diagnostics rather than returning FALSE.
 e2e_wait_idle <- function(app, quiet = 0.25, timeout = 15, interval = 0.1) {
-  deadline <- Sys.time() + timeout
+  deadline <- Sys.time() + e2e_timeout(timeout)
   repeat {
     st <- e2e_eval(app, "({busy: window.__iridIdle ? window.__iridIdle.busy : false, since: window.__iridIdle ? (Date.now() - window.__iridIdle.lastChange) : 1e9})")
     if (isFALSE(st$busy) && st$since >= quiet * 1000) return(invisible(TRUE))
-    if (Sys.time() > deadline) return(invisible(FALSE))
+    if (Sys.time() > deadline) e2e_fail(app, "timeout waiting for server idle")
     Sys.sleep(interval)
   }
 }
@@ -260,7 +303,18 @@ e2e_drag <- function(app, x1, y1, x2, y2, steps = 6) {
                              wait_ = TRUE)
 }
 
-# A settle window (rarely needed — prefer e2e_poll / e2e_wait_idle).
+# Flush `n` animation frames and return. A deterministic settle for "let the
+# browser finish the work it has already queued" (e.g. a pending plotly
+# `afterplot` from the initial render) — unlike a wall-clock sleep it waits for
+# exactly the queued frames, neither too short under load nor wastefully long.
+e2e_raf <- function(app, n = 2) {
+  e2e_eval(app, sprintf(
+    "new Promise(function(res){var i=%d;(function tick(){if(i--<=0)return res(true);requestAnimationFrame(tick);})();})",
+    as.integer(n)
+  ), await = TRUE)
+}
+
+# A settle window (rarely needed — prefer e2e_await / e2e_wait_idle / e2e_raf).
 e2e_settle <- function(sec = 2) Sys.sleep(sec)
 
 e2e_exceptions <- function(app) app$caps$exceptions
@@ -274,14 +328,32 @@ e2e_expect_no_error <- function(app) {
     info = paste("app stderr errors:", paste(errs, collapse = " | ")))
 }
 
-# Poll an R-side reader until a predicate holds (or timeout), returning the last
-# value so the caller can assert on it.
-e2e_poll <- function(reader, pred, timeout = 15, interval = 0.3) {
-  deadline <- Sys.time() + timeout
+# Poll an R-side reader until a predicate holds, returning the matching value so
+# the caller can assert on it. Used where the truth lives in R (app stderr) or
+# must round-trip through an R reader. On timeout it aborts with diagnostics and
+# the last value seen — a timed-out poll used to return the stale value and
+# surface as a baffling downstream assertion ("expected X, got NULL") instead of
+# "waited for X and it never came". `app` is optional: pass it to get the full
+# console/screenshot dump on timeout. `app` is auto-discovered from the calling
+# test frame (every test binds `app <- e2e_app(...)`) so the readers' closures
+# need no rewrite; pass it explicitly to override.
+e2e_poll <- function(reader, pred, timeout = 15, interval = 0.3, app = NULL) {
+  if (is.null(app)) {
+    app <- tryCatch(get("app", envir = parent.frame()), error = function(e) NULL)
+    if (!inherits(app, "e2e_app")) app <- NULL
+  }
+  deadline <- Sys.time() + e2e_timeout(timeout)
+  last <- NULL
   repeat {
-    v <- tryCatch(reader(), error = function(e) NULL)
-    if (!is.null(v) && isTRUE(tryCatch(pred(v), error = function(e) FALSE))) return(v)
-    if (Sys.time() > deadline) return(v)
+    last <- tryCatch(reader(), error = function(e) NULL)
+    if (!is.null(last) && isTRUE(tryCatch(pred(last), error = function(e) FALSE))) {
+      return(last)
+    }
+    if (Sys.time() > deadline) {
+      msg <- paste0("e2e_poll predicate never held; last value: ",
+                    paste(utils::capture.output(utils::str(last)), collapse = " "))
+      if (!is.null(app)) e2e_fail(app, msg) else stop("e2e: ", msg, call. = FALSE)
+    }
     Sys.sleep(interval)
   }
 }
