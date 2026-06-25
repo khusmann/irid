@@ -1,0 +1,59 @@
+# Typechecks, tests, and builds the TypeScript client (srcts/), and verifies the
+# vendored bundles in inst/ are up to date. See dev/srcts-migration.md.
+#
+# R-CMD-check / e2e run against the COMMITTED inst/ bundles and need no node — only
+# this job touches the toolchain.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+name: client.yaml
+
+permissions: read-all
+
+defaults:
+  run:
+    working-directory: srcts
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: srcts/.nvmrc
+
+      - name: Enable corepack (pnpm pinned via packageManager)
+        run: corepack enable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test + coverage
+        run: pnpm run coverage
+
+      - name: Build bundles
+        run: pnpm run build
+
+      - name: Verify vendored bundles are up to date
+        working-directory: .
+        run: |
+          if ! git diff --exit-code -- inst/; then
+            echo "::error::Built client is out of date. Run 'pnpm run build' in srcts/ and commit the inst/ changes."
+            exit 1
+          fi
+
+      - uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: ${{ github.event_name != 'pull_request' || secrets.CODECOV_TOKEN }}
+          files: ./srcts/coverage/lcov.info
+          flags: client
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
