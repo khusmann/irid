@@ -217,7 +217,7 @@ test_that("onClick, selected_ids, deselect, autorange-reset null via emit (12-15
 test_that("real drag-select populates both layers; clear tears both down (16, 17)", {
   app <- e2e_app("plotly/kitchen-sink.R")
   e2e_plt_await(app, KS_TRACES)
-  e2e_settle(1)
+  e2e_plt_drag_ready(app)
 
   # Row 16: a real drag populates layout.selections (outline) AND selectedpoints.
   e2e_plt_drag_select(app)
@@ -242,7 +242,7 @@ test_that("real drag-select populates both layers; clear tears both down (16, 17
 test_that("identity selection survives a trace-recomposing filter (23, 24)", {
   app <- e2e_app("plotly/kitchen-sink.R")
   e2e_plt_await(app, KS_TRACES)
-  e2e_settle(1)
+  e2e_plt_drag_ready(app)
 
   e2e_plt_drag_select(app)
   sel0 <- e2e_poll(\() e2e_readout(app, "#ro-selection"), \(t) !identical(t, "none"))
@@ -269,7 +269,7 @@ test_that("identity selection survives a trace-recomposing filter (23, 24)", {
 test_that("programmatic set clears the stale outline; a re-drag keeps its own (25)", {
   app <- e2e_app("plotly/kitchen-sink.R")
   e2e_plt_await(app, KS_TRACES)
-  e2e_settle(1)
+  e2e_plt_drag_ready(app)
 
   e2e_plt_drag_select(app)
   e2e_poll(\() e2e_plt_n_selections(app), \(n) n >= 1)
@@ -425,7 +425,7 @@ test_that("date-axis range round-trips as strings (server<->client, snap-back)",
 test_that("a same-flush spec + range write redraws once (20)", {
   app <- e2e_app("plotly/gated.R")
   e2e_plt_await(app, 1L)
-  e2e_settle(1)
+  e2e_raf(app)  # drain any pending initial-render afterplot before the spy
 
   # Count redraws via plotly_afterplot from this point forward.
   e2e_plt_eval(app, "window.__redraws=0;gd.on('plotly_afterplot',function(){window.__redraws++;});return true;")
