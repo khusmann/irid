@@ -53,6 +53,27 @@ otherwise it is opt-in via the `IRID_E2E=1` env var (env vars, not `options()`,
 are the idiomatic test-gate mechanism). A bare `devtools::test()` skips e2e so it
 doesn't boot Chrome.
 
+**Waiting and flake-resistance.** Tests never sleep on a fixed interval — they
+wait on the actual signal:
+
+- `e2e_wait_until(app, js_bool)` polls a (page-guarded) JS condition;
+  `e2e_wait_idle(app)` waits on irid's own `shiny:busy/idle` tracker.
+- `e2e_poll(reader, pred)` — for conditions whose truth lives in R (e.g. app
+  stderr via `e2e_expect_no_error`) or must round-trip through an R reader.
+- `e2e_raf(app, n)` flushes `n` animation frames (a deterministic "let queued
+  browser work finish"); `e2e_settle(sec)` is a raw sleep kept only as a last
+  resort.
+
+Every wait is **loud on timeout**: it aborts via `e2e_fail()`, which dumps the
+page console, uncaught exceptions, and the app's stderr, and writes a screenshot
+to `$E2E_ARTIFACTS` (falls back to `tempdir()`). A timeout reads as "waited for X
+and it never came" instead of a baffling downstream assertion.
+
+**Timeout budget.** Every wait routes its seconds through `e2e_timeout()`, scaled
+by `E2E_TIMEOUT_SCALE` (default `1`). CI sets it to `3` to absorb a cold runner
+without editing each call; generous ceilings don't slow the happy path because
+the browser-side waits return as soon as their condition holds.
+
 Tests that need a suggested package guard with `skip_if_not_installed()` (`DT`,
 `plotly`, `bslib`, …). The shiny#4372 scoped-teardown tests in `test-scope.R`
 guard on a runtime feature-detect (`shiny_has_scope()`) and skip on a shiny
@@ -66,7 +87,8 @@ Three workflows under `.github/workflows/`:
 - **`R-CMD-check.yaml`** — the main check job; leaves `IRID_E2E` unset, so e2e
   skips and the unit tests run once here.
 - **`e2e.yaml`** — a dedicated job that sets `IRID_E2E=1`, installs Chrome, and
-  runs only the `*-e2e.R` files.
+  runs only the `*-e2e.R` files. Sets `E2E_TIMEOUT_SCALE=3` for runner headroom
+  and uploads `$E2E_ARTIFACTS` (failure screenshots) on failure.
 - **`test-coverage.yaml`** — runs `covr` and uploads to Codecov (the README
   badge). Like the check job it leaves `IRID_E2E` unset, so the reported number
   is R-side, unit-test coverage (it excludes the e2e suite and the gated
