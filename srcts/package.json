@@ -1,0 +1,20 @@
+{
+  "name": "@irid/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "irid client runtime (TypeScript source). Built artifacts are vendored into ../inst — see dev/srcts-migration.md.",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
