@@ -2,10 +2,11 @@
 
 ## Status
 
-Proposed. Supersedes the V8-based approach in **#30** (unit-testing the pure JS
-decision logic): once the client is TypeScript with a native test runner, the V8
-harness is the thing we'd throw away, so #30 is folded into this work rather than
-done first. See *Relationship to #30* below.
+**Implemented** on the `srcts-migration` branch (Phases 1–7 below). Supersedes the
+V8-based approach in **#30** (unit-testing the pure JS decision logic): once the
+client is TypeScript with a native test runner, the V8 harness is the thing we'd
+throw away, so #30 is folded into this work rather than done first — close #30 as
+superseded when the PR merges. See *Relationship to #30* below.
 
 ## Why
 
