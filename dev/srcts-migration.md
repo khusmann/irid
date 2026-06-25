@@ -184,10 +184,28 @@ it with **no runtime duplication** — it is the one thing crossing the bundle b
 
 **External globals.** The client touches two untyped globals: `Shiny` (the Shiny
 client object) and `$` (jQuery, for `shiny:idle`/`busy` and `Shiny.unbindAll`/
-`bindAll` adjacency). Add a minimal hand-written `shiny.d.ts` declaring only the
-members we use (`addCustomMessageHandler`, `setInputValue`, `bindAll`/`unbindAll`,
-`shinyapp.$idleTimeout`, …) plus `@types/jquery` (or a one-method `$` shim). We do
-**not** try to fully type Shiny — just our usage.
+`bindAll` adjacency).
+
+- **Shiny:** use the official **`@types/rstudio-shiny`** declarations. They aren't
+  published to npm, so they're a **git-pinned devDep** (`github:rstudio/shiny#v1.11.0`,
+  which is literally packaged as `@types/rstudio-shiny` with a no-op `prepare`). They
+  augment `window.Shiny` with the full `ShinyClass` and cover everything irid calls
+  (`addCustomMessageHandler`, `setInputValue` with a typed `priority`, `bindAll`/
+  `unbindAll`). Two gaps remain, bridged by a tiny ambient `src/shiny.d.ts`: (a) the
+  post-init methods are typed *optional* (Shiny attaches them after init), so calls
+  take a `!`/guard — correct, since irid runs post-init; (b) `shinyapp.$idleTimeout`
+  (the backpressure gate) is an internal field they don't type, so it needs a local
+  cast/augmentation.
+- **jQuery `$`:** a one-method shim in `src/shiny.d.ts` (`$(target).on/.one`) — not
+  worth pulling all of `@types/jquery`.
+
+So we no longer hand-roll a guess of Shiny's API — `shiny.d.ts` shrinks to the bare
+`Shiny` global alias + the `$` shim.
+
+**Package manager: pnpm** (via corepack, pinned in `packageManager`). Chosen over
+npm for the committed **monorepo** future (pnpm workspaces). The git-pinned Shiny
+dep and esbuild's native-binary postinstall are allow-listed in
+`pnpm-workspace.yaml` (`allowBuilds`).
 
 ## CI
 
@@ -253,9 +271,11 @@ vitest"), and reference this doc.
 - esbuild IIFE output assigning `window.irid`: re-verify the global is assigned
   before any factory script runs (load order is preserved by the htmlDependency
   `script` vector / separate deps; the e2e suite is the check).
-- The `Shiny`/jQuery ambient surface tracks whatever Shiny version is on the page;
-  keep `shiny.d.ts` to the members actually used so a Shiny bump can't silently
-  invalidate broad type assumptions.
+- **`@types/rstudio-shiny` is git-pinned to `v1.11.0`.** Its internal type paths
+  (`srcts/types/src/...`) and the optional-method modeling can shift across versions
+  — re-confirm the bridge in `src/shiny.d.ts` still compiles on a bump, and keep the
+  pinned tag in step with the Shiny the app actually runs against.
+- The jQuery `$` shim covers only `.on`/`.one`; widen only if irid's usage grows.
 
 ## Coverage reporting
 
