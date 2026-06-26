@@ -18,7 +18,7 @@ klist_ids <- function(app) {
 }
 
 # data-id attributes of #olist's <li> (the renderIrid-delivered Each).
-klist_ids2 <- function(app) {
+olist_ids <- function(app) {
   as.character(e2e_eval(app, paste0(
     "Array.prototype.map.call(",
     "document.querySelectorAll('#olist > li'),",
@@ -107,18 +107,18 @@ test_that("Each delivered via renderIrid mutates (lookupAnchors lazy re-scan)", 
   # index (they arrived as an output binding, not a custom message).
   e2e_wait_until(app, "document.querySelectorAll('#olist > li').length === 1")
   e2e_wait_idle(app)
-  expect_equal(klist_ids2(app), c("x"))
+  expect_equal(olist_ids(app), c("x"))
 
   # First add -> first irid-mutate -> lookupAnchors MISSES the container anchor
   # -> must lazily re-scan document.body to find it, or the insert is dropped.
   e2e_click(app, "#btn-add")
   e2e_wait_until(app, "document.querySelectorAll('#olist > li').length === 2")
-  expect_equal(klist_ids2(app), c("x", "n1"))
+  expect_equal(olist_ids(app), c("x", "n1"))
 
   # A second add proves the re-indexed anchor stays usable.
   e2e_click(app, "#btn-add")
   e2e_wait_until(app, "document.querySelectorAll('#olist > li').length === 3")
-  expect_equal(klist_ids2(app), c("x", "n1", "n2"))
+  expect_equal(olist_ids(app), c("x", "n1", "n2"))
 
   expect_equal(e2e_exceptions(app), character())
   e2e_expect_no_error(app)
