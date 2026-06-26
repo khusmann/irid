@@ -80,19 +80,52 @@ guard on a runtime feature-detect (`shiny_has_scope()`) and skip on a shiny
 without the PR (CRAN today); they start running automatically once a shiny
 carrying it is installed.
 
+## Client tests (TypeScript)
+
+The client is TypeScript under `srcts/`, built to `inst/` with esbuild. Its pure
+decision logic is unit-tested with **vitest**;
+DOM / `Plotly.*` / Shiny-glue behavior stays in the R e2e suite (faithfully mocking
+it is less trustworthy than a real browser).
+
+```sh
+cd srcts
+corepack pnpm install         # first time (pnpm pinned via packageManager)
+corepack pnpm test            # vitest unit tests
+corepack pnpm run typecheck   # tsc --noEmit
+corepack pnpm run coverage    # vitest + lcov
+corepack pnpm run build       # rebuild the inst/ bundles
+```
+
+Unit-tested modules (tests in `srcts/src/__tests__/`): `core/seq` (the
+sequence/stale-echo gate), `widgets/plotly/pure` (identity/diff helpers + the pure
+half of each translation-table entry), and `core/ratelimit` (throttle/debounce +
+the per-element ordering queue, with fake timers — the timing case the old V8 plan
+couldn't reach).
+
+**Built artifacts are committed.** `inst/js/irid.js` and
+`inst/widgets/plotly/plotly-irid.js` (+ `.map`) are generated from `srcts/`. After
+changing any `.ts`, run `pnpm run build` and commit the `inst/` changes — the
+`client.yaml` CI job rebuilds and fails the run if they're stale.
+
 ## CI
 
-Three workflows under `.github/workflows/`:
+Four workflows under `.github/workflows/`:
 
 - **`R-CMD-check.yaml`** — the main check job; leaves `IRID_E2E` unset, so e2e
-  skips and the unit tests run once here.
+  skips and the unit tests run once here. Runs against the committed `inst/`
+  bundles (no node needed).
 - **`e2e.yaml`** — a dedicated job that sets `IRID_E2E=1`, installs Chrome, and
-  runs only the `*-e2e.R` files. Sets `E2E_TIMEOUT_SCALE=3` for runner headroom
-  and uploads `$E2E_ARTIFACTS` (failure screenshots) on failure.
-- **`test-coverage.yaml`** — runs `covr` and uploads to Codecov (the README
-  badge). Like the check job it leaves `IRID_E2E` unset, so the reported number
-  is R-side, unit-test coverage (it excludes the e2e suite and the gated
-  shiny#4372 path, and can't see client JS).
+  runs only the `*-e2e.R` files (against the committed bundles). Sets
+  `E2E_TIMEOUT_SCALE=3` for runner headroom and uploads `$E2E_ARTIFACTS` (failure
+  screenshots) on failure.
+- **`client.yaml`** — the TypeScript job: `pnpm` typecheck + vitest (with coverage)
+  + esbuild build, then a `git diff` **freshness gate** that fails if the committed
+  `inst/` bundles don't match a fresh build.
+- **`test-coverage.yaml`** — runs `covr` and uploads to Codecov under the `r` flag
+  (the README badge). Like the check job it leaves `IRID_E2E` unset, so the number
+  is R-side unit-test coverage (it excludes the e2e suite and the gated shiny#4372
+  path, and can't see the client). Client coverage uploads separately from
+  `client.yaml` under the `client` flag.
 
 ## Coverage
 
@@ -108,6 +141,6 @@ browser-effect dispatch in `mount.R` / the JS are intentionally left to e2e or
 treated as unreachable in unit context. Chase meaningful branches, not the
 number.
 
-Client-side JavaScript (`inst/js/irid.js`, `inst/widgets/*/*.js`) is not visible
-to `covr`; its pure decision logic is slated for `V8`-based unit tests (see
-issue #30), with DOM/Shiny-glue behavior covered by the e2e suite.
+The client (TypeScript under `srcts/`) is not visible to `covr`. Its pure decision
+logic is unit-tested with vitest (see *Client tests* above) and reported to Codecov
+under the `client` flag; DOM/Shiny-glue behavior is covered by the e2e suite.

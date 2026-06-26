@@ -18,11 +18,22 @@ R/
   irid-package.R Package-level imports
 
 inst/js/
-  irid.js        Client-side message handlers (vanilla JS, no build step)
+  irid.js        Built client runtime — esbuild bundle of srcts/src/core
+                 (+ irid.js.map). Generated; edit the TS source, not this.
 
 inst/widgets/<name>/
-  <name>-irid.js   Per-widget factory registration (one dir per shipped widget;
-                   user widgets live in user packages, not here)
+  <name>-irid.js   Built per-widget factory — esbuild bundle of
+                   srcts/src/widgets/<name> (+ .map). Generated. (One dir per
+                   shipped widget; user widgets live in user packages.)
+
+srcts/             TypeScript source for the client — the single source vendored
+                   into inst/ (eventually shared with a Python server). Built with
+                   esbuild, typechecked with tsc, unit-tested with vitest; see
+                   TESTING.md.
+  src/protocol.ts        Typed wire protocol + public client API (type-only)
+  src/core/*             core runtime (seq, payload, anchors, ratelimit, stale,
+                         widgets, handlers, index) -> inst/js/irid.js
+  src/widgets/plotly/*   plotly factory (pure + index) -> plotly-irid.js
 
 examples/
   old_faithful.R        Old Faithful geyser histogram with PlotOutput

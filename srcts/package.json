@@ -1,0 +1,22 @@
+{
+  "name": "@irid/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "irid client runtime (TypeScript source). Built artifacts are vendored into ../inst; see TESTING.md.",
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/rstudio-shiny": "github:rstudio/shiny#v1.11.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "esbuild": "^0.28.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

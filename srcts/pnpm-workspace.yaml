@@ -1,0 +1,10 @@
+# allowBuilds: dependencies whose install/prepare scripts pnpm is allowed to run.
+#
+# - @types/rstudio-shiny — the Shiny client's TypeScript declarations, pinned to a
+#   git tag (not on npm). Its `prepare` is a deliberate no-op guard so a git install
+#   doesn't build the whole Shiny repo. Keyed by resolved tarball URL (the v1.11.0
+#   tag pins a fixed commit, so this is stable).
+# - esbuild — its postinstall links the platform-native binary.
+allowBuilds:
+  "@types/rstudio-shiny@https://codeload.github.com/rstudio/shiny/tar.gz/ab219e3408c280f2f0b64f14184e6a93d7979d07": true
+  esbuild: true

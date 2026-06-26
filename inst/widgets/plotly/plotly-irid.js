@@ -1,429 +1,424 @@
-// irid-plotly widget factory
-//
-// Registers `irid.defineWidget("plotly", ...)`. Owns the Plotly.react /
-// Plotly.relayout / Plotly.restyle / Plotly.purge glue and its own mirror of
-// the R-side translation table that maps each named state arg to a spec path
-// and a source event.
-//
-// Load order: this script is delivered via insertUI at mount time (Shiny's
-// native render pipeline; see the R-side `deliver_widget_deps`), which always
-// runs after irid.js — so `window.irid.defineWidget` is defined when this calls
-// it. Two races are still handled downstream: the
-// factory-vs-init race by irid's pendingInits buffer, and the
-// plotly-main-global-not-loaded race by this factory being `async` and awaiting
-// `waitForPlotly()` before it touches Plotly (see below).
-
-(function () {
-  // --- small helpers (module scope; no closure deps) ----------------------
-
-  function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }
-
+"use strict";
+(() => {
+  // src/widgets/plotly/pure.ts
   function approxEq(a, b) {
     if (a === b) return true;
     if (typeof a !== "number" || typeof b !== "number") return false;
     return Math.abs(a - b) < 1e-6 * (Math.abs(a) + Math.abs(b) + 1);
   }
-
-  // plotly point objects reference data/fullData (circular, huge) — never let
-  // those reach Shiny.setInputValue's JSON.stringify. Project to the fields a
-  // handler actually wants.
-  function slimPoints(e) {
-    if (!e || !e.points) return { points: [] };
-    return {
-      points: e.points.map(function (p) {
-        return {
-          curveNumber: p.curveNumber,
-          pointNumber: p.pointNumber,
-          x: p.x, y: p.y, z: p.z,
-          text: p.text, customdata: p.customdata
-        };
-      })
-    };
-  }
-
-  // Selection canonical value: a flat array of `ids` (the per-point identity
-  // plotly carries in data[*].ids). Identity-keyed selection is layout-agnostic
-  // — resolution scans current ids, so it survives data changes that renumber
-  // points and works the same across plot_ly traces and grouped ggplotly.
-
-  // event points -> their id values, read off the graph (the point object does
-  // not carry the id, but the listener has curve/point and gd.data[*].ids does).
   function idsFromPoints(el, points) {
     if (!points || !points.length) return null;
-    var out = [];
-    points.forEach(function (p) {
-      var ids = el.data[p.curveNumber] && el.data[p.curveNumber].ids;
+    const out = [];
+    points.forEach((p) => {
+      const ids = el.data[p.curveNumber] && el.data[p.curveNumber].ids;
       if (ids && ids[p.pointNumber] != null) out.push(ids[p.pointNumber]);
     });
     return out.length ? out : null;
   }
-
-  // ids -> { traceIndex -> [0-based point indices] } against the given data.
-  // Scans each trace's ids for membership in the wanted set.
   function idsToIndices(data, ids) {
-    var want = {};
-    [].concat(ids).forEach(function (k) { want[k] = true; });
-    var g = {};
-    data.forEach(function (tr, i) {
-      (tr.ids || []).forEach(function (id, j) {
-        if (want[id]) { if (!g[i]) g[i] = []; g[i].push(j); }
+    const want = {};
+    [].concat(ids).forEach((k) => {
+      want[String(k)] = true;
+    });
+    const g = {};
+    data.forEach((tr, i) => {
+      (tr.ids || []).forEach((id, j) => {
+        if (want[String(id)]) {
+          if (!g[i]) g[i] = [];
+          g[i].push(j);
+        }
       });
     });
     return g;
   }
-
   function typedVisibility(s) {
     if (s === "true" || s === true) return true;
     if (s === "false" || s === false) return false;
-    return s; // "legendonly"
+    return s;
   }
   function stringVisibility(v) {
     if (v === false) return "false";
     if (v === "legendonly") return "legendonly";
-    return "true"; // true or undefined
+    return "true";
   }
-  // Visibility is keyed by trace NAME (identity), not position — a sparse
-  // { name -> tri-state } map. Like ids for points, name resolution is
-  // layout-agnostic, so toggling survives trace recomposition (a filter that
-  // drops a group renumbers traces but not their names). Traces without a name
-  // can't be keyed and are skipped.
   function readVisibility(el) {
-    var out = {};
-    el.data.forEach(function (tr) {
+    const out = {};
+    el.data.forEach((tr) => {
       if (tr.name != null) out[tr.name] = stringVisibility(tr.visible);
     });
     return out;
   }
+  function slimPoints(e) {
+    if (!e || !e.points) return { points: [] };
+    return {
+      points: e.points.map((p) => ({
+        curveNumber: p.curveNumber,
+        pointNumber: p.pointNumber,
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        text: p.text,
+        customdata: p.customdata
+      }))
+    };
+  }
+  function rangeSpec(axis) {
+    const rk = axis + ".range";
+    return {
+      writeSpec(s, v) {
+        if (!s.layout) s.layout = {};
+        if (!s.layout[axis]) s.layout[axis] = {};
+        const ax = s.layout[axis];
+        ax.range = v;
+        ax.autorange = false;
+      },
+      matchesCurrent(el, v) {
+        const ax = el.layout && el.layout[axis];
+        const cur = ax && ax.range;
+        const vv = v;
+        return !!cur && approxEq(cur[0], vv[0]) && approxEq(cur[1], vv[1]);
+      },
+      fromRelayout(p) {
+        if (p[rk] !== void 0) return p[rk];
+        const lo = p[axis + ".range[0]"];
+        const hi = p[axis + ".range[1]"];
+        if (lo !== void 0 && hi !== void 0) return [lo, hi];
+        if (p[axis + ".autorange"] === true) return null;
+        return void 0;
+      }
+    };
+  }
+  function scalarSpec(name) {
+    return {
+      writeSpec(s, v) {
+        if (!s.layout) s.layout = {};
+        s.layout[name] = v;
+      },
+      matchesCurrent(el, v) {
+        return !!el.layout && el.layout[name] === v;
+      },
+      fromRelayout(p) {
+        return p[name];
+      }
+    };
+  }
+  function selectionSpec() {
+    return {
+      writeSpec(s, v) {
+        const g = idsToIndices(s.data, v);
+        s.data.forEach((tr, i) => {
+          if (g[i]) tr.selectedpoints = g[i];
+        });
+      },
+      // True when the graph ALREADY shows exactly this selection (the echo of a
+      // user's own drag). Skipping it leaves their marquee intact.
+      matchesCurrent(el, v) {
+        const g = idsToIndices(el.data, v);
+        return el.data.every((tr, i) => {
+          const want = g[i] || [];
+          const have = tr.selectedpoints || [];
+          if (want.length !== have.length) return false;
+          const hs = {};
+          have.forEach((x) => {
+            hs[x] = true;
+          });
+          return want.every((x) => hs[x]);
+        });
+      }
+    };
+  }
+  function visibilitySpec() {
+    return {
+      writeSpec(s, v) {
+        const vm = v;
+        s.data.forEach((tr) => {
+          if (tr.name != null && vm[tr.name] !== void 0) {
+            tr.visible = typedVisibility(vm[tr.name]);
+          }
+        });
+      },
+      matchesCurrent(el, v) {
+        const vm = v;
+        return el.data.every((tr) => {
+          if (tr.name == null || vm[tr.name] === void 0) return true;
+          return stringVisibility(tr.visible) === String(vm[tr.name]);
+        });
+      }
+    };
+  }
 
-  // --- factory ------------------------------------------------------------
-
-  // plotly-main is delivered by a Shiny dependency in the same init message, so
-  // its `window.Plotly` global may not have executed yet when this factory
-  // first runs (its `load` event is unusable — Shiny injects deps via jQuery,
-  // which executes <script src> through an AJAX globalEval, so no element load
-  // fires; see the Widgets section of ARCHITECTURE.md). Poll until the global
-  // exists and resolve with it. The factory `await`s this ONCE up front and
-  // captures the result in a local `Plotly`, so every call below is guaranteed
-  // defined — irid's async-factory contract holds back updates until the
-  // returned handle commits.
+  // src/widgets/plotly/index.ts
+  function deepCopy(o) {
+    return JSON.parse(JSON.stringify(o));
+  }
   function waitForPlotly() {
     if (window.Plotly) return Promise.resolve(window.Plotly);
-    return new Promise(function (resolve) {
-      var t = setInterval(function () {
-        if (window.Plotly) { clearInterval(t); resolve(window.Plotly); }
+    return new Promise((resolve) => {
+      const t = setInterval(() => {
+        if (window.Plotly) {
+          clearInterval(t);
+          resolve(window.Plotly);
+        }
       }, 30);
     });
   }
-
-  window.irid.defineWidget("plotly", async function (el, props, sendEvent, setProp) {
-    var Plotly = await waitForPlotly();   // captured local; defined from here on
-
-    var applyDepth = 0;                // >0 while our own graph mutations run
-    var listenersAttached = false;
-    var ready = false;                 // first render committed?
-    var spec = JSON.parse(props.spec);
-    var state = {};
-
-    function applying() { return applyDepth > 0; }
-
-    // every programmatic mutation runs through this guard. react() is silent
-    // (no plotly_relayout); relayout()/restyle() echo a synchronous
-    // plotly_relayout that the listener must ignore. The echo fires before the
-    // returned promise resolves, so clearing in .then() is always in time.
-    //
-    // A depth COUNTER, not a boolean: a single batch can fire two async
-    // mutations at once (e.g. selected_ids' relayout().then(restyle()) running
-    // alongside trace_visibility's restyle()). With a boolean the first to
-    // resolve clears the guard while the other's deferred echo is still
-    // pending, leaking that echo back as a spurious user write. The counter
-    // stays raised until every in-flight mutation has settled.
-    function mutate(fn) {
-      applyDepth++;
-      var p;
-      try { p = fn(); } catch (err) { applyDepth--; throw err; }
-      return Promise.resolve(p).then(
-        function (r) { applyDepth--; return r; },
-        function (err) { applyDepth--; throw err; }
+  window.irid.defineWidget(
+    "plotly",
+    async function(el, props, sendEvent, setProp) {
+      const Plotly = await waitForPlotly();
+      const gd = el;
+      let applyDepth = 0;
+      let listenersAttached = false;
+      let ready = false;
+      let spec = JSON.parse(props.spec);
+      const state = {};
+      function applying() {
+        return applyDepth > 0;
+      }
+      function mutate(fn) {
+        applyDepth++;
+        let p;
+        try {
+          p = fn();
+        } catch (err) {
+          applyDepth--;
+          throw err;
+        }
+        return Promise.resolve(p).then(
+          (r) => {
+            applyDepth--;
+            return r;
+          },
+          (err) => {
+            applyDepth--;
+            throw err;
+          }
+        );
+      }
+      function rangeEntry(name, axis) {
+        const pure = rangeSpec(axis);
+        const rk = axis + ".range";
+        return {
+          name,
+          source: "relayout",
+          writeSpec: pure.writeSpec,
+          matchesCurrent: pure.matchesCurrent,
+          fromRelayout: pure.fromRelayout,
+          apply(el2, v) {
+            const u = {};
+            u[rk] = v;
+            u[axis + ".autorange"] = false;
+            return mutate(() => Plotly.relayout(el2, u));
+          },
+          applyDeferred(el2, spec2) {
+            const ax = spec2.layout && spec2.layout[axis];
+            const sr = ax && ax.range;
+            const u = {};
+            if (sr != null) {
+              u[rk] = sr;
+              u[axis + ".autorange"] = false;
+            } else {
+              u[axis + ".autorange"] = true;
+            }
+            return mutate(() => Plotly.relayout(el2, u));
+          }
+        };
+      }
+      function scalarEntry(name) {
+        const pure = scalarSpec(name);
+        return {
+          name,
+          source: "relayout",
+          writeSpec: pure.writeSpec,
+          matchesCurrent: pure.matchesCurrent,
+          fromRelayout: pure.fromRelayout,
+          apply(el2, v) {
+            const u = {};
+            u[name] = v;
+            return mutate(() => Plotly.relayout(el2, u));
+          },
+          applyDeferred(el2, spec2) {
+            const sv = spec2.layout ? spec2.layout[name] : void 0;
+            const u = {};
+            u[name] = sv == null ? null : sv;
+            return mutate(() => Plotly.relayout(el2, u));
+          }
+        };
+      }
+      function selectionEntry() {
+        const pure = selectionSpec();
+        return {
+          name: "selected_ids",
+          source: "selected",
+          writeSpec: pure.writeSpec,
+          matchesCurrent: pure.matchesCurrent,
+          // Both set and clear must drop the active drag selection FIRST: while one
+          // is active plotly owns selectedpoints, so a bare restyle is a no-op. So
+          // clear layout.selections, THEN restyle the per-point dimming.
+          apply(el2, v) {
+            const ids = v == null ? [] : [].concat(v);
+            const g = idsToIndices(el2.data, ids);
+            const empty = ids.length === 0;
+            const sel = el2.data.map((_, i) => empty ? null : g[i] || []);
+            return mutate(
+              () => Plotly.relayout(el2, { selections: null }).then(
+                () => Plotly.restyle(el2, { selectedpoints: sel })
+              )
+            );
+          },
+          applyDeferred(el2) {
+            const sel = el2.data.map(() => null);
+            return mutate(
+              () => Plotly.relayout(el2, { selections: null }).then(
+                () => Plotly.restyle(el2, { selectedpoints: sel })
+              )
+            );
+          }
+        };
+      }
+      function visibilityEntry() {
+        const pure = visibilitySpec();
+        return {
+          name: "trace_visibility",
+          source: "restyle",
+          writeSpec: pure.writeSpec,
+          matchesCurrent: pure.matchesCurrent,
+          apply(el2, v) {
+            const vm = v;
+            const idx = [];
+            const vals = [];
+            el2.data.forEach((tr, i) => {
+              if (tr.name != null && vm[tr.name] !== void 0) {
+                idx.push(i);
+                vals.push(typedVisibility(vm[tr.name]));
+              }
+            });
+            if (!idx.length) return Promise.resolve();
+            return mutate(() => Plotly.restyle(el2, { visible: vals }, idx));
+          },
+          applyDeferred() {
+            return Promise.resolve();
+          }
+        };
+      }
+      function makeEntry(name) {
+        const m = name.match(/^([xy]axis\d*)_range$/);
+        if (m) return rangeEntry(name, m[1]);
+        if (name === "dragmode" || name === "hovermode") return scalarEntry(name);
+        if (name === "selected_ids") return selectionEntry();
+        if (name === "trace_visibility") return visibilityEntry();
+        return null;
+      }
+      const stateKeys = [].concat(
+        props.__irid_state_keys || []
       );
-    }
-
-    // ---- translation-table entries, built from the state prop keys --------
-    // Each entry: { name, source, writeSpec(spec,v), apply(el,v),
-    //   applyDeferred(el,spec), matchesCurrent(el,v), fromRelayout(payload) }.
-
-    function rangeEntry(name, axis) {
-      var rk = axis + ".range";
-      return {
-        name: name, source: "relayout",
-        writeSpec: function (s, v) {
-          if (!s.layout[axis]) s.layout[axis] = {};
-          s.layout[axis].range = v;
-          s.layout[axis].autorange = false;
-        },
-        apply: function (el, v) {
-          var u = {}; u[rk] = v; u[axis + ".autorange"] = false;
-          return mutate(function () { return Plotly.relayout(el, u); });
-        },
-        applyDeferred: function (el, spec) {
-          var sr = spec.layout && spec.layout[axis] && spec.layout[axis].range;
-          var u = {};
-          if (sr != null) { u[rk] = sr; u[axis + ".autorange"] = false; }
-          else { u[axis + ".autorange"] = true; }
-          return mutate(function () { return Plotly.relayout(el, u); });
-        },
-        matchesCurrent: function (el, v) {
-          var cur = el.layout && el.layout[axis] && el.layout[axis].range;
-          return !!cur && approxEq(cur[0], v[0]) && approxEq(cur[1], v[1]);
-        },
-        fromRelayout: function (p) {
-          if (p[rk] !== undefined) return p[rk];           // whole-array
-          var lo = p[axis + ".range[0]"], hi = p[axis + ".range[1]"];
-          if (lo !== undefined && hi !== undefined) return [lo, hi]; // split
-          if (p[axis + ".autorange"] === true) return null;          // reset
-          return undefined;                                          // abstain
+      const entries = [];
+      stateKeys.forEach((key) => {
+        const e = makeEntry(key);
+        if (e) {
+          entries.push(e);
+          state[key] = key in props ? props[key] : null;
         }
-      };
-    }
-
-    function scalarEntry(name) {
-      return {
-        name: name, source: "relayout",
-        writeSpec: function (s, v) { s.layout[name] = v; },
-        apply: function (el, v) {
-          var u = {}; u[name] = v;
-          return mutate(function () { return Plotly.relayout(el, u); });
-        },
-        applyDeferred: function (el, spec) {
-          var sv = spec.layout ? spec.layout[name] : undefined;
-          var u = {}; u[name] = (sv == null ? null : sv);
-          return mutate(function () { return Plotly.relayout(el, u); });
-        },
-        matchesCurrent: function (el, v) {
-          return !!el.layout && el.layout[name] === v;
-        },
-        fromRelayout: function (p) { return p[name]; }  // undefined if absent
-      };
-    }
-
-    function selectionEntry() {
-      return {
-        name: "selected_ids", source: "selected",
-        writeSpec: function (s, v) {
-          var g = idsToIndices(s.data, v);
-          s.data.forEach(function (tr, i) { if (g[i]) tr.selectedpoints = g[i]; });
-        },
-        // Both set and clear must drop the active drag selection FIRST: while
-        // one is active plotly owns selectedpoints, so a bare restyle is a
-        // silent no-op (and a leftover outline rectangle stays on screen). So
-        // clear layout.selections, THEN restyle the per-point dimming to the
-        // new value (or null). matchesCurrent (below) is what keeps a user's
-        // OWN fresh marquee from being wiped — the drag's echo matches current
-        // state and is skipped, so only a *different* (programmatic) selection
-        // reaches here and clears the stale outline.
-        apply: function (el, v) {
-          var ids = (v == null) ? [] : [].concat(v);
-          var g = idsToIndices(el.data, ids);
-          // An EMPTY selection is a clear: every trace gets `null` (full
-          // opacity). A non-empty selection dims the rest, so an unmatched
-          // trace gets `[]` ("part of the selection, nothing selected" — plotly
-          // dims it). Using `[]` for an empty selection would dim everything.
-          var empty = ids.length === 0;
-          var sel = el.data.map(function (_, i) { return empty ? null : (g[i] || []); });
-          return mutate(function () {
-            return Plotly.relayout(el, { selections: null }).then(function () {
-              return Plotly.restyle(el, { selectedpoints: sel });
-            });
-          });
-        },
-        applyDeferred: function (el) {
-          var sel = el.data.map(function () { return null; });
-          return mutate(function () {
-            return Plotly.relayout(el, { selections: null }).then(function () {
-              return Plotly.restyle(el, { selectedpoints: sel });
-            });
-          });
-        },
-        // True when the graph ALREADY shows exactly this selection — the echo
-        // of a user's own drag (plotly set selectedpoints from it). Skipping it
-        // leaves their marquee intact; a mismatch (programmatic set) falls
-        // through to apply, which clears the stale outline first.
-        matchesCurrent: function (el, v) {
-          var g = idsToIndices(el.data, v);
-          return el.data.every(function (tr, i) {
-            var want = g[i] || [];
-            var have = tr.selectedpoints || [];
-            if (want.length !== have.length) return false;
-            var hs = {};
-            have.forEach(function (x) { hs[x] = true; });
-            return want.every(function (x) { return hs[x]; });
-          });
-        }
-      };
-    }
-
-    function visibilityEntry() {
-      // `v` is a sparse { traceName -> tri-state } map: set only the named
-      // traces, leave the rest at the spec's default. Resolution is by name,
-      // so it is robust to trace recomposition.
-      return {
-        name: "trace_visibility", source: "restyle",
-        writeSpec: function (s, v) {
-          s.data.forEach(function (tr) {
-            if (tr.name != null && v[tr.name] !== undefined) {
-              tr.visible = typedVisibility(v[tr.name]);
-            }
-          });
-        },
-        apply: function (el, v) {
-          var idx = [], vals = [];
-          el.data.forEach(function (tr, i) {
-            if (tr.name != null && v[tr.name] !== undefined) {
-              idx.push(i); vals.push(typedVisibility(v[tr.name]));
-            }
-          });
-          if (!idx.length) return Promise.resolve();
-          // restyle's value array maps 1:1 to the given trace indices.
-          return mutate(function () { return Plotly.restyle(el, { visible: vals }, idx); });
-        },
-        applyDeferred: function () { return Promise.resolve(); },  // null -> leave the spec's visibility
-        matchesCurrent: function (el, v) {
-          return el.data.every(function (tr) {
-            if (tr.name == null || v[tr.name] === undefined) return true;
-            return stringVisibility(tr.visible) === String(v[tr.name]);
-          });
-        }
-      };
-    }
-
-    function makeEntry(name) {
-      var m = name.match(/^([xy]axis\d*)_range$/);
-      if (m) return rangeEntry(name, m[1]);
-      if (name === "dragmode" || name === "hovermode") return scalarEntry(name);
-      if (name === "selected_ids") return selectionEntry();
-      if (name === "trace_visibility") return visibilityEntry();
-      return null; // unknown — R side already rejected these; ignore defensively
-    }
-
-    // Build entries from the explicit bound-key list, NOT from Object.keys
-    // (props): a NULL-initialized state arg is dropped from the init props
-    // object, so its key would otherwise be invisible here. Its initial value
-    // is whatever survived in props (or null if dropped).
-    var stateKeys = [].concat(props.__irid_state_keys || []);
-    var entries = [];
-    stateKeys.forEach(function (key) {
-      var e = makeEntry(key);
-      if (e) { entries.push(e); state[key] = (key in props) ? props[key] : null; }
-    });
-
-    // ---- render ------------------------------------------------------------
-
-    function merge() {
-      var s = deepCopy(spec);
-      if (!s.layout) s.layout = {};
-      if (s.layout.uirevision == null) s.layout.uirevision = "irid";
-      entries.forEach(function (entry) {
-        var v = state[entry.name];
-        if (v != null) entry.writeSpec(s, v);
       });
-      return s;
-    }
-
-    function render() {
-      return mutate(function () {
-        var m = merge();
-        return Plotly.react(el, m.data, m.layout, m.config || {});
-      }).then(function () {
-        ready = true;
-        if (!listenersAttached) { attachListeners(); listenersAttached = true; }
-        // Readiness marker: rendered AND event listeners wired. `Plotly.react`
-        // sets `el.data` before this `.then` runs, so data presence alone does
-        // not mean the `plotly_relayout`/`plotly_click` handlers are attached.
-        // An external observer dispatching a gesture (the e2e suite) must wait
-        // for this attribute, or a gesture fired in that window is lost.
-        el.setAttribute("data-irid-plotly-ready", "1");
-      });
-    }
-
-    function attachListeners() {
-      el.on("plotly_relayout", function (payload) {
-        if (applying()) return;            // our own relayout/restyle echo
-        var keys = Object.keys(payload);
-        // Plotly fires a bare `{}` relayout on some interactions (and our own
-        // settle can surface one). It carries nothing for onRelayout or any
-        // prop, so drop it rather than spuriously notifying with an empty object.
-        if (!keys.length) return;
-        // Per-channel sequencing (#28): the `relayout` notification and each
-        // prop's `setProp` ride independent sequence counters, so the
-        // notification can no longer out-sequence a same-gesture prop write
-        // (a box/lasso select's selection-only relayout no longer gates the
-        // `selected_ids` echo, and a box zoom's two range props don't gate each
-        // other). Emit order is therefore irrelevant; onRelayout sees every
-        // relayout, including the transient selection-outline geometry.
-        sendEvent("relayout", payload);  // raw escape hatch (no-op if unbound)
-        entries.forEach(function (entry) {
-          if (entry.source !== "relayout") return;
-          var v = entry.fromRelayout(payload);
-          if (v !== undefined) setProp(entry.name, v);  // value | null
+      function merge() {
+        const s = deepCopy(spec);
+        if (!s.layout) s.layout = {};
+        if (s.layout.uirevision == null) s.layout.uirevision = "irid";
+        entries.forEach((entry) => {
+          const v = state[entry.name];
+          if (v != null) entry.writeSpec(s, v);
         });
-      });
-      el.on("plotly_selected", function (e) {
-        if (applying()) return;            // echo from our own react/restyle
-        setProp("selected_ids", idsFromPoints(el, e && e.points));
-      });
-      el.on("plotly_selecting", function (e) {
-        if (applying()) return;
-        sendEvent("selecting", slimPoints(e));
-      });
-      el.on("plotly_deselect", function () {
-        if (applying()) return;            // a data-change react() deselects —
-        // that is our mutation, not the user clearing; do not write back.
-        setProp("selected_ids", null);
-        sendEvent("deselect", {});
-      });
-      el.on("plotly_restyle", function () {
-        if (applying()) return;
-        setProp("trace_visibility", readVisibility(el));
-      });
-      el.on("plotly_click", function (e) { sendEvent("click", slimPoints(e)); });
-      el.on("plotly_hover", function (e) { sendEvent("hover", slimPoints(e)); });
-      el.on("plotly_unhover", function () { sendEvent("unhover", {}); });
-      el.on("plotly_doubleclick", function () { sendEvent("doubleclick", {}); });
-      el.on("plotly_legendclick", function (e) {
-        sendEvent("legend-click", { curveNumber: e.curveNumber }); return true;
-      });
-      el.on("plotly_legenddoubleclick", function (e) {
-        sendEvent("legend-doubleclick", { curveNumber: e.curveNumber }); return true;
-      });
-      el.on("plotly_clickannotation", function (e) {
-        sendEvent("click-annotation", { index: e.index, annotation: e.annotation });
-      });
-      el.on("plotly_sunburstclick", function (e) { sendEvent("sunburst-click", slimPoints(e)); });
-    }
-
-    render();
-
-    // ---- server -> client batch -------------------------------------------
-
-    return {
-      update: function (values) {
-        var reactNeeded = ("spec" in values);
-        if (reactNeeded) spec = JSON.parse(values.spec);
-        entries.forEach(function (entry) {
-          if (!(entry.name in values)) return;
-          var v = values[entry.name];
-          state[entry.name] = v;
-          // Before the first render commits (or when a spec change is in the
-          // same batch), the upcoming render() folds in this state — no
-          // targeted apply needed.
-          if (reactNeeded || !ready) return;
-          if (v == null) entry.applyDeferred(el, spec);             // reset
-          else if (!entry.matchesCurrent(el, v)) entry.apply(el, v); // snap/apply
+        return s;
+      }
+      function render() {
+        return mutate(() => {
+          const m = merge();
+          return Plotly.react(gd, m.data, m.layout, m.config || {});
+        }).then(() => {
+          ready = true;
+          if (!listenersAttached) {
+            attachListeners();
+            listenersAttached = true;
+          }
+          gd.setAttribute("data-irid-plotly-ready", "1");
         });
-        if (reactNeeded || !ready) render(); // one redraw for the whole batch
-      },
-      // `Plotly` is the captured local — the handle only exists past the
-      // `await`, so it's always defined here. No guard needed.
-      destroy: function () { Plotly.purge(el); }
-    };
-  });
+      }
+      function attachListeners() {
+        gd.on("plotly_relayout", (payload) => {
+          if (applying()) return;
+          const keys = Object.keys(payload);
+          if (!keys.length) return;
+          sendEvent("relayout", payload);
+          entries.forEach((entry) => {
+            if (entry.source !== "relayout" || !entry.fromRelayout) return;
+            const v = entry.fromRelayout(payload);
+            if (v !== void 0) setProp(entry.name, v);
+          });
+        });
+        gd.on("plotly_selected", (e) => {
+          if (applying()) return;
+          setProp("selected_ids", idsFromPoints(gd, e && e.points));
+        });
+        gd.on("plotly_selecting", (e) => {
+          if (applying()) return;
+          sendEvent("selecting", slimPoints(e));
+        });
+        gd.on("plotly_deselect", () => {
+          if (applying()) return;
+          setProp("selected_ids", null);
+          sendEvent("deselect", {});
+        });
+        gd.on("plotly_restyle", () => {
+          if (applying()) return;
+          setProp("trace_visibility", readVisibility(gd));
+        });
+        gd.on("plotly_click", (e) => {
+          sendEvent("click", slimPoints(e));
+        });
+        gd.on("plotly_hover", (e) => {
+          sendEvent("hover", slimPoints(e));
+        });
+        gd.on("plotly_unhover", () => {
+          sendEvent("unhover", {});
+        });
+        gd.on("plotly_doubleclick", () => {
+          sendEvent("doubleclick", {});
+        });
+        gd.on("plotly_legendclick", (e) => {
+          sendEvent("legend-click", { curveNumber: e.curveNumber });
+          return true;
+        });
+        gd.on("plotly_legenddoubleclick", (e) => {
+          sendEvent("legend-doubleclick", { curveNumber: e.curveNumber });
+          return true;
+        });
+        gd.on("plotly_clickannotation", (e) => {
+          sendEvent("click-annotation", { index: e.index, annotation: e.annotation });
+        });
+        gd.on("plotly_sunburstclick", (e) => {
+          sendEvent("sunburst-click", slimPoints(e));
+        });
+      }
+      render();
+      return {
+        update(values) {
+          const reactNeeded = "spec" in values;
+          if (reactNeeded) spec = JSON.parse(values.spec);
+          entries.forEach((entry) => {
+            if (!(entry.name in values)) return;
+            const v = values[entry.name];
+            state[entry.name] = v;
+            if (reactNeeded || !ready) return;
+            if (v == null) entry.applyDeferred(gd, spec);
+            else if (!entry.matchesCurrent(gd, v)) entry.apply(gd, v);
+          });
+          if (reactNeeded || !ready) render();
+        },
+        destroy() {
+          Plotly.purge(gd);
+        }
+      };
+    }
+  );
 })();
+//# sourceMappingURL=plotly-irid.js.map
