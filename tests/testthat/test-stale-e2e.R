@@ -31,7 +31,7 @@ test_that("indicator shows while busy past the timeout, then clears (no flicker)
   install_stale_log(app)
   e2e_click(app, "#btn-slow")
 
-  # Appears within the 150ms timeout while the 700ms handler is still running.
+  # Appears once busy passes the 400ms timeout, while the 700ms handler runs.
   e2e_wait_until(app, HAS_STALE)
   # Server finishes (round-trip landed) and the bar clears after the idle debounce.
   e2e_wait_until(app, "document.getElementById('ro-slow').textContent.trim() === '1'")
@@ -51,7 +51,7 @@ test_that("a handler faster than the timeout never shows the indicator", {
   install_stale_log(app)
   e2e_click(app, "#btn-fast")
 
-  # The 30ms handler settles well before the 150ms show timer; idle resets it.
+  # The 30ms handler settles well before the 400ms show timer; idle resets it.
   e2e_wait_until(app, "document.getElementById('ro-fast').textContent.trim() === '1'")
   e2e_wait_idle(app)
   expect_false(e2e_eval(app, HAS_STALE))
