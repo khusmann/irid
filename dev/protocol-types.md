@@ -82,6 +82,16 @@ Three axes organize everything:
   concretely, so the client drops its defensive `!!`/coercion reads. Rationale:
   with two servers and one client, a default belongs in the producers, resolved
   once, not re-implemented per consumer ("parse, don't validate" at the boundary).
+- **Naming.** Wire envelope fields are **camelCase**. Verified across the complete
+  field set (every `msg.<field>` the client reads + every R sender key): the lone
+  offender today is `value_meta`, fixed to `valueGates` by this redesign — after
+  which the envelope is uniformly camelCase. Two non-camelCase categories are
+  *deliberate, not violations*: (1) the `__irid_*` prefixed internal fields
+  (`__irid_seq`, `__irid_state_keys`) — a namespace that avoids collision with user
+  event fields / widget props, so the prefix is load-bearing; (2) keys *inside*
+  `values`/`props` (`xaxis_range`, `dragmode`, …) — these are the **widget's** own
+  vocabulary (plotly's), not irid's protocol, so their casing is the widget author's
+  call. The rule governs the protocol envelope, not payload data it carries.
 
 Composition over inheritance throughout: arms share a core by intersection (`&`),
 and cohesive field clusters (`DomOpts`, `Timing`) are **nested members**, not
