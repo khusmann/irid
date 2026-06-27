@@ -400,17 +400,33 @@ read, etc.). This is the "producer owns defaults" rule from §2 applied concrete
 
 ---
 
-## 9. Serialization caveat (third-party runtime behavior)
+## 9. Serialization — SETTLED by spike
 
-The nesting changes (`gate`, `timing`, `domOpts`, `valueGates`) assume jsonlite
-serializes a named R list as a JSON object and Shiny's `simplifyVector = FALSE`
-decode preserves it as a nested object on the client. mount.R already builds and
-round-trips nested lists (`value_meta[[attr]] <- list(seq=, channel=)`), so this is
-established behavior — but per the project's design-workflow rule, a one-shot spike
-in `dev/spikes/` should print the decoded client-side shape of a representative
-`irid-events` entry (nested `timing` + `domOpts`) and a dom `irid-attr` (nested
-`gate`) to confirm before the R senders are rewired. Pin **jsonlite** and **shiny**
-versions in that spike and note re-confirm-on-bump.
+Spike: [`dev/spikes/protocol-serialization.R`](spikes/protocol-serialization.R),
+run against the same `shiny:::toJSON` that `sendCustomMessage` uses (so the printed
+JSON *is* the client-side shape — for server→client custom messages the client gets
+`JSON.parse()` of it; `simplifyVector` only affects client→server inputs). **Pinned:
+shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 16/16 verdicts pass. Findings:
+
+1. **Required booleans survive.** `coalesce = FALSE`, an all-false `domOpts`, and
+   `clientOnly = FALSE` all reach the client as concrete scalars — `"coalesce":false`,
+   `"domOpts":{"preventDefault":false,…}`. The producer-owns-defaults decision holds:
+   `FALSE` is not dropped (only `NULL` is), so the now-required fields are safe.
+2. **Nests round-trip as objects.** `gate`, `timing` (incl. immediate→`{"mode":
+   "immediate"}` with no ms, throttle→`{…,"ms":100,"leading":true}`), `domOpts`, and
+   the per-key `valueGates` map all serialize as JSON objects. immediate+coalesce is
+   representable (`"timing":{"mode":"immediate"},"coalesce":true`). Omitting
+   `valueGates` (programmatic) emits no key — the sparse-map encoding works.
+3. **Empty-text confirms the §8 fix is required.** `as.character(NULL)` is
+   `character(0)` → serializes as `[]`; `NA_character_` → `null`; `""` → `""`. So the
+   honest current wire type is `string | null | []` — `value: string` only holds
+   once R normalizes empty/`NA`/`character(0)` → `""` (the §8 row).
+4. **`__irid_state_keys` array-forcing confirmed.** A length-1 char vector unboxes to
+   a scalar (`"xaxis_range"`, the bug); `I()` or `as.list()` forces `["xaxis_range"]`;
+   length ≥2 is already an array. Use `I()` at the send site.
+
+No surprises against the design — the only action item the spike *surfaces* (vs.
+merely confirms) is the empty-text normalization, already captured in §8.
 
 ---
 
