@@ -152,6 +152,22 @@ irid_encode_event <- function(ev, channel, client_only) {
   msg
 }
 
+# --- irid-mutate message constructor ---------------------------------------
+
+# Granular comment-anchor range mutations: the sole structural message, driving
+# Each (N keyed/positional children) AND When/Match (one child, keyed by active
+# branch/case). removes/inserts/order are contextual command-parts, each OMITTED
+# when this mutation doesn't do it. `wire_array` forces each to a JSON array (an
+# unnamed list), centralizing the length-1-unbox / named-vector-as-object discipline
+# that used to live at every send site.
+irid_encode_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
+  msg <- list(id = id)
+  if (length(removes) > 0L) msg$removes <- wire_array(removes)
+  if (length(inserts) > 0L) msg$inserts <- wire_array(inserts)
+  if (length(order) > 0L) msg$order <- wire_array(order)
+  msg
+}
+
 # --- Inbound: client -> server payload decode ------------------------------
 
 # The structural mirror of the client's `attachPayloadMeta`. Splits the transport

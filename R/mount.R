@@ -179,23 +179,18 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
     env$item_mounts[[id]] <- entry
   }
 
-  msg <- list(id = cf_id)
-  if (length(removes) > 0L) msg$removes <- as.list(removes)
-  if (length(inserts) > 0L) msg$inserts <- inserts
-  if (!is.null(plan$order)) {
-    # `USE.NAMES = FALSE` keeps the result unnamed — `plan$order` is a
-    # character vector, so a default `vapply` would name the result by the
-    # id strings, and `as.list` of a named vector serializes to a JSON
-    # *object* (`{...}`) instead of an array, breaking `msg.order.forEach`
-    # in the client's irid-mutate handler.
-    msg$order <- as.list(vapply(
+  # `order` maps planner ids to their wrapper ids; the encoder forces each field
+  # to a JSON array (the array-typed-field discipline lives in `wire_array`).
+  order_ids <- if (!is.null(plan$order)) {
+    vapply(
       plan$order,
       function(id) env$item_mounts[[id]]$wrapper_id,
-      character(1L),
-      USE.NAMES = FALSE
-    ))
-  }
-  session$sendCustomMessage("irid-mutate", msg)
+      character(1L)
+    )
+  } else NULL
+  session$sendCustomMessage("irid-mutate", irid_encode_mutate(
+    cf_id, removes = removes, inserts = inserts, order = order_ids
+  ))
 
   # Mount new entries after their DOM exists.
   for (id in plan$added) {
@@ -217,6 +212,41 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
 
   env$current_ids <- new_ids
   invisible()
+}
+
+# Single-slot keyed reconciliation for `When`/`Match` — the unification that lets
+# control flow drop `irid-swap` and ride `irid-mutate` like `Each` (one child slot
+# keyed by the active branch/case). The body is given its own child-anchor pair
+# (a named child range inside the container `cf_id`), so a flip is
+# `mutate {removes:[old], inserts:[new]}` and an empty branch `mutate {removes:[old]}`.
+#
+# `body_tag` is the already-evaluated tag tree, or NULL for an empty branch.
+# `old_child_id` is the previous body's wrapper id (NULL on first render). Returns
+# `list(child_id, mount)` — the caller stores both for the next flip and teardown.
+# The mount runs AFTER the DOM insert (mutate first), matching the binding/event
+# ordering the old swap path relied on.
+cf_render_child <- function(session, cf_id, old_child_id, body_tag,
+                            counter, depth) {
+  removes <- if (!is.null(old_child_id)) old_child_id else NULL
+  if (is.null(body_tag)) {
+    if (!is.null(removes)) {
+      session$sendCustomMessage("irid-mutate",
+        irid_encode_mutate(cf_id, removes = removes))
+    }
+    return(list(child_id = NULL, mount = NULL))
+  }
+  child_id <- counter()
+  wrapped <- tagList(
+    htmltools::HTML(paste0("<!--irid:s:", child_id, "-->")),
+    body_tag,
+    htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
+  )
+  processed <- process_tags(wrapped, counter = counter)
+  session$sendCustomMessage("irid-mutate", irid_encode_mutate(
+    cf_id, removes = removes, inserts = list(as.character(processed$tag))
+  ))
+  mount <- irid_mount_processed(processed, session, depth = depth + 1L)
+  list(child_id = child_id, mount = mount)
 }
 
 # Deliver a widget's dependencies at mount time through Shiny's *native render
@@ -490,6 +520,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     if (cf$type == "when") {
       local({
         current_mount <- NULL
+        current_child <- NULL
         last_active <- NULL
         cf_id <- cf$id
         cf_condition <- cf$condition
@@ -506,34 +537,20 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
           branch_fn <- if (active) cf_yes else cf_otherwise
 
-          # Destroy previous branch
+          # Destroy previous branch's observers (the DOM child range is removed by
+          # the mutate below). Call the body fresh on each activation — the
+          # previous branch's closures were torn down here.
           if (!is.null(env$current_mount)) {
             env$current_mount$destroy()
             env$current_mount <- NULL
           }
 
-          if (!is.null(branch_fn)) {
-            # Call the body fresh on each activation — the previous
-            # branch's closures were torn down above.
-            branch <- branch_fn()
-            processed <- process_tags(branch, counter = counter)
-
-            # Swap first so elements exist in DOM
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = as.character(processed$tag)
-            ))
-
-            # Then mount observers/events
-            env$current_mount <- irid_mount_processed(
-              processed, session, depth = depth + 1L
-            )
-          } else {
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = ""
-            ))
-          }
+          body_tag <- if (!is.null(branch_fn)) branch_fn() else NULL
+          rendered <- cf_render_child(
+            session, cf_id, env$current_child, body_tag, counter, depth
+          )
+          env$current_child <- rendered$child_id
+          env$current_mount <- rendered$mount
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
@@ -739,6 +756,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     } else if (cf$type == "match") {
       local({
         current_mount <- NULL
+        current_child <- NULL
         current_scope <- NULL
         last_active <- NULL
         cf_id <- cf$id
@@ -783,9 +801,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           }
 
           if (is.na(active_idx)) {
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id, html = ""
-            ))
+            # Empty case — remove the current child range, mount nothing.
+            rendered <- cf_render_child(
+              session, cf_id, env$current_child, NULL, counter, depth
+            )
+            env$current_child <- rendered$child_id
             return()
           }
 
@@ -814,14 +834,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           # the Each build_entry note) — scopes user reactives to the case.
           tag_tree <- scope$with_scope(if (n_body == 0L) body() else body(binding))
 
-          processed <- process_tags(tag_tree, counter = counter)
-          session$sendCustomMessage("irid-swap", list(
-            id = cf_id,
-            html = as.character(processed$tag)
-          ))
-          env$current_mount <- irid_mount_processed(
-            processed, session, depth = depth + 1L
+          rendered <- cf_render_child(
+            session, cf_id, env$current_child, tag_tree, counter, depth
           )
+          env$current_child <- rendered$child_id
+          env$current_mount <- rendered$mount
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env

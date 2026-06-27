@@ -114,7 +114,7 @@ function destroyWidget(id: string): void {
   delete widgets[id];
 }
 
-// Destroy any widget instances inside `root`. Called from detachRange / irid-swap
+// Destroy any widget instances inside `root`. Called from detachRange
 // BEFORE Shiny.unbindAll so destroy() runs while the subtree is intact.
 export function destroyWidgetsIn(root: Node): void {
   if (

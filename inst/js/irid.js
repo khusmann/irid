@@ -587,31 +587,6 @@
         el.setAttribute(msg.attr, msg.value);
       }
     });
-    Shiny.addCustomMessageHandler("irid-swap", (msg) => {
-      const a = lookupAnchors(msg.id);
-      if (!a) return;
-      const parent = a.start.parentNode;
-      const detached = document.createDocumentFragment();
-      let n = a.start.nextSibling;
-      while (n && n !== a.end) {
-        const next = n.nextSibling;
-        if (n.nodeType === 1) {
-          destroyWidgetsIn(n);
-          Shiny.unbindAll(n);
-        }
-        detached.appendChild(n);
-        n = next;
-      }
-      unregisterAnchorsIn(detached);
-      if (msg.html) {
-        const fragment = parseFragment(msg.html, parent);
-        indexAnchors(fragment);
-        parent.insertBefore(fragment, a.end);
-      }
-      setTimeout(() => {
-        Shiny.bindAll(parent);
-      }, 0);
-    });
     Shiny.addCustomMessageHandler("irid-mutate", (msg) => {
       const a = lookupAnchors(msg.id);
       if (!a) return;

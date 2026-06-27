@@ -107,18 +107,17 @@ export interface IridAttrWidget {
   valueGates?: Record<string, EchoGate>;
 }
 
-/** `irid-swap` — replace a comment-anchor range's contents wholesale. */
-export interface IridSwapMessage {
-  id: string;
-  html: string;
-}
-
-/** `irid-mutate` — granular range mutations (used by `Each`). */
+/**
+ * `irid-mutate` — granular comment-anchor range mutations. The sole structural
+ * message: drives `Each` (N keyed/positional children) AND `When`/`Match` (one
+ * child, keyed by active branch/case). removes/inserts/order are contextual
+ * command-parts, each omitted when this mutation doesn't do it.
+ */
 export interface IridMutateMessage {
-  id: string;
-  removes?: string[];
+  id: AnchorId;
+  removes?: AnchorId[];
   inserts?: string[];
-  order?: string[];
+  order?: AnchorId[];
 }
 
 /**

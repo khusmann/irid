@@ -1,5 +1,5 @@
 // The Shiny custom-message handlers that drive the client: irid-config,
-// irid-attr, irid-swap, irid-mutate, irid-events, irid-widget-init, irid-ready.
+// irid-attr, irid-mutate, irid-events, irid-widget-init, irid-ready.
 
 import { isStaleEcho, sequences } from "./seq";
 import {
@@ -10,7 +10,7 @@ import {
   parseFragment,
   unregisterAnchorsIn,
 } from "./anchors";
-import { destroyWidgetsIn, handleWidgetInit, widgets } from "./widgets";
+import { handleWidgetInit, widgets } from "./widgets";
 import {
   attachClientOnlyListener,
   managed,
@@ -26,7 +26,6 @@ import type {
   IridEventEntry,
   IridMutateMessage,
   IridReadyMessage,
-  IridSwapMessage,
   IridWidgetInitMessage,
 } from "../protocol";
 
@@ -116,38 +115,6 @@ export function registerHandlers(): void {
     } else {
       el.setAttribute(msg.attr, msg.value as string);
     }
-  });
-
-  Shiny.addCustomMessageHandler("irid-swap", (msg: IridSwapMessage) => {
-    const a = lookupAnchors(msg.id);
-    if (!a) return;
-    const parent = a.start.parentNode!;
-
-    // Detach everything between start and end (exclusive).
-    const detached = document.createDocumentFragment();
-    let n: Node | null = a.start.nextSibling;
-    while (n && n !== a.end) {
-      const next: Node | null = n.nextSibling;
-      if (n.nodeType === 1) {
-        destroyWidgetsIn(n);
-        Shiny.unbindAll!(n as Element);
-      }
-      detached.appendChild(n);
-      n = next;
-    }
-    unregisterAnchorsIn(detached);
-
-    if (msg.html) {
-      const fragment = parseFragment(msg.html, parent);
-      indexAnchors(fragment);
-      parent.insertBefore(fragment, a.end);
-    }
-
-    // Defer bindAll so Shiny finishes the current flush before we ask it to
-    // discover new output bindings.
-    setTimeout(() => {
-      Shiny.bindAll!(parent as Element);
-    }, 0);
   });
 
   Shiny.addCustomMessageHandler("irid-mutate", (msg: IridMutateMessage) => {
