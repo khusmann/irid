@@ -1,6 +1,8 @@
 # Protocol Types — First-Principles Reorganization (proposal)
 
-Status: proposal / design. Not yet implemented.
+Status: **design complete — ready to implement.** Start at §10 (commit plan +
+orientation); §11's only open item is split-vs-single-file (a preference). Run
+`dev/spikes/protocol-serialization.R` first to internalize the serialization contract.
 
 Scope: the typed wire contract in [`srcts/src/protocol.ts`](../srcts/src/protocol.ts)
 — the single shape definition the R server (and a future Python server) target and
@@ -364,18 +366,16 @@ Every client→server payload is an **envelope wrapping the event data**, not a 
 bag with metadata mixed in:
 
 ```ts
-/** irid transport metadata. Top-level of every client->server payload. */
-export interface PayloadMeta {
+/** What goes on the wire for every client->server payload: irid's transport
+ *  envelope owning the top level, with the foreign-keyed event data under `data`
+ *  (DOM event fields, or a widget author's sendEvent payload). No `nonce` — it was a
+ *  Math.random() to force value-distinctness, but every payload is sent with
+ *  {priority:"event"}, which bypasses Shiny's no-resend dedup (shiny.js:11187, §9),
+ *  so it was vestigial. */
+export interface EventPayload {
   id: ElementId;        // source element (carried explicitly — robust under
                         // Shiny-module namespacing, where the inputId is opaque)
-  nonce: number;        // Math.random() — forces Shiny to treat repeats as new
   seq: number;          // per-channel monotonic sequence (the echo gate)
-}
-
-/** What actually goes on the wire: the envelope + the event data under `data`.
- *  `data` is the foreign-keyed bag (DOM event fields, or a widget author's
- *  sendEvent payload); the envelope owns the top level. */
-export interface EventPayload extends PayloadMeta {
   data: Record<string, unknown>;
 }
 ```
@@ -384,7 +384,7 @@ export interface EventPayload extends PayloadMeta {
 *and* the source of the user's event object. If the two share one flat namespace,
 irid's bookkeeping must dodge collisions with DOM event fields *and* arbitrary
 widget-author `sendEvent` keys — which is why today's wire smuggles a *prefixed*
-`__irid_seq` next to *un*prefixed `id`/`nonce` (an inconsistency: a widget author's
+`__irid_seq` next to an *un*prefixed `id` (an inconsistency: a widget author's
 `sendEvent("x", { id })` silently clobbers the envelope's `id`). Nesting the foreign
 data under `data` gives irid sole ownership of the top level, so **no prefix is
 needed at all** — `seq` is just `seq`. The user handler still gets `e$value` flat:
@@ -504,7 +504,7 @@ edit so the bytes match the type:
 | DOM flags | flat 4 fields → nested `domOpts`; **omit on widget rows** | [mount.R:368-371](../R/mount.R#L368-L371) |
 | `kind` | omit from DOM rows (today sent as `"kind":null` — see §9); required on widget | [mount.R:363](../R/mount.R#L363) |
 | Ready id | `id` → `output` (optional; absent for `iridApp`) | [app.R:18-20](../R/app.R#L18) |
-| Payload envelope | flat `{…fields, id, nonce, __irid_seq}` → `{ id, nonce, seq, data:{…fields} }`; deletes `__irid_seq` | client `attachPayloadMeta`; `irid_decode_payload` ([mount.R:402-420](../R/mount.R#L402)) |
+| Payload envelope | flat `{…fields, id, nonce, __irid_seq}` → `{ id, seq, data:{…fields} }`; deletes `__irid_seq` AND `nonce` (§9.8) | client `attachPayloadMeta`+`buildPayload`; `irid_decode_payload` ([mount.R:402-420](../R/mount.R#L402)) |
 | Widget props | preserve NULL props (keep key as explicit `null`) → factory sees full set → **deletes `__irid_state_keys`**; drop client `.concat` ([plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)) | widget-init seeding ([mount.R:326-333](../R/mount.R#L326)) |
 | Control flow | delete `irid-swap`; When/Match emit `irid-mutate` (anchor bodies as child ranges) | [mount.R:556,566,820,852](../R/mount.R#L556) → mutate |
 | array fields | move `as.list`/`USE.NAMES=FALSE` for `removes`/`inserts`/`order` into the encoder (no behavior change, cleanup) | [mount.R:195-208](../R/mount.R#L195-L208) |
@@ -527,7 +527,7 @@ Spike: [`dev/spikes/protocol-serialization.R`](spikes/protocol-serialization.R),
 run against the same `shiny:::toJSON` that `sendCustomMessage` uses (so the printed
 JSON *is* the client-side shape — for server→client custom messages the client gets
 `JSON.parse()` of it; `simplifyVector` only affects client→server inputs). **Pinned:
-shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings:
+shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 24/24 verdicts pass. Findings:
 
 1. **Required booleans survive.** `coalesce = FALSE`, an all-false `domOpts`, and
    `clientOnly = FALSE` all reach the client as concrete scalars — `"coalesce":false`,
@@ -540,8 +540,8 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings
      `"…":null` on the wire **today, not absent** — for the *contextual* ones the
      encoder must *actively omit* (they don't apply); `filter` stays `null` (it's a
      materialized off-default, see below). (Only the incrementally-assigned
-     `gate`/`valueGates` are genuinely absent today.) This corrects the earlier "R
-     already drops these" claim.
+     `gate`/`valueGates` are genuinely absent today.) **This is the non-obvious one:
+     `list(x = NULL)` keeps the key as `null`; the encoder must drop contextual ones.**
    - **present-empty survives** — empty array → `[]`, empty map → `{}`, empty string
      → `""`, and all are distinct from an omitted key. **But `[]` vs `{}` is keyed off
      list NAMES** (unnamed empty list → `[]`, named → `{}`), so the encoder must build
@@ -582,10 +582,18 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings
    serializes as `[]` unless built as a *named* list — and the factory expects an
    object. The encoder must emit `{}` for an empty `props` (and any map field). `data`
    in the payload is the same shape but client→server (JS `{}` is unambiguous).
+8. **`nonce` is vestigial → delete it.** Every payload is sent with `{priority:
+   "event"}`, and Shiny's no-resend dedup `return` is guarded by `opts.priority !==
+   "event"` (installed `shiny.js:11187`, shiny 1.7.4) — so an event-priority input *always* sends, even
+   with an identical payload. The `Math.random()` nonce that forced distinctness is
+   redundant; it's also read nowhere (set in payload.ts, stripped at mount.R:418). The
+   payload envelope is `{ id, seq, data }`. (Source read of the installed shiny.js,
+   re-confirm on shiny bump.)
 
-No surprises against the design except finding 2 (which corrects an earlier wrong
-assumption). The empty-text normalization (finding 4) is the one
-genuine wire *fix*; the rest is moving per-site shape discipline into the encoder.
+Findings 2 and 4 are the load-bearing ones (NULL-kept-as-null; empty-text → `[]`).
+Finding 4 is the one genuine wire *fix* (normalize → `""`); the rest is the encoder
+making "absent / present-empty / off-default / null" deliberate per field, replacing
+whatever `list()`/jsonlite produces by accident.
 
 ### Predictable serialization — a producer-side encoder
 
@@ -603,28 +611,25 @@ config knob — and the spike shows the non-determinism is narrow and enumerable
 Everything else (scalars, named lists → objects) is already deterministic under
 `auto_unbox = TRUE`. The strict-jsonlite idiom (`auto_unbox = FALSE` + explicit
 `unbox()`) is the inverse discipline; since we can't flip the flag, we **emulate it
-at construction** — make each field's wire shape a function of its *declared
-protocol type*, never the runtime value:
-
-- array fields always `I()`/`as.list()`-wrapped (length-1 can't collapse them);
-- `string` fields normalize empty/`NA`/`character(0)` → `""`;
-- required fields resolve `NULL` defaults to concrete values before send.
+at construction** — make each field's wire shape a function of its *declared protocol
+type*, never the runtime value.
 
 **Centralize this in one producer-side wire encoder** — a thin `irid_*` message
-constructor per message type (mirroring the protocol types in §4–5) that applies the
-rules, rather than scattering them across every `sendCustomMessage` site. Concretely,
-the encoder **absorbs the discipline that lives at the send sites today**, so callers
-pass semantic R values and carry no jsonlite knowledge:
+constructor per message type (mirroring the protocol types in §4–5), rather than
+scattering the rules across every `sendCustomMessage` site. The encoder **absorbs the
+discipline that lives at the send sites today**, so callers pass semantic R values and
+carry no jsonlite knowledge. The complete rule set (this is the encoder spec):
 
-- array-typed fields (`removes`/`inserts`/`order`) declared once
-  as arrays → unnamed + `as.list`-wrapped centrally. This deletes the per-site
-  `as.list`/`vapply(USE.NAMES = FALSE)` and the [mount.R:198-202](../R/mount.R#L198-L202)
-  comment explaining the named-vector→JSON-object trap — that knowledge moves into the
-  encoder, where it's stated once.
-- `string` fields normalize empty/`NA`/`character(0)` → `""` (the one genuine fix).
-- sparse maps (`valueGates`) omit when empty — the [mount.R:74](../R/mount.R#L74) guard
-  becomes the encoder's job.
-- required fields resolve `NULL` defaults to concrete values before send.
+- **array fields** (`removes`/`inserts`/`order`) → unnamed list (`[]` when empty,
+  `[x]` for length-1). Deletes the per-site `as.list`/`vapply(USE.NAMES = FALSE)` and
+  the [mount.R:198-202](../R/mount.R#L198-L202) named-vector→object-trap comment.
+- **map fields** (`props`, `values`, `valueGates`) → *named* list, so empty → `{}` not
+  `[]` (§9.7). `valueGates` additionally **omits** when empty (contextual; §9.2/§2).
+- **`string` fields** normalize empty/`NA`/`character(0)` → `""` (the text-value fix).
+- **required default-carrying fields** present with their off-default: booleans →
+  `false`/resolved (`coalesce` from mode), `filter` → `null`, `staleTimeout` → its value.
+- **contextual fields** (`gate`, `output`, `kind`, variant-gated `ms`/`leading`) →
+  **omit** when absent (today some are sent as `null` — §9.2 — the encoder must drop them).
 
 Strictness then lives in one place that tracks the type definitions. It also gives a
 natural **dev-mode assertion**: the encoder can re-parse its own output and check it
@@ -638,15 +643,15 @@ The encoder handles server→client. The client→server direction has a partner
 that today is **inline** in the event observer ([mount.R:402-420](../R/mount.R#L402)):
 it reads `__irid_seq` off the payload and strips the flat envelope via
 `setdiff(names, c("id", "nonce", "__irid_seq"))` to build the user-facing
-`event_obj`. With the §5 envelope shape (`{ id, nonce, seq, data }`) this collapses to
-**`irid_decode_payload(payload)` returning `list(meta = payload[c("id","nonce","seq")],
+`event_obj`. With the §5 envelope shape (`{ id, seq, data }`) this collapses to
+**`irid_decode_payload(payload)` returning `list(meta = payload[c("id","seq")],
 event = payload$data)`** — a field read, no strip-list to keep in sync, no
 `__irid_*` names. Promote it to that named function — the explicit mirror of
 `attachPayloadMeta` on the client. Two reasons beyond symmetry:
 
-- **One home for the envelope.** `attachPayloadMeta` (client) wraps `{ id, nonce, seq,
-  data }`; `irid_decode_payload` (R) unwraps it. The envelope shape lives in exactly
-  those two mirror functions, not as inline string literals in the observer.
+- **One home for the envelope.** `attachPayloadMeta` (client) wraps `{ id, seq, data }`;
+  `irid_decode_payload` (R) unwraps it. The envelope shape lives in exactly those two
+  mirror functions, not as inline string literals in the observer.
 - **It clarifies what is NOT in this layer.** `irid_decode_payload` handles only the
   **structural envelope** (extract meta, expose the rest as fields). It does **not**
   do value coercion — turning `list(40, 200)` back into a numeric range, `NA` back
@@ -666,28 +671,36 @@ encoder, backstopped by e2e and TS compile-time types.
 
 ## 10. Commit plan (one concept per commit, feature branch)
 
-1. Introduce `wire.ts`'s vocabulary section, no consumers yet: id aliases +
-   `EchoGate`, `DomOpts`, `Timing`, `EventKind`.
-2. `EchoGate` everywhere: `gate?` on dom/text, `valueGates` on widget; collapse
-   `isStaleEcho` to take a gate. (TS + R + handler together.)
+**Orientation for a fresh implementer.** Read §2 (the encoding rules every field
+decision follows), §8 (every R sender site that changes), §9 (the serialization
+behaviors + the encoder spec). **Run `dev/spikes/protocol-serialization.R` first** —
+its 24 checks *are* the serialization contract (NULL-kept-as-null, `[]`-vs-`{}` by
+names, present-empty, nonce-redundant). Touchpoints: client = `srcts/src/protocol.ts`
+(types — currently one file; the directory split is step 7) + `core/{handlers,
+ratelimit,payload,seq}.ts` + `widgets/plotly/index.ts`; R = `mount.R`, `app.R`,
+`plotly.R`. The **encoder/decoder (§9)** is the linchpin — every R-touching step
+routes its sends through it, so build it in step 2 and grow it. Each step keeps the
+**e2e suite green** (`TESTING.md`); that's the proof the wire still round-trips.
+
+1. Introduce the vocabulary in `protocol.ts`, no consumers yet: id aliases +
+   `EchoGate`, `DomOpts`, `Timing`, `EventKind`. (TS-only; nothing references them.)
+2. `EchoGate` everywhere + stand up the **codec**: `gate?` on dom, `valueGates` on
+   widget; `isStaleEcho` takes a gate; extract `irid_encode_*` / `irid_decode_payload`
+   (§9) and route the attr senders through them. (TS + R + handler together.)
 3. `irid-events` union: `IridEventCore` + `IridDomEvent | IridWidgetEvent`, nested
-   `timing`/`domOpts`, drop `kind` null, narrow the ratelimit helpers.
-4. Renames + type tightenings: `inputId`→`channel`, ready `id`→`output` (optional),
-   delete `__irid_state_keys` (preserve NULL props; plotly derives keys from props).
-5. Payload envelope: `{ id, nonce, seq, data }` (§5) — wrap on the client
-   (`attachPayloadMeta`), unwrap in `irid_decode_payload`; deletes `__irid_seq`.
+   `timing`/`domOpts` (filter inside domOpts as `string|null`), `kind` required on
+   widget / omitted on dom, narrow the ratelimit helpers to `IridDomEvent`/`DomOpts`.
+4. Renames + tightenings: `inputId`→`channel`; ready `id`→`output` (optional, omit for
+   app); text `value`→`string` (normalize empty→`""`); delete `__irid_state_keys`
+   (preserve NULL props; plotly derives keys from props + drop client `.concat`).
+5. Payload envelope: `{ id, seq, data }` (§5) — wrap on the client
+   (`attachPayloadMeta`+`buildPayload`), unwrap in `irid_decode_payload`; **deletes
+   `__irid_seq` AND `nonce`** (§9.8).
 6. Unify control-flow rendering (§11): anchor When/Match bodies as child ranges,
    emit `irid-mutate` from the When/Match mount, delete the `irid-swap` handler +
    `IridSwapMessage`. Mostly mount.R + client; e2e covers When/Match/Each.
-7. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
-   rules) and `irid_decode_payload` (inbound envelope, promoted from the mount.R
-   inline). Land the encoder alongside the first R-touching step (it's where the
-   nesting/`I()`/normalization rules belong); value coercion stays per-widget.
-8. Split TS into `protocol/` directory with barrel `index.ts`.
-9. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
-
-Each step keeps the e2e suite green; the suite is what proves the wire still
-round-trips after each rename/nest.
+7. Split TS into `protocol/` directory (`wire.ts` + `widget.ts` + barrel `index.ts`).
+8. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
 
 ---
 
@@ -696,13 +709,11 @@ round-trips after each rename/nest.
 **Open:**
 
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
-  prefers one file, the section-layout fallback in §7 gives the same shapes.
-- **Is `PayloadMeta.nonce` vestigial?** Every payload is sent with
-  `{priority: "event"}`, and event-priority inputs are processed on every send
-  regardless of value equality — so the `Math.random()` nonce that forces distinctness
-  may be redundant. Verify with a ~10-line spike (two identical event-priority sends
-  with no nonce → does the `observeEvent` fire twice?); if so, the envelope shrinks to
-  `{ id, seq, data }`. Verify-then-maybe-delete, not a redesign.
+  prefers one file, the section-layout fallback in §7 gives the same shapes. This is
+  the *only* remaining open item — everything else below is decided.
+
+(Previously open, now resolved: `__irid_state_keys` deletion, branded ids, `nonce`
+deletion — all decided below or in §9.)
 
 **Decided — delete `irid-swap`; unify control-flow rendering on `irid-mutate`.**
 When/Match are **single-slot keyed reconciliation**: they already short-circuit,

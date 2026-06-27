@@ -168,5 +168,19 @@ j <- show("programmatic widget (no gate)", prog)
 check("omitted valueGates => no key on the wire", j, !grepl("valueGates", j, fixed = TRUE))
 
 # --------------------------------------------------------------------------
+section(7, "nonce is redundant — event-priority bypasses Shiny's dedup")
+# Every irid payload is sent with {priority:"event"}. Shiny's InputNoResendDecorator
+# dedups identical values, but its skip-`return` is guarded by `opts.priority !==
+# "event"` — so an event-priority input ALWAYS sends, even with an identical payload.
+# The Math.random() `nonce` (which existed only to force value distinctness) is
+# therefore vestigial. (Source read, not a toJSON check — re-confirm on shiny bump.)
+shiny_js <- system.file("www/shared/shiny.js", package = "shiny")
+guard <- grep('opts.priority !== "event"', readLines(shiny_js), fixed = TRUE, value = TRUE)
+cat("  shiny.js guard:", if (length(guard)) trimws(guard[1]) else "(NOT FOUND)", "\n")
+check("dedup `return` is guarded by priority!='event' (event-priority always sends)",
+      "", length(guard) >= 1 && grepl("lastSentValues", guard[1], fixed = TRUE) &&
+        grepl("jsonValue", guard[1], fixed = TRUE))
+
+# --------------------------------------------------------------------------
 cat(sprintf("\n--- %d passed, %d failed ---\n", pass, fail))
 if (fail > 0L) quit(status = 1L)
