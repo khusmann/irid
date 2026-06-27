@@ -527,7 +527,14 @@ Spike: [`dev/spikes/protocol-serialization.R`](spikes/protocol-serialization.R),
 run against the same `shiny:::toJSON` that `sendCustomMessage` uses (so the printed
 JSON *is* the client-side shape — for server→client custom messages the client gets
 `JSON.parse()` of it; `simplifyVector` only affects client→server inputs). **Pinned:
-shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 24/24 verdicts pass. Findings:
+shiny 1.7.4, jsonlite 2.0.0.** 24/24 verdicts pass. Findings:
+
+> **The spike is throwaway** — it settles the design now and is **deleted after
+> implementation**. "Re-confirm on bump" therefore lives in the **e2e suite**, not
+> here: the suite already exercises the real `toJSON` wire end-to-end (the app works
+> iff the encoder emits the right shapes), and the encoder's dev-mode self-assert (below)
+> backstops it in-process. The one assumption a normal e2e wouldn't exercise — Shiny's
+> event-priority *non*-dedup (finding 8) — gets a **dedicated permanent e2e** (§10 step 5).
 
 1. **Required booleans survive.** `coalesce = FALSE`, an all-false `domOpts`, and
    `clientOnly = FALSE` all reach the client as concrete scalars — `"coalesce":false`,
@@ -587,8 +594,10 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 24/24 verdicts pass. Findings
    "event"` (installed `shiny.js:11187`, shiny 1.7.4) — so an event-priority input *always* sends, even
    with an identical payload. The `Math.random()` nonce that forced distinctness is
    redundant; it's also read nowhere (set in payload.ts, stripped at mount.R:418). The
-   payload envelope is `{ id, seq, data }`. (Source read of the installed shiny.js,
-   re-confirm on shiny bump.)
+   payload envelope is `{ id, seq, data }`. **Durable guard:** the §10-step-5 e2e (two
+   identical consecutive events both reach the server) locks this and fails loudly if a
+   future Shiny makes event-priority dedup — that's the real "confirm on bump", not the
+   source read above (which only settles it now).
 
 Findings 2 and 4 are the load-bearing ones (NULL-kept-as-null; empty-text → `[]`).
 Finding 4 is the one genuine wire *fix* (normalize → `""`); the rest is the encoder
@@ -695,12 +704,18 @@ routes its sends through it, so build it in step 2 and grow it. Each step keeps 
    (preserve NULL props; plotly derives keys from props + drop client `.concat`).
 5. Payload envelope: `{ id, seq, data }` (§5) — wrap on the client
    (`attachPayloadMeta`+`buildPayload`), unwrap in `irid_decode_payload`; **deletes
-   `__irid_seq` AND `nonce`** (§9.8).
+   `__irid_seq` AND `nonce`** (§9.8). **Add a permanent e2e**: two identical
+   consecutive events (e.g. same button clicked twice, constant payload) both fire the
+   server observer — locks the nonce deletion and catches a Shiny event-priority
+   regression on bump (replaces the throwaway spike's finding 8).
 6. Unify control-flow rendering (§11): anchor When/Match bodies as child ranges,
    emit `irid-mutate` from the When/Match mount, delete the `irid-swap` handler +
    `IridSwapMessage`. Mostly mount.R + client; e2e covers When/Match/Each.
 7. Split TS into `protocol/` directory (`wire.ts` + `widget.ts` + barrel `index.ts`).
-8. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
+8. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections, and
+   **delete the throwaway spike** (`dev/spikes/protocol-serialization.R`) — its
+   load-bearing findings now live in durable tests (the e2e suite + the step-5
+   event-priority e2e) and the encoder's dev-mode self-assert.
 
 ---
 
