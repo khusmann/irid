@@ -42,17 +42,14 @@ impactful:
    the `window.irid` / `irid:ready` globals) have different stability contracts and
    different readers, but sit interleaved.
 
-5. **Wire-shape discipline is scattered across send sites.** The over-wide
-   `__irid_state_keys?: string | string[]` (and the client's defensive `.concat` at
-   [plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)) suggests a
-   length-1 unbox hazard — but R *already* defuses it ad-hoc: `as.list(names(state))`
-   at [plotly.R:345](../R/plotly.R#L345), `as.list(removes)` / `as.list(vapply(…,
-   USE.NAMES = FALSE))` at [mount.R:195-208](../R/mount.R#L195-L208) (with a 4-line
-   comment on the named-vector→JSON-object trap), the non-empty `value_meta` guard at
+5. **Wire-shape discipline is scattered across send sites.** Array fields are kept
+   array-safe ad-hoc — `as.list(removes)` / `as.list(vapply(…, USE.NAMES = FALSE))` at
+   [mount.R:195-208](../R/mount.R#L195-L208) (with a 4-line comment on the
+   named-vector→JSON-object trap) — and the non-empty `value_meta` guard sits inline at
    [mount.R:74](../R/mount.R#L74). The wire is clean *by scattered discipline* — every
    author must remember the `as.list`/`USE.NAMES`/guard tricks. That belongs in one
-   encoder (§9), and the type should just be `string[]`, not a union mirroring a
-   hazard the producer already handles.
+   encoder (§9). (The `__irid_state_keys` `string | string[]` over-wide type was a
+   third instance, now moot — the field is deleted via NULL-prop preservation, §11.)
 
 ---
 
@@ -86,9 +83,10 @@ Three axes organize everything:
   field set (every `msg.<field>` the client reads + every R sender key): the lone
   offender today is `value_meta`, fixed to `valueGates` by this redesign — after
   which the envelope is uniformly camelCase. Two non-camelCase categories are
-  *deliberate, not violations*: (1) the `__irid_*` prefixed internal fields
-  (`__irid_seq`, `__irid_state_keys`) — a namespace that avoids collision with user
-  event fields / widget props, so the prefix is load-bearing; (2) keys *inside*
+  *deliberate, not violations*: (1) the `__irid_*` prefixed fields existed only to
+  smuggle metadata into a foreign-keyed bag — **both are being deleted**, `__irid_seq`
+  by the §5 payload envelope and `__irid_state_keys` by NULL-prop preservation (§11),
+  so the prefix convention leaves the protocol entirely; (2) keys *inside*
   `values`/`props` (`xaxis_range`, `dragmode`, …) — these are the **widget's** own
   vocabulary (plotly's), not irid's protocol, so their casing is the widget author's
   call. The rule governs the protocol envelope, not payload data it carries.
@@ -331,7 +329,7 @@ can no longer be handed a widget entry.
 export interface IridWidgetInitMessage {
   id: ElementId;
   name: string;
-  props: WidgetProps;
+  props: Record<string, unknown>;   // see WidgetFactory's `props` param (§6)
 }
 ```
 
@@ -372,10 +370,10 @@ idiomatic "envelope wraps payload" shape, and it deletes the entire `__irid_*`
 convention from the client→server direction. `irid_decode_payload` becomes
 `event_obj <- payload$data` — a field read, no strip-list.
 
-(The other prefixed field, `__irid_state_keys`, is a *different* case — server→client
-metadata **delivered to** the widget factory via its `props` bag, not stripped before
-a user. The same instinct (lift it out of the foreign bag) applies but the mechanics
-differ; tracked as an open item in §11.)
+(The other prefixed field, `__irid_state_keys`, is deleted a *different* way — by
+fixing the NULL-prop dropping that forced it to exist, so the factory derives its
+state args from the full prop set. See §11. Net: both `__irid_*` fields gone, the
+prefix convention removed from the protocol.)
 
 ---
 
@@ -385,13 +383,10 @@ Separated because the audience and stability contract differ from the wire: this
 what a third-party widget author writes against.
 
 ```ts
-/** Merged props handed to a factory. `__irid_state_keys` is `string[]`, not the
- *  old `string | string[]`: R already array-wraps it (`as.list`, plotly.R:345), so
- *  the wire is always an array — the union was over-defensive. Tightening it lets the
- *  client drop its `.concat` widening (plotly/index.ts:259). No R change. */
-export type WidgetProps = Record<string, unknown> & {
-  __irid_state_keys?: string[];
-};
+// No `WidgetProps` alias: with `__irid_state_keys` gone (§11) it was a transparent
+// `Record<string, unknown>` — no constraint, no sibling to disambiguate from — so it
+// failed "earn your place" (cf. the id aliases, kept because they *disambiguate*).
+// The props contract lives on the factory's `props` param instead.
 
 export type SendEvent = (event: string, payload?: unknown) => void;
 export type SetProp   = (key: string, value: unknown) => void;
@@ -403,7 +398,10 @@ export interface WidgetHandle {
 
 export type WidgetFactory = (
   el: HTMLElement,
-  props: WidgetProps,
+  /** All declared props, callable and constant alike. The factory sees EVERY prop it
+   *  declared — including NULL-initialized reactives, which arrive as explicit `null`,
+   *  not absent (§11). plotly relies on this to derive its state args from the prop set. */
+  props: Record<string, unknown>,
   sendEvent: SendEvent,
   setProp: SetProp,
 ) => WidgetHandle | Promise<WidgetHandle>;
@@ -449,8 +447,8 @@ share, and there is none.
   `EchoGate`/`DomOpts`/`Timing`/`EventKind`), server→client messages, and
   client→server payloads. They live together because (a) every one of these types is
   wire-exclusive, and (b) the two directions are read *jointly* on a round-trip (the
-  outbound `gate` is gated against the `__irid_seq` the inbound `PayloadMeta` bumped
-  on the same `channel`). Direction is kept as in-file sections, not files.
+  outbound `gate` is gated against the `seq` the inbound `PayloadMeta` bumped on the
+  same `channel`). Direction is kept as in-file sections, not files.
 - `widget.ts` is the public, third-party-facing surface — different stability
   contract, so it's separate. It references *nothing* from `wire.ts`: its one
   would-be cross-reference (`irid:ready`'s detail) uses plain `string` (§6), so the
@@ -522,9 +520,13 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 16/16 verdicts pass. Findings
 4. **Array-forcing is real but already handled ad-hoc.** A length-1 char vector
    unboxes to a scalar (`"xaxis_range"`); `I()` or `as.list()` forces
    `["xaxis_range"]`; length ≥2 is already an array. The send sites *already* do this
-   — `as.list` for `__irid_state_keys` ([plotly.R:345](../R/plotly.R#L345)) and
-   `removes`/`inserts`/`order` ([mount.R:195-208](../R/mount.R#L195-L208)). So this
-   isn't a bug to fix but **scattered discipline to centralize** into the encoder.
+   — `as.list` for `removes`/`inserts`/`order` ([mount.R:195-208](../R/mount.R#L195-L208)).
+   So this isn't a bug to fix but **scattered discipline to centralize** into the
+   encoder.
+5. **TODO — NULL props must keep their key.** For the `__irid_state_keys` deletion
+   (§11), a NULL-valued widget prop must serialize as `"k": null`, not be dropped.
+   Confirm `props[k] <- list(NULL)` (vs `props[[k]] <- NULL`) keeps the key and
+   jsonlite (`null="null"`) emits `null`. Add to the spike.
 
 No surprises against the design. The empty-text normalization (point 3) is the one
 genuine wire *fix*; the rest is moving per-site shape discipline into the encoder.
@@ -538,8 +540,7 @@ Shiny's model. So predictability is a **producer-construction** concern, not a
 config knob — and the spike shows the non-determinism is narrow and enumerable:
 
 - **array-typed fields that are contingently length-1** unbox to a scalar
-  (`__irid_state_keys`, `removes`/`inserts`/`order`) — shape depends on runtime
-  *length*;
+  (`removes`/`inserts`/`order`) — shape depends on runtime *length*;
 - **empty/sentinel values** encode by content (`NULL` dropped, `character(0)` →
   `[]`, `NA` → `null`) — shape depends on runtime *content*.
 
@@ -559,7 +560,7 @@ rules, rather than scattering them across every `sendCustomMessage` site. Concre
 the encoder **absorbs the discipline that lives at the send sites today**, so callers
 pass semantic R values and carry no jsonlite knowledge:
 
-- array-typed fields (`removes`/`inserts`/`order`, `__irid_state_keys`) declared once
+- array-typed fields (`removes`/`inserts`/`order`) declared once
   as arrays → unnamed + `as.list`-wrapped centrally. This deletes the per-site
   `as.list`/`vapply(USE.NAMES = FALSE)` and the [mount.R:198-202](../R/mount.R#L198-L202)
   comment explaining the named-vector→JSON-object trap — that knowledge moves into the
@@ -616,7 +617,7 @@ encoder, backstopped by e2e and TS compile-time types.
 3. `irid-events` union: `IridEventCore` + `IridDomEvent | IridWidgetEvent`, nested
    `timing`/`domOpts`, drop `kind` null, narrow the ratelimit helpers.
 4. Renames + type tightenings: `inputId`→`channel`, ready `id`→`output` (optional),
-   `__irid_state_keys` `string|string[]`→`string[]` (TS-only; drop client `.concat`).
+   delete `__irid_state_keys` (preserve NULL props; plotly derives keys from props).
 5. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
    rules) and `irid_decode_payload` (inbound envelope, promoted from the mount.R
    inline). Land the encoder alongside the first R-touching step (it's where the
@@ -635,15 +636,21 @@ round-trips after each rename/nest.
 
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
-- **`__irid_state_keys` — lift it out of the `props` bag?** The §5 envelope deletes
-  `__irid_seq` smuggling, but `__irid_state_keys` is a different shape: server→client
-  metadata *delivered to* the widget factory (it reads `props.__irid_state_keys`,
-  plotly/index.ts:260), riding in the author's own `props` namespace. The same
-  instinct — give irid its own namespace instead of prefixing inside a foreign bag —
-  suggests lifting it to a top-level field on `IridWidgetInitMessage`
-  (`{ id, name, props, stateKeys }`). The open question is the factory contract: does
-  the factory get `stateKeys` as a separate arg, or does the client re-merge it into
-  `props` before calling? (Brainstorm pending.)
+
+**Decided — delete `__irid_state_keys` by preserving NULL props (root cause).** The
+field exists only because a NULL-initialized prop is dropped from the props bag (R's
+`props[[k]] <- NULL` removes the key), so the plotly factory can't discover it via
+`Object.keys(props)` and ships an explicit name list instead. Fix the *cause*
+generically: irid's widget-init seeding keeps a NULL-valued prop as explicit `null`
+(e.g. `props[k] <- list(NULL)` → jsonlite `null="null"` → `"k": null`), so every
+factory sees its **full declared prop set**. plotly then iterates `Object.keys(props)`
+through its existing `makeEntry` name-pattern — which already returns `null` for
+`spec`/unknown ([plotly/index.ts:250](../srcts/src/widgets/plotly/index.ts#L250)) — so
+no key list is needed. Generic (helps any widget), deletes the field with no
+replacement, and — with the §5 envelope — removes the `__irid_*` prefix from the
+protocol **entirely**. *Rejected* the alternative (lift to a top-level `stateKeys` on
+`IridWidgetInitMessage`): that puts one widget's domain data on the generic widget
+message — a layering violation.
 
 **Decided — plain aliases, not branded ids.** Use plain `type ElementId = string`
 etc. The aliases' real win is *documentation* of what each string resolves against,
