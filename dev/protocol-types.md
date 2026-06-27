@@ -1,8 +1,8 @@
 # Protocol Types — First-Principles Reorganization (proposal)
 
-Status: **design complete — ready to implement.** Start at §10 (commit plan +
-orientation); §11's only open item is split-vs-single-file (a preference). Run
-`dev/spikes/protocol-serialization.R` first to internalize the serialization contract.
+Status: **design complete — ready to implement; no open questions.** Start at §10
+(commit plan + orientation). Run `dev/spikes/protocol-serialization.R` first to
+internalize the serialization contract.
 
 Scope: the typed wire contract in [`srcts/src/protocol.ts`](../srcts/src/protocol.ts)
 — the single shape definition the R server (and a future Python server) target and
@@ -719,16 +719,17 @@ routes its sends through it, so build it in step 2 and grow it. Each step keeps 
 
 ---
 
-## 11. Open questions & rejected alternatives
+## 11. Decisions & rejected alternatives
 
-**Open:**
+**No open questions** — all decided.
 
-- **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
-  prefers one file, the section-layout fallback in §7 gives the same shapes. This is
-  the *only* remaining open item — everything else below is decided.
+**Decided — split into the `protocol/` directory** (`wire.ts` + `widget.ts` + barrel
+`index.ts`, §7), over a single section-layout file. Two files on the audience/stability
+boundary (internal wire vs public widget API); the type *shapes* are identical either
+way, so this is purely the file-organization call.
 
-(Previously open, now resolved: `__irid_state_keys` deletion, branded ids, `nonce`
-deletion — all decided below or in §9.)
+(Other resolved items, detailed below or in §9: `__irid_state_keys` deletion, branded
+ids, `nonce` deletion, `irid-swap` deletion, zod, `coalesce` placement.)
 
 **Decided — delete `irid-swap`; unify control-flow rendering on `irid-mutate`.**
 When/Match are **single-slot keyed reconciliation**: they already short-circuit,
