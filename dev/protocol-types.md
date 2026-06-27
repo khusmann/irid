@@ -42,9 +42,17 @@ impactful:
    the `window.irid` / `irid:ready` globals) have different stability contracts and
    different readers, but sit interleaved.
 
-5. **jsonlite artifacts leak into the type.** `__irid_state_keys?: string | string[]`
-   exists only because R collapses a length-1 vector to a scalar; every consumer
-   must re-normalize. The fix belongs at the R boundary, not in the type.
+5. **Wire-shape discipline is scattered across send sites.** The over-wide
+   `__irid_state_keys?: string | string[]` (and the client's defensive `.concat` at
+   [plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)) suggests a
+   length-1 unbox hazard — but R *already* defuses it ad-hoc: `as.list(names(state))`
+   at [plotly.R:345](../R/plotly.R#L345), `as.list(removes)` / `as.list(vapply(…,
+   USE.NAMES = FALSE))` at [mount.R:195-208](../R/mount.R#L195-L208) (with a 4-line
+   comment on the named-vector→JSON-object trap), the non-empty `value_meta` guard at
+   [mount.R:74](../R/mount.R#L74). The wire is clean *by scattered discipline* — every
+   author must remember the `as.list`/`USE.NAMES`/guard tricks. That belongs in one
+   encoder (§9), and the type should just be `string[]`, not a union mirroring a
+   hazard the producer already handles.
 
 ---
 
@@ -345,8 +353,10 @@ Separated because the audience and stability contract differ from the wire: this
 what a third-party widget author writes against.
 
 ```ts
-/** Merged props handed to a factory. `__irid_state_keys` is normalized to an
- *  array at the R boundary (see §7) — no more string | string[]. */
+/** Merged props handed to a factory. `__irid_state_keys` is `string[]`, not the
+ *  old `string | string[]`: R already array-wraps it (`as.list`, plotly.R:345), so
+ *  the wire is always an array — the union was over-defensive. Tightening it lets the
+ *  client drop its `.concat` widening (plotly/index.ts:259). No R change. */
 export type WidgetProps = Record<string, unknown> & {
   __irid_state_keys?: string[];
 };
@@ -440,17 +450,19 @@ edit so the bytes match the type:
 | Timing | flat `mode/ms/leading` → nested `timing` discriminated obj | [mount.R:364-366](../R/mount.R#L364-L366) |
 | DOM flags | flat 4 fields → nested `domOpts`; **omit on widget rows** | [mount.R:368-371](../R/mount.R#L368-L371) |
 | `kind` | drop from DOM rows entirely (already NULL→absent); required on widget | [mount.R:363](../R/mount.R#L363) |
-| Ready id | `id` → `output` | [app.R:20](../R/app.R#L20) |
-| state keys | `__irid_state_keys` always an array (wrap length-1) | [plotly.R:365](../R/plotly.R#L365) |
+| Ready id | `id` → `output` (optional; absent for `iridApp`) | [app.R:18-20](../R/app.R#L18) |
+| state keys | type-only: `string\|string[]` → `string[]` + drop client `.concat` ([plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)). **R already array-wraps** (`as.list`, no R change) | [plotly.R:345](../R/plotly.R#L345) |
+| array fields | move `as.list`/`USE.NAMES=FALSE` for `removes`/`inserts`/`order` into the encoder (no behavior change, cleanup) | [mount.R:195-208](../R/mount.R#L195-L208) |
 | text value | drop `number`; normalize empty/`NA`/`character(0)` → `""` so wire is `string` | [mount.R:39-500](../R/mount.R#L39) (`coerce_text_child`) |
 
 Note `coalesce` stays a carrier-level field, now **required**: R must resolve the
 NULL→mode default *before* send so the wire value is a concrete boolean. Same for
 the other default-elision fields made required above (`domOpts` + its flags,
 `clientOnly`, throttle `leading`, `staleTimeout`) — the producer materializes them,
-and the client drops its defensive `!!`/coercion reads
-([ratelimit.ts:158](../srcts/src/core/ratelimit.ts#L158), the `!!msg.coalesce`
-read, etc.). This is the "producer owns defaults" rule from §2 applied concretely.
+and the client drops its defensive `!!`/coercion reads (the `domOpts` `!!` at
+[ratelimit.ts:158](../srcts/src/core/ratelimit.ts#L158); the `!!msg.coalesce` reads at
+[ratelimit.ts:194,263,322](../srcts/src/core/ratelimit.ts#L194)). This is the
+"producer owns defaults" rule from §2 applied concretely.
 
 ---
 
@@ -475,12 +487,15 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 16/16 verdicts pass. Findings
    `character(0)` → serializes as `[]`; `NA_character_` → `null`; `""` → `""`. So the
    honest current wire type is `string | null | []` — `value: string` only holds
    once R normalizes empty/`NA`/`character(0)` → `""` (the §8 row).
-4. **`__irid_state_keys` array-forcing confirmed.** A length-1 char vector unboxes to
-   a scalar (`"xaxis_range"`, the bug); `I()` or `as.list()` forces `["xaxis_range"]`;
-   length ≥2 is already an array. Use `I()` at the send site.
+4. **Array-forcing is real but already handled ad-hoc.** A length-1 char vector
+   unboxes to a scalar (`"xaxis_range"`); `I()` or `as.list()` forces
+   `["xaxis_range"]`; length ≥2 is already an array. The send sites *already* do this
+   — `as.list` for `__irid_state_keys` ([plotly.R:345](../R/plotly.R#L345)) and
+   `removes`/`inserts`/`order` ([mount.R:195-208](../R/mount.R#L195-L208)). So this
+   isn't a bug to fix but **scattered discipline to centralize** into the encoder.
 
-No surprises against the design — the only action item the spike *surfaces* (vs.
-merely confirms) is the empty-text normalization, already captured in §8.
+No surprises against the design. The empty-text normalization (point 3) is the one
+genuine wire *fix*; the rest is moving per-site shape discipline into the encoder.
 
 ### Predictable serialization — a producer-side encoder
 
@@ -507,13 +522,26 @@ protocol type*, never the runtime value:
 - required fields resolve `NULL` defaults to concrete values before send.
 
 **Centralize this in one producer-side wire encoder** — a thin `irid_*` message
-constructor per message type (mirroring the protocol types in §4–6) that applies the
-rules, rather than scattering `I()` across every `sendCustomMessage` site. Strictness
-then lives in one place that tracks the type definitions. It also gives a natural
-**dev-mode assertion**: the encoder can re-parse its own output and check it against
-the expected shape (or a JSON Schema generated from the protocol) in debug builds —
-which would have caught the `character(0)` → `[]` wart automatically. This is the
-R-side embodiment of the "producer emits total values" rule (§2).
+constructor per message type (mirroring the protocol types in §4–5) that applies the
+rules, rather than scattering them across every `sendCustomMessage` site. Concretely,
+the encoder **absorbs the discipline that lives at the send sites today**, so callers
+pass semantic R values and carry no jsonlite knowledge:
+
+- array-typed fields (`removes`/`inserts`/`order`, `__irid_state_keys`) declared once
+  as arrays → unnamed + `as.list`-wrapped centrally. This deletes the per-site
+  `as.list`/`vapply(USE.NAMES = FALSE)` and the [mount.R:198-202](../R/mount.R#L198-L202)
+  comment explaining the named-vector→JSON-object trap — that knowledge moves into the
+  encoder, where it's stated once.
+- `string` fields normalize empty/`NA`/`character(0)` → `""` (the one genuine fix).
+- sparse maps (`valueGates`) omit when empty — the [mount.R:74](../R/mount.R#L74) guard
+  becomes the encoder's job.
+- required fields resolve `NULL` defaults to concrete values before send.
+
+Strictness then lives in one place that tracks the type definitions. It also gives a
+natural **dev-mode assertion**: the encoder can re-parse its own output and check it
+against the expected shape (or a JSON Schema generated from the protocol) in debug
+builds — which would have caught the `character(0)` → `[]` wart automatically. This is
+the R-side embodiment of the "producer emits total values" rule (§2).
 
 ### Inbound decode — the symmetric half
 
@@ -553,7 +581,8 @@ encoder, backstopped by e2e and TS compile-time types.
    `isStaleEcho` to take a gate. (TS + R + handler together.)
 3. `irid-events` union: `IridEventCore` + `IridDomEvent | IridWidgetEvent`, nested
    `timing`/`domOpts`, drop `kind` null, narrow the ratelimit helpers.
-4. Renames: `inputId`→`channel`, ready `id`→`output`, `__irid_state_keys`→array.
+4. Renames + type tightenings: `inputId`→`channel`, ready `id`→`output` (optional),
+   `__irid_state_keys` `string|string[]`→`string[]` (TS-only; drop client `.concat`).
 5. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
    rules) and `irid_decode_payload` (inbound envelope, promoted from the mount.R
    inline). Land the encoder alongside the first R-touching step (it's where the
