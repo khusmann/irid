@@ -134,19 +134,20 @@ export interface EchoGate {
   channel: Channel;       // same-file alias (see Vocabulary above)
 }
 
-// --- DOM listener flags ----------------------------------------------------
-// Mirrors R's `wire_dom_opts()`. DOM-only; a widget channel has no listener.
-// Fully required, and the `domOpts` member that carries it is required too (see
-// IridDomEvent): there is no semantic difference between an absent DomOpts and an
-// all-false one — a "plain listener" IS the all-false record — so absence would be
-// pure default-elision. R already materializes the full record on every dom row;
-// the type stops under-describing it, and the client reads each flag directly
-// (no `!!` coercion).
+// --- DOM listener options --------------------------------------------------
+// Mirrors R's `wire_dom_opts(prevent_default, stop_propagation, capture, passive,
+// filter)` 1:1 (event.R:119). DOM-only; a widget channel has no listener. The four
+// flags are required — R materializes them on every dom row, absent ≡ the `false`
+// default (pure elision), and the client reads each directly (no `!!`). `filter` is
+// optional: its R default is NULL (semantic absence — "no predicate"), so it follows
+// the gate?/filter? rule. The `domOpts` member that carries this is required too:
+// an absent DomOpts would just re-encode {4 false, no filter} — a plain listener.
 export interface DomOpts {
   preventDefault: boolean;
   stopPropagation: boolean;
   capture: boolean;
   passive: boolean;
+  filter?: string;        // JS predicate over the DOM event `e`; absent = no filter
 }
 
 // --- Rate-limit timing -----------------------------------------------------
@@ -298,12 +299,11 @@ export interface IridEventCore {
                           // arm-vs-carrier rule); R resolves NULL→mode default
 }
 
-/** DOM event: carries listener flags + the DOM-only escape hatches. */
+/** DOM event: the listener options (incl. filter) + the config-only flag. */
 export type IridDomEvent = IridEventCore & {
   source: "dom";
-  domOpts: DomOpts;       // required: absent ≡ all-false, pure elision (see DomOpts)
+  domOpts: DomOpts;       // required; carries the flags AND filter (= wire_dom_opts)
   clientOnly: boolean;    // config-only wire: attach flags, never round-trip
-  filter?: string;        // optional: absence is SEMANTIC (no predicate at all)
 };
 
 /** Widget event: carries kind; no DOM flags (no listener is attached). */
