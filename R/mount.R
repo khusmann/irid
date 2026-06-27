@@ -13,10 +13,10 @@
 #'
 #' The stale-echo gate is keyed PER CHANNEL, and a batch can mix props from
 #' different channels (e.g. `xaxis_range` + `yaxis_range` from one box zoom),
-#' so the sequence travels per key: `value_meta: {attr -> {seq, channel}}`.
+#' so the sequence travels per key: `valueGates: {attr -> {seq, channel}}`.
 #' A key contributed without a sequence (purely programmatic) gets no
-#' `value_meta` entry and the client applies it unconditionally; a batch with
-#' no gated keys carries no `value_meta` at all.
+#' `valueGates` entry and the client applies it unconditionally; a batch with
+#' no gated keys carries no `valueGates` at all.
 #'
 #' Batching is intra-flush only: a prop updating in one flush and another in
 #' a later flush still produces two messages.
