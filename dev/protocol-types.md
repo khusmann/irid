@@ -262,12 +262,19 @@ export interface IridAttrText {
 export interface IridAttrWidget {
   target: "widget";
   id: ElementId;
-  values: Record<string, unknown>;        // { attr -> value }, ≥1 key
-  valueGates?: Record<string, EchoGate>;  // was value_meta. Sparse: an entry only
-                                          // for a key that came from a client write;
-                                          // an absent key is programmatic. R sends
-                                          // the map only when non-empty (mount.R:74),
-                                          // so absent is the one canonical "none".
+  values: Record<string, unknown>;        // { attr -> value }, ≥1 key. The DATA —
+                                          // always present (contrast valueGates).
+  valueGates?: Record<string, EchoGate>;  // was value_meta. Sparse gate ANNOTATION:
+                                          // an entry only for a key from a client
+                                          // write; absent key = programmatic. Omitted
+                                          // (not present-empty `{}`) when no key is
+                                          // gated: `{}` and undefined are semantically
+                                          // identical here (both = all-programmatic),
+                                          // so pick one — and omit matches the scalar
+                                          // `gate` (same echo-gate concept: the gate
+                                          // field is ABSENT when no gating context, at
+                                          // both cardinalities). Programmatic is the
+                                          // common path, so `{}` would be noise.
 }
 ```
 
