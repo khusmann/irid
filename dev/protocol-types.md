@@ -357,19 +357,32 @@ declare global {
 
 ```
 srcts/src/protocol/
-  common.ts     identity aliases, EchoGate, DomOpts, Timing, EventKind
-  messages.ts   server -> client custom messages
-  payloads.ts   client -> server payloads
-  widget.ts     public widget-author API + window/document globals
-  index.ts      barrel: `export * from "./common"`, etc.
+  common.ts   shared vocabulary: identity aliases, EchoGate, DomOpts, Timing, EventKind
+  wire.ts     the transport contract — both directions (messages + payloads),
+              as two labeled sections: `// Server → client` / `// Client → server`
+  widget.ts   public widget-author API + window/document globals
+  index.ts    barrel: `export * from "./common"`, etc.
 ```
 
+The file boundaries follow **audience/stability** and **shared vocabulary**, not
+direction:
+
+- `common.ts` is the shared axis — referenced by *both* `wire.ts` and `widget.ts`
+  (e.g. `irid:ready`'s detail uses `OutputName`), so it's its own file.
+- `wire.ts` is the internal transport contract. Server→client messages and
+  client→server payloads live together because they're one layer read *jointly* on a
+  round-trip (the outbound `gate` is gated against the `__irid_seq` the inbound
+  `PayloadMeta` bumped on the same `channel`) — splitting them fights that mental
+  model, and the payload half alone is only two types. The direction distinction is
+  kept as in-file sections, not separate files.
+- `widget.ts` is the public, third-party-facing surface — different stability
+  contract from the wire, so it's separate.
+
 `index.ts` keeps the single import surface (`import type { … } from "../protocol"`
-still works if the directory is named `protocol/` with an `index.ts`). This is a
-modest split — ~220 lines into four focused files — justified by the two-audience
-and direction axes, not by size. If we'd rather not split, the fallback is one file
-with these as four labeled sections and the vocabulary hoisted to the top; the type
-*shapes* are identical either way.
+still works with the directory + `index.ts`). Three substantive files on the axes
+that matter. If we'd rather not split at all, the fallback is one file with these as
+labeled sections and the vocabulary hoisted to the top; the type *shapes* are
+identical either way.
 
 ---
 
