@@ -1,6 +1,6 @@
 irid_send_config <- function(session) {
-  session$sendCustomMessage("irid-config", list(
-    staleTimeout = getOption("irid.stale_timeout", default = 200)
+  session$sendCustomMessage("irid-config", irid_encode_config(
+    getOption("irid.stale_timeout", default = 200)
   ))
 }
 
@@ -15,9 +15,9 @@ irid_send_config <- function(session) {
 # `irid-events`, so by WebSocket ordering a client that has seen `irid-ready`
 # has every listener attached and every server observer registered. The e2e
 # harness waits on this before driving the first interaction (see helper-e2e.R).
-irid_send_ready <- function(session, id = NULL) {
+irid_send_ready <- function(session, output = NULL) {
   session$onFlushed(function() {
-    session$sendCustomMessage("irid-ready", list(id = id))
+    session$sendCustomMessage("irid-ready", irid_encode_ready(output))
   }, once = TRUE)
 }
 
@@ -91,7 +91,7 @@ renderIrid <- function(expr, env = parent.frame(), quoted = FALSE) {
     session$onFlushed(function() {
       irid_send_config(session)
       irid_mount_processed(result, session)
-      irid_send_ready(session, id = output_name)
+      irid_send_ready(session, output = output_name)
     }, once = TRUE)
 
     result$tag

@@ -168,8 +168,8 @@ test_that("widget event messages carry kind and a namespaced inputId", {
   expect_equal(bykind$v$kind, "prop")
   expect_equal(bykind$ping$kind, "event")
   # inputId is namespaced (the client's managed key / send target).
-  expect_true(grepl("^mock-session-irid_prop_.*_v$", bykind$v$inputId))
-  expect_true(grepl("^mock-session-irid_ev_.*_ping$", bykind$ping$inputId))
+  expect_true(grepl("^mock-session-irid_prop_.*_v$", bykind$v$channel))
+  expect_true(grepl("^mock-session-irid_ev_.*_ping$", bykind$ping$channel))
 
   handle$destroy()
 })

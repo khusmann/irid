@@ -41,11 +41,8 @@ const eventsRegistered = new Set<string>(); // `${inputId}` keys
 
 export function registerHandlers(): void {
   Shiny.addCustomMessageHandler("irid-config", (msg: IridConfigMessage) => {
-    if (msg.staleTimeout !== undefined && msg.staleTimeout !== null) {
-      setStaleTimeout(msg.staleTimeout);
-    } else {
-      setStaleTimeout(null);
-    }
+    // staleTimeout is materialized (always present); `null` disables the indicator.
+    setStaleTimeout(msg.staleTimeout);
   });
 
   Shiny.addCustomMessageHandler("irid-attr", (msg: IridAttrMessage) => {
@@ -90,9 +87,9 @@ export function registerHandlers(): void {
         parent.removeChild(n);
         n = next;
       }
-      const val = msg.value;
-      if (val !== null && val !== undefined && val !== "") {
-        parent.insertBefore(document.createTextNode(String(val)), a.end);
+      // `value` is a string; "" is the canonical "clear the range" signal.
+      if (msg.value !== "") {
+        parent.insertBefore(document.createTextNode(msg.value), a.end);
       }
       return;
     }
@@ -204,7 +201,7 @@ export function registerHandlers(): void {
   Shiny.addCustomMessageHandler("irid-events", (msgs: IridEventEntry[]) => {
     msgs.forEach((msg) => {
       // Key on the (namespaced) inputId — unique per id/event/kind.
-      const key = msg.inputId;
+      const key = msg.channel;
       if (eventsRegistered.has(key)) return;
       // DOM events need the element to exist for addEventListener; widget events
       // bypass that step.
@@ -226,7 +223,7 @@ export function registerHandlers(): void {
       // Index widget streams by the {kind}:{id}:{event} triple a factory resolves.
       if (msg.source === "widget") {
         widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] =
-          managed[msg.inputId];
+          managed[msg.channel];
       }
     });
   });
@@ -246,8 +243,9 @@ export function registerHandlers(): void {
   // the "missed the event" escape hatch. The e2e harness waits on the flag.
   Shiny.addCustomMessageHandler("irid-ready", (msg: IridReadyMessage) => {
     window.__iridReady = true;
+    // Wire `output` is optional/omitted; the public DOM detail uses null.
     document.dispatchEvent(
-      new CustomEvent("irid:ready", { detail: { id: msg?.id ?? null } }),
+      new CustomEvent("irid:ready", { detail: { id: msg?.output ?? null } }),
     );
   });
 }

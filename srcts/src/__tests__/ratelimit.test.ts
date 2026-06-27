@@ -39,7 +39,7 @@ function msg(over: Partial<IridWidgetEvent>): IridWidgetEvent {
   return {
     id: "el",
     event: "input",
-    inputId: "in",
+    channel: "in",
     source: "widget",
     kind: "event",
     timing: { mode: "immediate" },
@@ -50,7 +50,7 @@ function msg(over: Partial<IridWidgetEvent>): IridWidgetEvent {
 
 describe("debounce", () => {
   it("sends once after the window, with the latest payload", () => {
-    const s = setupDebounce(null, msg({ id: "d", inputId: "din" }), 200);
+    const s = setupDebounce(null, msg({ id: "d", channel: "din" }), 200);
     s.dispatch({ value: "a" });
     vi.advanceTimersByTime(100);
     s.dispatch({ value: "b" }); // resets the window
@@ -63,7 +63,7 @@ describe("debounce", () => {
 
 describe("throttle (leading)", () => {
   it("fires immediately, then a trailing event after the window", () => {
-    const s = setupThrottle(null, msg({ id: "t", inputId: "tin" }), 100, true);
+    const s = setupThrottle(null, msg({ id: "t", channel: "tin" }), 100, true);
     s.dispatch({ v: 1 });
     expect(sent).toEqual([{ inputId: "tin", payload: { v: 1 } }]); // leading edge
     s.dispatch({ v: 2 }); // during cooldown -> buffered as trailing
@@ -80,8 +80,8 @@ describe("per-element ordering queue", () => {
   it("an immediate event preempts a still-debouncing one on the same element", () => {
     // The canonical bug: typing (debounced input) then Enter (immediate keydown)
     // on the same element — the Enter must not overtake the buffered input.
-    const d = setupDebounce(null, msg({ id: "shared", inputId: "d" }), 200);
-    const i = setupImmediate(null, msg({ id: "shared", inputId: "i" }));
+    const d = setupDebounce(null, msg({ id: "shared", channel: "d" }), 200);
+    const i = setupImmediate(null, msg({ id: "shared", channel: "i" }));
     d.dispatch({ value: "typed" }); // joins queue, timer running, not yet sent
     expect(sent).toHaveLength(0);
     i.dispatch({ key: "Enter" }); // ready now -> drains, preempting the debounce
@@ -92,8 +92,8 @@ describe("per-element ordering queue", () => {
   });
 
   it("does not couple streams on different elements", () => {
-    const a = setupDebounce(null, msg({ id: "elA", inputId: "a" }), 200);
-    const b = setupImmediate(null, msg({ id: "elB", inputId: "b" }));
+    const a = setupDebounce(null, msg({ id: "elA", channel: "a" }), 200);
+    const b = setupImmediate(null, msg({ id: "elB", channel: "b" }));
     a.dispatch({ value: "x" });
     b.dispatch({ key: "y" }); // different element: sends without touching a
     expect(sent).toEqual([{ inputId: "b", payload: { key: "y" } }]);

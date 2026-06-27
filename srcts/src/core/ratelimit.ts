@@ -154,7 +154,7 @@ function attachListener(
       if (filter && !filter(e)) return;
       if (opts.preventDefault) e.preventDefault();
       if (opts.stopPropagation) e.stopPropagation();
-      dispatch(buildPayload(e, el, msg.id, msg.inputId));
+      dispatch(buildPayload(e, el, msg.id, msg.channel));
     },
     { capture: opts.capture, passive: opts.passive },
   );
@@ -190,7 +190,7 @@ export function setupThrottle(
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     timerRunning: false,
     timerReady: false,
@@ -248,7 +248,7 @@ export function setupThrottle(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }
@@ -260,7 +260,7 @@ export function setupDebounce(
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     timerId: null,
     timerReady: false,
@@ -308,7 +308,7 @@ export function setupDebounce(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }
@@ -321,7 +321,7 @@ export function setupImmediate(
   // event can preemptively flush a sibling debounced stream before sending.
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     serverBusy: false,
     coalesce: msg.coalesce,
@@ -354,7 +354,7 @@ export function setupImmediate(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }

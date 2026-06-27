@@ -311,15 +311,15 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   for (wi in result$widget_inits) {
     props <- wi$static_props
     for (key in names(wi$prop_fns)) {
-      props[[key]] <- isolate(wi$prop_fns[[key]]())
+      # Single-bracket assignment so a NULL-initialized reactive prop keeps its
+      # key as explicit `null` (the encoder emits `"k":null`), giving the factory
+      # its full declared prop set — the root-cause fix that deletes
+      # `__irid_state_keys`. (`[[<-` with NULL would drop the key.)
+      props[key] <- list(isolate(wi$prop_fns[[key]]()))
     }
-    props <- irid_jsonify_names(props)
     deliver_widget_deps(session, wi$deps)
-    session$sendCustomMessage("irid-widget-init", list(
-      id = wi$id,
-      name = wi$name,
-      props = props
-    ))
+    session$sendCustomMessage("irid-widget-init",
+      irid_encode_widget_init(wi$id, wi$name, props))
   }
 
   # Set up event listeners

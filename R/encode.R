@@ -56,6 +56,28 @@ irid_jsonify_names <- function(value) {
   value
 }
 
+# --- lifecycle message constructors ----------------------------------------
+
+# irid-config: materialized stale-timeout (always present; `null` disables).
+irid_encode_config <- function(stale_timeout) {
+  list(staleTimeout = stale_timeout)
+}
+
+# irid-ready: `output` is present only for a renderIrid/iridOutput mount; it is
+# OMITTED for a top-level iridApp mount (no output name exists), never sent as null.
+irid_encode_ready <- function(output) {
+  msg <- list()
+  if (!is.null(output)) msg$output <- output
+  msg
+}
+
+# irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
+# props are kept as explicit `null` so the factory sees its full declared prop set
+# (the root-cause fix that deletes `__irid_state_keys`).
+irid_encode_widget_init <- function(id, name, props) {
+  list(id = id, name = name, props = wire_map(props))
+}
+
 # --- irid-attr message constructors ----------------------------------------
 
 # DOM property/attribute write. `gate` is omitted for a programmatic write.
@@ -112,7 +134,7 @@ irid_encode_event <- function(ev, channel, client_only) {
   msg <- list(
     id = ev$id,
     event = ev$event,
-    inputId = channel,
+    channel = channel,
     source = ev$source,
     timing = irid_encode_timing(ev$mode, ev$ms, ev$leading),
     coalesce = ev$coalesce

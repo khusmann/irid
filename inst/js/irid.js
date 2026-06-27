@@ -181,7 +181,7 @@
         if (filter && !filter(e)) return;
         if (opts.preventDefault) e.preventDefault();
         if (opts.stopPropagation) e.stopPropagation();
-        dispatch(buildPayload(e, el, msg.id, msg.inputId));
+        dispatch(buildPayload(e, el, msg.id, msg.channel));
       },
       { capture: opts.capture, passive: opts.passive }
     );
@@ -203,7 +203,7 @@
   function setupThrottle(el, msg, ms, leading) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       timerRunning: false,
       timerReady: false,
@@ -256,14 +256,14 @@
       s.timerReady = false;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
   function setupDebounce(el, msg, ms) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       timerId: null,
       timerReady: false,
@@ -308,14 +308,14 @@
       s.payload = null;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
   function setupImmediate(el, msg) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       serverBusy: false,
       coalesce: msg.coalesce,
@@ -345,7 +345,7 @@
       s.payload = null;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
@@ -534,11 +534,7 @@
   var eventsRegistered = /* @__PURE__ */ new Set();
   function registerHandlers() {
     Shiny.addCustomMessageHandler("irid-config", (msg) => {
-      if (msg.staleTimeout !== void 0 && msg.staleTimeout !== null) {
-        setStaleTimeout(msg.staleTimeout);
-      } else {
-        setStaleTimeout(null);
-      }
+      setStaleTimeout(msg.staleTimeout);
     });
     Shiny.addCustomMessageHandler("irid-attr", (msg) => {
       if (msg.target === "widget") {
@@ -574,9 +570,8 @@
           parent.removeChild(n);
           n = next;
         }
-        const val = msg.value;
-        if (val !== null && val !== void 0 && val !== "") {
-          parent.insertBefore(document.createTextNode(String(val)), a.end);
+        if (msg.value !== "") {
+          parent.insertBefore(document.createTextNode(msg.value), a.end);
         }
         return;
       }
@@ -661,7 +656,7 @@
     });
     Shiny.addCustomMessageHandler("irid-events", (msgs) => {
       msgs.forEach((msg) => {
-        const key = msg.inputId;
+        const key = msg.channel;
         if (eventsRegistered.has(key)) return;
         const el = document.getElementById(msg.id);
         if (msg.source !== "widget" && !el) return;
@@ -678,7 +673,7 @@
           setupImmediate(el, msg);
         }
         if (msg.source === "widget") {
-          widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] = managed[msg.inputId];
+          widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] = managed[msg.channel];
         }
       });
     });
@@ -692,7 +687,7 @@
       var _a;
       window.__iridReady = true;
       document.dispatchEvent(
-        new CustomEvent("irid:ready", { detail: { id: (_a = msg == null ? void 0 : msg.id) != null ? _a : null } })
+        new CustomEvent("irid:ready", { detail: { id: (_a = msg == null ? void 0 : msg.output) != null ? _a : null } })
       );
     });
   }

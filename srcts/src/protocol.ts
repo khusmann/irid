@@ -62,8 +62,9 @@ export type Timing =
 
 /** `irid-config` — runtime options pushed at session start. */
 export interface IridConfigMessage {
-  /** ms before the stale indicator shows; `null` disables it. */
-  staleTimeout?: number | null;
+  /** ms before the stale indicator shows; `null` disables it. Materialized config
+   *  field: required, with `null` its off value (R always sends it, default 200). */
+  staleTimeout: number | null;
 }
 
 /** `irid-attr` — a binding update; discriminated on `target`. */
@@ -87,7 +88,10 @@ export interface IridAttrDom {
 export interface IridAttrText {
   target: "text";
   id: AnchorId;
-  value: string | number | null;
+  /** `string`, not `string | number | null`: `number` is dead (R runs
+   *  `as.character()` before send), and the producer normalizes empty/NA to `""`
+   *  (the canonical clear signal), so the wire type is exactly `string`. */
+  value: string;
 }
 
 /** Coalesced batch routed to a widget's `update()` hook. */
@@ -135,8 +139,9 @@ export interface IridEventCore {
   id: ElementId;
   /** The DOM/widget event NAME. */
   event: string;
-  /** The Shiny input id the client sends on AND the per-channel sequence key. */
-  inputId: Channel;
+  /** The Shiny input id the client sends on AND the per-channel sequence key.
+   *  Replaces the old `inputId` — one name for one value. */
+  channel: Channel;
   /** Nested timing; `ms`/`leading` live inside per mode. */
   timing: Timing;
   /** Carrier-level (orthogonal to mode); R resolves NULL -> mode default. */
@@ -162,18 +167,20 @@ export type IridEventEntry = IridDomEvent | IridWidgetEvent;
 
 /** `irid-widget-init` — mount a widget instance into its container. */
 export interface IridWidgetInitMessage {
-  id: string;
+  id: ElementId;
   name: string;
-  props: WidgetProps;
+  props: Record<string, unknown>;
 }
 
 /**
  * `irid-ready` — a mount is fully wired (listeners attached, server observers
- * registered). `id` is the output name for a `renderIrid`/`iridOutput` mount,
- * absent for a top-level `iridApp` mount.
+ * registered). `output` is the output name for a `renderIrid`/`iridOutput` mount,
+ * and ABSENT for a top-level `iridApp` mount (no output name exists). Optional, not
+ * `| null`: top-level is semantic absence, one canonical encoding. The client maps
+ * absent -> null only when synthesizing the public `irid:ready` detail.
  */
 export interface IridReadyMessage {
-  id?: string | null;
+  output?: OutputName;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,15 +201,6 @@ export type EventPayload = PayloadMeta & Record<string, unknown>;
 // ---------------------------------------------------------------------------
 // Public client API (window.irid) + widget-author contract
 // ---------------------------------------------------------------------------
-
-/**
- * The merged props object handed to a factory: all props (callable and constant
- * alike) flattened. `__irid_state_keys` lists state args that may have been
- * dropped from the object when `null`-initialized.
- */
-export type WidgetProps = Record<string, unknown> & {
-  __irid_state_keys?: string | string[];
-};
 
 /** Push a widget notification (no-op if no R subscriber). */
 export type SendEvent = (event: string, payload?: unknown) => void;
@@ -225,7 +223,11 @@ export interface WidgetHandle {
  */
 export type WidgetFactory = (
   el: HTMLElement,
-  props: WidgetProps,
+  /** All declared props, callable and constant alike. The factory sees EVERY prop
+   *  it declared — including NULL-initialized reactives, which arrive as explicit
+   *  `null`, not absent. plotly relies on this to derive its state args from the
+   *  prop set. */
+  props: Record<string, unknown>,
   sendEvent: SendEvent,
   setProp: SetProp,
 ) => WidgetHandle | Promise<WidgetHandle>;

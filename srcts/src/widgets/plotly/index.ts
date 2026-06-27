@@ -24,7 +24,7 @@ import {
   type RelayoutPayload,
   type VisibilityMap,
 } from "./pure";
-import type { SetProp, WidgetHandle, WidgetProps } from "../../protocol";
+import type { SetProp, WidgetHandle } from "../../protocol";
 
 interface PlotlyHTMLElement extends HTMLElement {
   data: PlotlyTrace[];
@@ -87,7 +87,7 @@ window.irid.defineWidget(
   "plotly",
   async function (
     el: HTMLElement,
-    props: WidgetProps,
+    props: Record<string, unknown>,
     sendEvent,
     setProp: SetProp,
   ): Promise<WidgetHandle> {
@@ -254,17 +254,15 @@ window.irid.defineWidget(
       return null; // unknown — R side already rejected these; ignore defensively
     }
 
-    // Build entries from the explicit bound-key list, not Object.keys(props): a
-    // NULL-initialized state arg is dropped from the init props object.
-    const stateKeys = ([] as string[]).concat(
-      (props.__irid_state_keys as string | string[] | undefined) || [],
-    );
+    // Derive entries from the full prop set: NULL-initialized state args are now
+    // preserved as explicit `null` in props (no `__irid_state_keys` list needed).
+    // makeEntry returns null for `spec`/unknown keys, so they're skipped.
     const entries: Entry[] = [];
-    stateKeys.forEach((key) => {
+    Object.keys(props).forEach((key) => {
       const e = makeEntry(key);
       if (e) {
         entries.push(e);
-        state[key] = key in props ? props[key] : null;
+        state[key] = props[key];
       }
     });
 

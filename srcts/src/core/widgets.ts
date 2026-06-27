@@ -15,7 +15,6 @@ import type {
   SetProp,
   WidgetFactory,
   WidgetHandle,
-  WidgetProps,
 } from "../protocol";
 
 interface WidgetEntry {
@@ -26,14 +25,14 @@ interface WidgetEntry {
 }
 
 const defined = new Map<string, WidgetFactory>();
-const pendingInits: Record<string, Array<{ id: string; props: WidgetProps }>> =
+const pendingInits: Record<string, Array<{ id: string; props: Record<string, unknown> }>> =
   {};
 export const widgets: Record<string, WidgetEntry> = {};
 
 function mountWidget(
   id: string,
   name: string,
-  props: WidgetProps,
+  props: Record<string, unknown>,
   factory: WidgetFactory,
 ): void {
   if (widgets[id]) return; // idempotent — duplicate init (in-flight or live)
