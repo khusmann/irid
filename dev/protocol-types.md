@@ -203,6 +203,8 @@ export interface IridAttrDom {
                             // absence (not elision): absent = programmatic write,
                             // no client channel to gate against. There is no
                             // "default gate" — so it stays optional by the §2 rule.
+                            // Only dom carries this (value/checked echoes on focused
+                            // inputs); text never does (see IridAttrText).
 }
 
 /** Text replacement inside a comment-anchor range. */
@@ -220,7 +222,13 @@ export interface IridAttrText {
   // must normalize the empty/NA case to "" (or NULL→clean null if we keep
   // `string | null`). Until then the truthful wire type is `string | null | []`.
   value: string;
-  gate?: EchoGate;          // semantic absence, as above
+  // NO gate. The echo gate exists for cursor/focus preservation on a controlled
+  // input being typed into; a text node is display-only — you can't type into a
+  // comment-anchor range. Structurally, "text" is never an event `write_target` and
+  // an anchor id is never an event source, so the seq/channel lookup is always NULL
+  // for a text binding (mount.R:493) — the field is dead today. A text echo is
+  // always programmatic and applies unconditionally. Gate lives only on dom +
+  // widget.
 }
 
 /** Coalesced batch routed to a widget's update() hook. */
@@ -237,8 +245,8 @@ export interface IridAttrWidget {
 ```
 
 `isStaleEcho` becomes `(gate: EchoGate | undefined, seqs) => boolean` — one shape,
-called identically from the dom/text path (`msg.gate`) and the widget per-key path
-(`valueGates[k]`).
+called identically from the dom path (`msg.gate`) and the widget per-key path
+(`valueGates[k]`). Text carries no gate, so it never calls it.
 
 ### Structure — comment-anchor range ops
 
@@ -426,7 +434,7 @@ edit so the bytes match the type:
 
 | Concept | Wire change | R site |
 |---|---|---|
-| Echo gate (dom/text) | `sequence` + `channel` → nested `gate: {seq, channel}` | [mount.R](../R/mount.R) attr senders (~:464, :509) |
+| Echo gate (dom only) | `sequence` + `channel` → nested `gate: {seq, channel}`; drop from text (always absent there) | [mount.R](../R/mount.R) attr senders (~:464, :509) |
 | Echo gate (widget) | `value_meta` → `valueGates` (rename only) | [mount.R:74-88](../R/mount.R#L74-L88) |
 | Event channel | `inputId` → `channel` (rename) | [mount.R:359](../R/mount.R#L359) |
 | Timing | flat `mode/ms/leading` → nested `timing` discriminated obj | [mount.R:364-366](../R/mount.R#L364-L366) |
