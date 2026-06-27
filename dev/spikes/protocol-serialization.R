@@ -11,11 +11,18 @@
 # PINNED: shiny 1.7.4, jsonlite 2.0.0. Re-confirm on bump.
 #
 # The bets, most load-bearing first:
-#   1. Required booleans survive — especially FALSE (the producer-owns-defaults
-#      decision rides on FALSE reaching the client as scalar `false`, not dropped).
-#   2. The empty-text wire shape — justifies the "R must normalize empty -> ''" fix.
-#   3. __irid_state_keys array-forcing — length-1 must not unbox to a scalar.
-#   4. New nests (gate / timing / domOpts / valueGates) round-trip as objects.
+#   1. Required booleans survive — especially FALSE (producer-owns-defaults).
+#   2. NULL in a list() constructor is KEPT as `null` (NOT dropped) — so the encoder
+#      must actively OMIT semantic-absence fields; they're `null` on the wire today.
+#   3. Present-but-empty ([]/{}/"") survives and is distinct from absent — but the
+#      []-vs-{} choice is keyed off list NAMES, so the encoder must build the right type.
+#   4. The empty-text wire shape — justifies the "R must normalize empty -> ''" fix.
+#   5. Array-forcing — a length-1 array field must not unbox to a scalar.
+#   6. New nests (gate / timing / domOpts / valueGates) round-trip as objects.
+#
+# Together (2,3): the encoder must keep three states distinct that the naive
+# list()/jsonlite path conflates — absent (omit key) / present-empty ([]/{}/"") / null
+# (never on the wire).
 
 stopifnot(packageVersion("shiny") == "1.7.4")
 toJSON <- shiny:::toJSON  # the exact custom-message serializer
@@ -67,7 +74,37 @@ j <- show("throttle timing", thr)
 check("throttle has ms + leading", j, grepl('"timing":{"mode":"throttle","ms":100,"leading":true}', j, fixed = TRUE))
 
 # --------------------------------------------------------------------------
-section(2, "Empty-text wire shape (drives the normalize -> '' fix)")
+section(2, "NULL in a list() constructor is KEPT as null (NOT dropped)")
+# The drop-on-NULL rule is for `x[[k]] <- NULL` (assignment). The event message is
+# built with a single list(...) constructor, which KEEPS NULL elements -> jsonlite
+# emits them as `null`. So `filter`/`kind`/`ms`/`leading`/ready-`id` are `null` on
+# the wire today, NOT absent. Only the incrementally-assigned fields (gate, valueGates)
+# are genuinely omitted. The encoder must actively OMIT semantic-absence fields.
+j <- show("list(filter=NULL, kind=NULL)", list(filter = NULL, kind = NULL))
+check("constructor keeps NULL as `null` (not dropped)", j,
+      grepl('"filter":null', j, fixed = TRUE) && grepl('"kind":null', j, fixed = TRUE))
+cat("  incremental drop: ",
+    { x <- list(a = 1); x[["b"]] <- NULL; sprintf("x[[\"b\"]]<-NULL => length %d", length(x)) },
+    "\n", sep = "")
+check("ready list(id=NULL) is {\"id\":null}, not {}", as.character(toJSON(list(id = NULL))),
+      grepl('"id":null', as.character(toJSON(list(id = NULL))), fixed = TRUE))
+
+# --------------------------------------------------------------------------
+section(3, "Present-but-empty survives (and is distinct from absent)")
+# Three states the encoder must keep distinct: absent (omit key), present-empty
+# ([]/{}/""), null (not used on the wire). jsonlite picks []-vs-{} off NAMES:
+# unnamed empty list -> [], named empty list -> {}. So the encoder must build an
+# empty ARRAY field as an unnamed list and an empty MAP field as a named list.
+j_arr <- show("empty array  list(removes=character(0))", list(removes = character(0)))
+j_map <- show("empty map    setNames(list(),char(0))", list(values = setNames(list(), character(0))))
+check("empty array -> [] (unnamed list)", j_arr, grepl('"removes":[]', j_arr, fixed = TRUE))
+check("empty map -> {} (named list)", j_map, grepl('"values":{}', j_map, fixed = TRUE))
+check("present-empty `[]` is distinct from absent (key present)",
+      as.character(toJSON(list(a = 1, removes = list()))),
+      grepl('"removes":[]', as.character(toJSON(list(a = 1, removes = list()))), fixed = TRUE))
+
+# --------------------------------------------------------------------------
+section(4, "Empty-text wire shape (drives the normalize -> '' fix)")
 # What does coerce_text_child's as.character() actually put on the wire?
 cat("  coerce_text_child(NULL) == ", deparse(as.character(NULL)), "\n", sep = "")
 text_cases <- list(
@@ -89,7 +126,7 @@ cat("  => empty/NA are NOT '' on the wire; R must normalize so value: string hol
 invisible(show("value = '' (post-fix)", list(id = "irid-5", target = "text", value = "")))
 
 # --------------------------------------------------------------------------
-section(3, "__irid_state_keys array-forcing")
+section(5, "__irid_state_keys array-forcing")
 j_scalar <- show("c('xaxis_range')   (bug)", list(`__irid_state_keys` = c("xaxis_range")))
 j_I      <- show("I(c('xaxis_range')) (fix)", list(`__irid_state_keys` = I(c("xaxis_range"))))
 j_aslist <- show("as.list(c('x'))     (fix)", list(`__irid_state_keys` = as.list(c("xaxis_range"))))
@@ -102,7 +139,7 @@ check("length-2 is already an array", j_two,
       grepl('"__irid_state_keys":["a","b"]', j_two, fixed = TRUE))
 
 # --------------------------------------------------------------------------
-section(4, "New nests round-trip as objects")
+section(6, "New nests round-trip as objects")
 attr_dom <- list(id = "irid-3", target = "dom", attr = "value", value = "hello",
                  gate = list(seq = 12L, channel = "irid_ev_irid-3_input"))
 j <- show("irid-attr dom + gate", attr_dom)

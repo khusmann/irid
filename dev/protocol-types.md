@@ -147,7 +147,10 @@ export interface DomOpts {
   stopPropagation: boolean;
   capture: boolean;
   passive: boolean;
-  filter?: string;        // JS predicate over the DOM event `e`; absent = no filter
+  filter?: string;        // JS predicate over `e`. Optional/absent-only: R forbids
+                          // "" (allow_empty=FALSE) and an empty predicate is invalid,
+                          // so there's no present-empty form. Encoder omits when none
+                          // (today it's sent as `null` — see §9; never on the wire).
 }
 
 // --- Rate-limit timing -----------------------------------------------------
@@ -190,13 +193,13 @@ export interface IridConfigMessage {
 /** `irid-ready` — a mount is fully wired. `output` is the output name for a
  *  renderIrid/iridOutput mount, and ABSENT for a top-level iridApp mount (which has
  *  no output name). Optional, not `| null`: top-level is *semantic* absence (no name
- *  exists to elide), so it's the `gate?`/`filter?` pattern — and R drops a NULL list
- *  element, so the app case is literally absent on the wire, never JSON null (the
- *  `| null` claimed a value the producer can't emit). The client maps absent → null
- *  only when it synthesizes the PUBLIC `irid:ready` detail (`msg.output ?? null`),
- *  where `{ id: string | null }` is the right shape for a JS consumer (§6). Wire =
- *  optional/absent; public DOM detail = null. (Renamed from the overloaded `id`:
- *  this is an OutputName, not an element/anchor id.) */
+ *  exists), one canonical encoding. NOTE: today R sends `list(id = NULL)` → the
+ *  single-`list()` constructor keeps the element → `{"id":null}` on the wire (NOT
+ *  absent — see §9). So this is an encoder *decision*: emit the field only when an
+ *  output name exists, never `null`. The client maps absent → null only when it
+ *  synthesizes the PUBLIC `irid:ready` detail (`msg.output ?? null`), where
+ *  `{ id: string | null }` suits a JS consumer (§6). Wire = optional/omitted;
+ *  public DOM detail = null. (Renamed from the overloaded `id`.) */
 export interface IridReadyMessage {
   output?: OutputName;
 }
@@ -480,7 +483,7 @@ edit so the bytes match the type:
 | Event channel | `inputId` → `channel` (rename) | [mount.R:359](../R/mount.R#L359) |
 | Timing | flat `mode/ms/leading` → nested `timing` discriminated obj | [mount.R:364-366](../R/mount.R#L364-L366) |
 | DOM flags | flat 4 fields → nested `domOpts`; **omit on widget rows** | [mount.R:368-371](../R/mount.R#L368-L371) |
-| `kind` | drop from DOM rows entirely (already NULL→absent); required on widget | [mount.R:363](../R/mount.R#L363) |
+| `kind` | omit from DOM rows (today sent as `"kind":null` — see §9); required on widget | [mount.R:363](../R/mount.R#L363) |
 | Ready id | `id` → `output` (optional; absent for `iridApp`) | [app.R:18-20](../R/app.R#L18) |
 | Payload envelope | flat `{…fields, id, nonce, __irid_seq}` → `{ id, nonce, seq, data:{…fields} }`; deletes `__irid_seq` | client `attachPayloadMeta`; `irid_decode_payload` ([mount.R:402-420](../R/mount.R#L402)) |
 | Widget props | preserve NULL props (keep key as explicit `null`) → factory sees full set → **deletes `__irid_state_keys`**; drop client `.concat` ([plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)) | widget-init seeding ([mount.R:326-333](../R/mount.R#L326)) |
@@ -505,33 +508,49 @@ Spike: [`dev/spikes/protocol-serialization.R`](spikes/protocol-serialization.R),
 run against the same `shiny:::toJSON` that `sendCustomMessage` uses (so the printed
 JSON *is* the client-side shape — for server→client custom messages the client gets
 `JSON.parse()` of it; `simplifyVector` only affects client→server inputs). **Pinned:
-shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 16/16 verdicts pass. Findings:
+shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings:
 
 1. **Required booleans survive.** `coalesce = FALSE`, an all-false `domOpts`, and
    `clientOnly = FALSE` all reach the client as concrete scalars — `"coalesce":false`,
-   `"domOpts":{"preventDefault":false,…}`. The producer-owns-defaults decision holds:
-   `FALSE` is not dropped (only `NULL` is), so the now-required fields are safe.
-2. **Nests round-trip as objects.** `gate`, `timing` (incl. immediate→`{"mode":
+   `"domOpts":{"preventDefault":false,…}`. The producer-owns-defaults decision holds.
+2. **Three "empty-ish" states the encoder must keep distinct** (the naive
+   `list()`/jsonlite path conflates them):
+   - **`null` is NOT absent.** The drop-on-NULL rule is for `x[[k]] <- NULL`
+     (assignment); the event message uses a single `list(...)` constructor, which
+     *keeps* NULL → jsonlite emits `"k":null`. So `filter`/`kind`/`ms`/`leading`/
+     ready-`id` are `"…":null` on the wire **today, not absent** — the encoder must
+     *actively omit* them. (Only the incrementally-assigned `gate`/`valueGates` are
+     genuinely absent today.) This corrects the earlier "R already drops these" claim.
+   - **present-empty survives** — empty array → `[]`, empty map → `{}`, empty string
+     → `""`, and all are distinct from an omitted key. **But `[]` vs `{}` is keyed off
+     list NAMES** (unnamed empty list → `[]`, named → `{}`), so the encoder must build
+     an empty *array* field as an unnamed list and an empty *map* as a named list.
+   - Net rule the encoder enforces: **absent** (omit key) / **present-empty**
+     (`[]`/`{}`/`""`, only when empty is a valid value of the type) / **`null`**
+     (never on the wire). `filter` is *absent*-only — R forbids `""` (`allow_empty =
+     FALSE`) and an empty predicate is invalid, so it has no present-empty form.
+3. **Nests round-trip as objects.** `gate`, `timing` (incl. immediate→`{"mode":
    "immediate"}` with no ms, throttle→`{…,"ms":100,"leading":true}`), `domOpts`, and
    the per-key `valueGates` map all serialize as JSON objects. immediate+coalesce is
    representable (`"timing":{"mode":"immediate"},"coalesce":true`). Omitting
    `valueGates` (programmatic) emits no key — the sparse-map encoding works.
-3. **Empty-text confirms the §8 fix is required.** `as.character(NULL)` is
+4. **Empty-text confirms the §8 fix is required.** `as.character(NULL)` is
    `character(0)` → serializes as `[]`; `NA_character_` → `null`; `""` → `""`. So the
    honest current wire type is `string | null | []` — `value: string` only holds
    once R normalizes empty/`NA`/`character(0)` → `""` (the §8 row).
-4. **Array-forcing is real but already handled ad-hoc.** A length-1 char vector
+5. **Array-forcing is real but already handled ad-hoc.** A length-1 char vector
    unboxes to a scalar (`"xaxis_range"`); `I()` or `as.list()` forces
    `["xaxis_range"]`; length ≥2 is already an array. The send sites *already* do this
    — `as.list` for `removes`/`inserts`/`order` ([mount.R:195-208](../R/mount.R#L195-L208)).
    So this isn't a bug to fix but **scattered discipline to centralize** into the
    encoder.
-5. **TODO — NULL props must keep their key.** For the `__irid_state_keys` deletion
-   (§11), a NULL-valued widget prop must serialize as `"k": null`, not be dropped.
-   Confirm `props[k] <- list(NULL)` (vs `props[[k]] <- NULL`) keeps the key and
-   jsonlite (`null="null"`) emits `null`. Add to the spike.
+6. **NULL props must keep their key** (for the `__irid_state_keys` deletion, §11).
+   A NULL-valued widget prop must serialize as `"k": null`, not be dropped — built via
+   `props[k] <- list(NULL)` (single-bracket keeps it), not `props[[k]] <- NULL`
+   (drops it). Same constructor-vs-assignment distinction as finding 2.
 
-No surprises against the design. The empty-text normalization (point 3) is the one
+No surprises against the design except finding 2 (which corrects an earlier wrong
+assumption). The empty-text normalization (finding 4) is the one
 genuine wire *fix*; the rest is moving per-site shape discipline into the encoder.
 
 ### Predictable serialization — a producer-side encoder
