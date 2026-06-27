@@ -52,13 +52,17 @@ impactful:
 
 Three axes organize everything:
 
-- **Direction.** Server→client custom messages; client→server payloads; and the
-  public author API (neither — it's a DOM/JS contract). These are three modules.
+- **Audience/stability.** The internal wire contract (both directions — messages and
+  payloads) vs the public widget-author API (a DOM/JS contract). These are the two
+  modules; direction is an in-file *section*, not a file (§7).
 - **Shared vocabulary.** A handful of value types recur across messages —
-  `EchoGate`, `DomOpts`, `Timing`, `EventKind`, and the id aliases. Name each once,
-  reuse everywhere. This is what collapses "one concept, several encodings."
+  `EchoGate`, `DomOpts`, `Timing`, `EventKind`. Name each once, reuse everywhere.
+  This is what collapses "one concept, several encodings." All wire-only, so they
+  live in `wire.ts` (§3) alongside the messages — there is no separate vocabulary
+  file (see §7 for why `common.ts` was dropped).
 - **Identity.** Every `id`/channel string resolves against *something*. Give each
-  referent a named alias so the type says what the string points at.
+  referent a named alias so the type says what the string points at (also wire-only,
+  in `wire.ts`).
 - **Default ownership.** Defaults are resolved by the **producer** (R, and the
   future Python server) into *total* values on the wire; consumers never re-derive
   them. It follows that **optionality marks semantic absence only — never
@@ -77,18 +81,29 @@ flattened in.
 
 ---
 
-## 3. Proposed shared vocabulary (`protocol/common.ts`)
+## 3. The wire contract (`protocol/wire.ts`)
+
+Both directions, and the vocabulary they're built from, live in one file (§7) — here
+split into: the vocabulary, the server→client messages, then the client→server
+payloads (§5). **There is no `common.ts`:** every value-type *and* every id alias is
+wire-only. `widget.ts`'s one potential cross-reference — the `irid:ready` detail —
+uses plain `string` (§6), so nothing is shared and the only files are `wire.ts` +
+`widget.ts` (see §7).
+
+### Vocabulary
+
+The id aliases plus the value-types every message is built from.
 
 ```ts
-// --- Identity aliases (documentation-only; all `string`) -------------------
-// Not branded — these don't change runtime or enforce at compile time; they
-// document what each string resolves against. (Branding is possible but costs a
-// cast at every R-boundary decode; deferred unless a real mix-up shows up.)
+// Identity aliases (documentation-only; all `string`; not branded — see §11).
+// Each names what the string resolves against.
 export type ElementId = string;   // resolves via document.getElementById
 export type AnchorId  = string;   // a comment-anchor-pair id (range protocol)
 export type OutputName = string;  // a Shiny output id (renderIrid / iridOutput)
 export type Channel   = string;   // a Shiny input id; also the per-channel seq key
+```
 
+```ts
 // --- Optimistic-update echo gate -------------------------------------------
 // The single representation everywhere a gate travels. Carried as `gate?: EchoGate`
 // (optional), NOT a tagged union `{type:'echo',…} | {type:'programmatic'}`: the
@@ -100,7 +115,7 @@ export type Channel   = string;   // a Shiny input id; also the per-channel seq 
 // the mirror of the DomOpts call, where absence re-encoded a *default* → required.)
 export interface EchoGate {
   seq: number;
-  channel: Channel;
+  channel: Channel;       // same-file alias (see Vocabulary above)
 }
 
 // --- DOM listener flags ----------------------------------------------------
@@ -141,7 +156,7 @@ export type EventKind = "prop" | "event";
 
 ---
 
-## 4. Server→client messages (`protocol/messages.ts`)
+## 4. Server→client messages (`protocol/wire.ts`)
 
 The Shiny message-channel name is the discriminant *between* messages; within
 `irid-attr`, `target` discriminates. No synthetic `type` field is added.
@@ -289,7 +304,7 @@ export interface IridWidgetInitMessage {
 
 ---
 
-## 5. Client→server payloads (`protocol/payloads.ts`)
+## 5. Client→server payloads (`protocol/wire.ts`, same file as §3–4)
 
 ```ts
 /** The envelope every client->server payload carries (attachPayloadMeta).
@@ -346,7 +361,11 @@ declare global {
     __iridReady?: boolean;
   }
   interface DocumentEventMap {
-    "irid:ready": CustomEvent<{ id: OutputName | null }>;
+    // `id` is the output name (renderIrid/iridOutput) or null (top-level iridApp).
+    // Plain `string`, not `OutputName`: this is widget.ts's only would-be reference
+    // to the wire vocabulary, and importing one alias across files isn't worth it
+    // (and would re-introduce common.ts). Documented by the comment instead.
+    "irid:ready": CustomEvent<{ id: string | null }>;
   }
 }
 ```
@@ -357,37 +376,38 @@ declare global {
 
 ```
 srcts/src/protocol/
-  common.ts   shared vocabulary: identity aliases, EchoGate, DomOpts, Timing, EventKind
-  wire.ts     the transport contract — both directions (messages + payloads),
-              as two labeled sections: `// Server → client` / `// Client → server`
+  wire.ts     vocabulary (id aliases + EchoGate/DomOpts/Timing/EventKind) + the
+              transport contract, both directions, as labeled sections:
+              `// Server → client` / `// Client → server`
   widget.ts   public widget-author API + window/document globals
-  index.ts    barrel: `export * from "./common"`, etc.
+  index.ts    barrel: `export * from "./wire"`, `export * from "./widget"`
 ```
 
-The file boundaries follow **audience/stability** and **shared vocabulary**, not
-direction:
+**Two substantive files.** The boundary that earns its place is **audience/
+stability** — internal wire vs public widget-author surface. There is *no*
+`common.ts`: a shared-vocabulary file is justified only by a genuine cross-file
+share, and there is none.
 
-- `common.ts` is the **vocabulary leaf** — value-type primitives (`EchoGate`,
-  `DomOpts`, `Timing`, `EventKind`, id aliases) that exist independent of the message
-  structures that carry them. It's a dependency-free leaf referenced by *both*
-  `wire.ts` and `widget.ts` (e.g. `irid:ready`'s detail uses `OutputName`), which is
-  what keeps those two as *peers over a shared foundation* rather than coupling
-  `widget → wire`. Note this is the inverse of the payloads/messages call: those were
-  the same *layer* (transport structure) and wire-only, so they merged; `common` is a
-  *different* layer and genuinely shared, so it stays split.
-- `wire.ts` is the internal transport contract. Server→client messages and
-  client→server payloads live together because they're one layer read *jointly* on a
-  round-trip (the outbound `gate` is gated against the `__irid_seq` the inbound
-  `PayloadMeta` bumped on the same `channel`) — splitting them fights that mental
-  model, and the payload half alone is only two types. The direction distinction is
-  kept as in-file sections, not separate files.
+- `wire.ts` is the entire internal transport contract — vocabulary (id aliases +
+  `EchoGate`/`DomOpts`/`Timing`/`EventKind`), server→client messages, and
+  client→server payloads. They live together because (a) every one of these types is
+  wire-exclusive, and (b) the two directions are read *jointly* on a round-trip (the
+  outbound `gate` is gated against the `__irid_seq` the inbound `PayloadMeta` bumped
+  on the same `channel`). Direction is kept as in-file sections, not files.
 - `widget.ts` is the public, third-party-facing surface — different stability
-  contract from the wire, so it's separate.
+  contract, so it's separate. It references *nothing* from `wire.ts`: its one
+  would-be cross-reference (`irid:ready`'s detail) uses plain `string` (§6), so the
+  files don't couple in either direction.
+
+The history here is the rule eating its own tail: vocabulary started in a `common.ts`
+"shared leaf," then the value-types proved wire-only and moved to `wire.ts`, then the
+*last* alleged share (`OutputName` in `widget.ts`) turned out to be self-inflicted (I
+aliased what the original typed as `string`) — so `common.ts` had nothing left to
+justify it. A file earns its place by a real share; there wasn't one.
 
 `index.ts` keeps the single import surface (`import type { … } from "../protocol"`
-still works with the directory + `index.ts`). Three substantive files on the axes
-that matter. If we'd rather not split at all, the fallback is one file with these as
-labeled sections and the vocabulary hoisted to the top; the type *shapes* are
+still works with the directory + `index.ts`). If we'd rather not split at all, the
+fallback is one file with `wire`/`widget` as labeled sections; the type *shapes* are
 identical either way.
 
 ---
@@ -512,8 +532,8 @@ encoder, backstopped by e2e and TS compile-time types.
 
 ## 10. Commit plan (one concept per commit, feature branch)
 
-1. Introduce `protocol/common.ts` vocabulary (`EchoGate`, `DomOpts`, `Timing`,
-   `EventKind`, id aliases); no consumers yet.
+1. Introduce `wire.ts`'s vocabulary section, no consumers yet: id aliases +
+   `EchoGate`, `DomOpts`, `Timing`, `EventKind`.
 2. `EchoGate` everywhere: `gate?` on dom/text, `valueGates` on widget; collapse
    `isStaleEcho` to take a gate. (TS + R + handler together.)
 3. `irid-events` union: `IridEventCore` + `IridDomEvent | IridWidgetEvent`, nested
@@ -535,11 +555,23 @@ round-trips after each rename/nest.
 
 **Open:**
 
-- **Branded ids?** Plain aliases document intent but don't enforce (an `AnchorId`
-  is assignable to an `ElementId`). Worth branding only if a real mix-up surfaces;
-  branding adds a cast at every decode boundary.
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
+
+**Decided — plain aliases, not branded ids.** Use plain `type ElementId = string`
+etc. The aliases' real win is *documentation* of what each string resolves against,
+which plain aliases give for free. Branding (nominal `string & {__brand}`) would add
+enforcement, but the value is marginal here: (1) the discriminated unions already
+segregate id-kinds by message variant, so cross-kind confusion isn't a structural
+risk; (2) in a type-only module a brand has no runtime teeth (the encoder + e2e
+catch malformed values) and is TS-only, so it doesn't strengthen the cross-language
+contract the future Python server needs; (3) client-side ids are overwhelmingly
+*inbound* — they'd brand for free at the typed handler boundary and widen back to
+`string` for free at `getElementById`/`anchors.get`, so branding adds ceremony
+without catching a bug that occurs. **Tripwire to revisit:** an actual id-kind mixup
+(e.g. an `AnchorId` reaching `getElementById` → silent `null`). The codec boundary
+(§9) is where a brand would be asserted if adopted, and inbound-free branding makes
+it a contained, cheap reversal — so there's no cost to deferring.
 
 **Rejected — runtime schema validation (zod/valibot) on the wire.** Keep the client
 type-only. The wire is first-party and version-locked (the client is vendored into
