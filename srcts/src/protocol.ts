@@ -117,42 +117,48 @@ export interface IridMutateMessage {
   order?: string[];
 }
 
-/** How a client->server stream is rate-limited. */
-export type EventMode = "immediate" | "throttle" | "debounce";
-
-/** Whether an event originates from a DOM listener or a widget channel. */
-export type EventSource = "dom" | "widget";
-
 /**
  * For widget channels, which kind of stream: a two-way prop write-back
- * (`irid_prop_*`) or a notification (`irid_ev_*`). `null`/absent for DOM events.
+ * (`irid_prop_*`) or a notification (`irid_ev_*`). No `null` — absence is carried
+ * by the field living on the widget arm only.
  */
-export type EventKind = "prop" | "event" | null;
+export type EventKind = "prop" | "event";
 
-/** One `irid-events` registration entry. The message is an array of these. */
-export interface IridEventEntry {
-  id: string;
+/**
+ * One `irid-events` registration entry; the message is an array of these. A
+ * discriminated union on `source`: a DOM event carries listener options, a widget
+ * event carries its stream `kind`. This makes the illegal states unrepresentable —
+ * a throttle with no `ms` won't type, DOM flags don't exist on the widget arm, and
+ * `kind` is required-without-null on the widget arm and absent on the dom arm.
+ */
+export interface IridEventCore {
+  id: ElementId;
+  /** The DOM/widget event NAME. */
   event: string;
-  /** Namespaced send target; also the per-channel sequence key. */
-  inputId: string;
-  source: EventSource;
-  kind?: EventKind;
-  mode: EventMode;
-  /** Rate-limit window (throttle/debounce). */
-  ms?: number;
-  /** Throttle leading-edge fire. */
-  leading?: boolean;
-  /** Gate sends on server-idle (backpressure). */
-  coalesce?: boolean;
-  preventDefault?: boolean;
-  stopPropagation?: boolean;
-  capture?: boolean;
-  passive?: boolean;
-  /** A config-only wire (DOM flags, no round-trip). */
-  clientOnly?: boolean;
-  /** JS expression over the DOM event `e`, compiled to a drop-predicate. */
-  filter?: string;
+  /** The Shiny input id the client sends on AND the per-channel sequence key. */
+  inputId: Channel;
+  /** Nested timing; `ms`/`leading` live inside per mode. */
+  timing: Timing;
+  /** Carrier-level (orthogonal to mode); R resolves NULL -> mode default. */
+  coalesce: boolean;
 }
+
+/** DOM event: the listener options (incl. filter) + the config-only flag. */
+export type IridDomEvent = IridEventCore & {
+  source: "dom";
+  /** Carries the flags AND filter (= R's `wire_dom_opts`). */
+  domOpts: DomOpts;
+  /** Config-only wire: attach flags, never round-trip. */
+  clientOnly: boolean;
+};
+
+/** Widget event: carries kind; no DOM flags (no listener is attached). */
+export type IridWidgetEvent = IridEventCore & {
+  source: "widget";
+  kind: EventKind;
+};
+
+export type IridEventEntry = IridDomEvent | IridWidgetEvent;
 
 /** `irid-widget-init` — mount a widget instance into its container. */
 export interface IridWidgetInitMessage {

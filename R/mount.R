@@ -341,26 +341,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # SAME channel.
       channel <- session$ns(input_id)
 
-      msg <- list(
-        id = ev$id,
-        event = ev$event,
-        inputId = channel,
-        # `kind` ("prop"/"event") lets the client index widget streams by the
-        # `{kind}:{id}:{event}` triple its `setProp`/`sendEvent` resolves
-        # against — robust to the module namespace the client can't see.
-        kind = ev$kind,
-        mode = ev$mode,
-        ms = ev$ms,
-        leading = ev$leading,
-        coalesce = ev$coalesce,
-        preventDefault = ev$prevent_default,
-        stopPropagation = ev$stop_propagation,
-        capture = ev$capture,
-        passive = ev$passive,
-        filter = ev$filter,
-        clientOnly = is.null(handler),
-        source = ev$source
-      )
+      # The encoder builds the discriminated wire shape (nested timing/domOpts,
+      # kind on widget rows, domOpts/clientOnly on dom rows). `clientOnly` is a
+      # config-only dom wire — `dom_opts` with no server handler.
+      msg <- irid_encode_event(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so

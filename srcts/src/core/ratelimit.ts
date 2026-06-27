@@ -8,7 +8,7 @@
 
 import { onEventSent } from "./stale";
 import { attachPayloadMeta, buildPayload } from "./payload";
-import type { IridEventEntry } from "../protocol";
+import type { DomOpts, IridDomEvent, IridEventEntry } from "../protocol";
 
 type Payload = Record<string, unknown> | null;
 
@@ -116,14 +116,14 @@ function drainQueue(elId: string): void {
 
 // Compile a `wire_dom_opts(filter = ...)` expression into a predicate over the
 // DOM event `e`, or null when no filter is set.
-function compileFilter(msg: IridEventEntry): ((e: Event) => boolean) | null {
-  if (!msg.filter) return null;
+function compileFilter(opts: DomOpts): ((e: Event) => boolean) | null {
+  if (!opts.filter) return null;
   try {
-    return new Function("e", "return (" + msg.filter + ");") as (
+    return new Function("e", "return (" + opts.filter + ");") as (
       e: Event,
     ) => boolean;
   } catch (err) {
-    console.error("irid: invalid event filter expression:", msg.filter, err);
+    console.error("irid: invalid event filter expression:", opts.filter, err);
     return null;
   }
 }
@@ -142,20 +142,21 @@ function shouldSkip(el: HTMLElement, eventName: string): boolean {
 
 function attachListener(
   el: HTMLElement,
-  msg: IridEventEntry,
+  msg: IridDomEvent,
   dispatch: (payload: Payload) => void,
 ): void {
-  const filter = compileFilter(msg);
+  const opts = msg.domOpts;
+  const filter = compileFilter(opts);
   el.addEventListener(
     msg.event,
     (e) => {
       if (shouldSkip(el, msg.event)) return;
       if (filter && !filter(e)) return;
-      if (msg.preventDefault) e.preventDefault();
-      if (msg.stopPropagation) e.stopPropagation();
+      if (opts.preventDefault) e.preventDefault();
+      if (opts.stopPropagation) e.stopPropagation();
       dispatch(buildPayload(e, el, msg.id, msg.inputId));
     },
-    { capture: !!msg.capture, passive: !!msg.passive },
+    { capture: opts.capture, passive: opts.passive },
   );
 }
 
@@ -163,18 +164,19 @@ function attachListener(
 // flags client-side and never round-trip.
 export function attachClientOnlyListener(
   el: HTMLElement,
-  msg: IridEventEntry,
+  msg: IridDomEvent,
 ): void {
-  const filter = compileFilter(msg);
+  const opts = msg.domOpts;
+  const filter = compileFilter(opts);
   el.addEventListener(
     msg.event,
     (e) => {
       if (shouldSkip(el, msg.event)) return;
       if (filter && !filter(e)) return;
-      if (msg.preventDefault) e.preventDefault();
-      if (msg.stopPropagation) e.stopPropagation();
+      if (opts.preventDefault) e.preventDefault();
+      if (opts.stopPropagation) e.stopPropagation();
     },
-    { capture: !!msg.capture, passive: !!msg.passive },
+    { capture: opts.capture, passive: opts.passive },
   );
 }
 
@@ -183,6 +185,8 @@ export function attachClientOnlyListener(
 export function setupThrottle(
   el: HTMLElement | null,
   msg: IridEventEntry,
+  ms: number,
+  leading: boolean,
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
@@ -191,8 +195,8 @@ export function setupThrottle(
     timerRunning: false,
     timerReady: false,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
-    leading: msg.leading,
+    coalesce: msg.coalesce,
+    leading,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},
@@ -206,7 +210,7 @@ export function setupThrottle(
       s.timerRunning = false;
       s.timerReady = true;
       s.maybeSend();
-    }, msg.ms);
+    }, ms);
   }
 
   s.maybeSend = () => {
@@ -252,6 +256,7 @@ export function setupThrottle(
 export function setupDebounce(
   el: HTMLElement | null,
   msg: IridEventEntry,
+  ms: number,
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
@@ -260,7 +265,7 @@ export function setupDebounce(
     timerId: null,
     timerReady: false,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
+    coalesce: msg.coalesce,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},
@@ -287,7 +292,7 @@ export function setupDebounce(
       s.timerId = null;
       s.timerReady = true;
       s.maybeSend();
-    }, msg.ms);
+    }, ms);
   };
 
   // Preempt: a later sibling is ready and we're the head. Cancel the timer and
@@ -319,7 +324,7 @@ export function setupImmediate(
     inputId: msg.inputId,
     payload: null,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
+    coalesce: msg.coalesce,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},

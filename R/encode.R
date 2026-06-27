@@ -80,6 +80,56 @@ irid_encode_attr_widget <- function(id, values, gates) {
   msg
 }
 
+# --- irid-events message constructors --------------------------------------
+
+# The nested `timing` sub-object, discriminated on `mode`. ms/leading exist only
+# where the variant gives them meaning (semantic absence by variant).
+irid_encode_timing <- function(mode, ms = NULL, leading = NULL) {
+  switch(mode,
+    immediate = list(mode = "immediate"),
+    throttle  = list(mode = "throttle", ms = ms, leading = leading),
+    debounce  = list(mode = "debounce", ms = ms)
+  )
+}
+
+# The fully-materialized DOM listener record: every flag present (off-default
+# `false`), `filter` present as its value or `null` (list() keeps the NULL).
+irid_encode_dom_opts <- function(prevent_default, stop_propagation, capture,
+                                 passive, filter) {
+  list(
+    preventDefault = prevent_default,
+    stopPropagation = stop_propagation,
+    capture = capture,
+    passive = passive,
+    filter = filter
+  )
+}
+
+# One `irid-events` entry. `channel` is the namespaced inputId. The wire shape is
+# a discriminated union on `source`: a dom event carries `domOpts` + `clientOnly`,
+# a widget event carries `kind` (each field omitted on the other arm).
+irid_encode_event <- function(ev, channel, client_only) {
+  msg <- list(
+    id = ev$id,
+    event = ev$event,
+    inputId = channel,
+    source = ev$source,
+    timing = irid_encode_timing(ev$mode, ev$ms, ev$leading),
+    coalesce = ev$coalesce
+  )
+  if (identical(ev$source, "widget")) {
+    # `kind` ("prop"/"event") lets the client index widget streams by the
+    # `{kind}:{id}:{event}` triple its setProp/sendEvent resolves against.
+    msg$kind <- ev$kind
+  } else {
+    msg$domOpts <- irid_encode_dom_opts(
+      ev$prevent_default, ev$stop_propagation, ev$capture, ev$passive, ev$filter
+    )
+    msg$clientOnly <- client_only
+  }
+  msg
+}
+
 # --- Inbound: client -> server payload decode ------------------------------
 
 # The structural mirror of the client's `attachPayloadMeta`. Splits the transport

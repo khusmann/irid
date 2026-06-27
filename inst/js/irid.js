@@ -158,12 +158,12 @@
       }
     }
   }
-  function compileFilter(msg) {
-    if (!msg.filter) return null;
+  function compileFilter(opts) {
+    if (!opts.filter) return null;
     try {
-      return new Function("e", "return (" + msg.filter + ");");
+      return new Function("e", "return (" + opts.filter + ");");
     } catch (err) {
-      console.error("irid: invalid event filter expression:", msg.filter, err);
+      console.error("irid: invalid event filter expression:", opts.filter, err);
       return null;
     }
   }
@@ -172,33 +172,35 @@
     return eventName === "change" && el.tagName === "INPUT" && input.type === "radio" && !input.checked;
   }
   function attachListener(el, msg, dispatch) {
-    const filter = compileFilter(msg);
+    const opts = msg.domOpts;
+    const filter = compileFilter(opts);
     el.addEventListener(
       msg.event,
       (e) => {
         if (shouldSkip(el, msg.event)) return;
         if (filter && !filter(e)) return;
-        if (msg.preventDefault) e.preventDefault();
-        if (msg.stopPropagation) e.stopPropagation();
+        if (opts.preventDefault) e.preventDefault();
+        if (opts.stopPropagation) e.stopPropagation();
         dispatch(buildPayload(e, el, msg.id, msg.inputId));
       },
-      { capture: !!msg.capture, passive: !!msg.passive }
+      { capture: opts.capture, passive: opts.passive }
     );
   }
   function attachClientOnlyListener(el, msg) {
-    const filter = compileFilter(msg);
+    const opts = msg.domOpts;
+    const filter = compileFilter(opts);
     el.addEventListener(
       msg.event,
       (e) => {
         if (shouldSkip(el, msg.event)) return;
         if (filter && !filter(e)) return;
-        if (msg.preventDefault) e.preventDefault();
-        if (msg.stopPropagation) e.stopPropagation();
+        if (opts.preventDefault) e.preventDefault();
+        if (opts.stopPropagation) e.stopPropagation();
       },
-      { capture: !!msg.capture, passive: !!msg.passive }
+      { capture: opts.capture, passive: opts.passive }
     );
   }
-  function setupThrottle(el, msg) {
+  function setupThrottle(el, msg, ms, leading) {
     const s = {
       id: msg.id,
       inputId: msg.inputId,
@@ -206,8 +208,8 @@
       timerRunning: false,
       timerReady: false,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
-      leading: msg.leading,
+      coalesce: msg.coalesce,
+      leading,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -223,7 +225,7 @@
         s.timerRunning = false;
         s.timerReady = true;
         s.maybeSend();
-      }, msg.ms);
+      }, ms);
     }
     s.maybeSend = () => {
       if (s.coalesce && s.serverBusy) return;
@@ -258,7 +260,7 @@
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
-  function setupDebounce(el, msg) {
+  function setupDebounce(el, msg, ms) {
     const s = {
       id: msg.id,
       inputId: msg.inputId,
@@ -266,7 +268,7 @@
       timerId: null,
       timerReady: false,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
+      coalesce: msg.coalesce,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -294,7 +296,7 @@
         s.timerId = null;
         s.timerReady = true;
         s.maybeSend();
-      }, msg.ms);
+      }, ms);
     };
     s.qFlush = () => {
       if (s.timerId !== null && s.timerId !== void 0) {
@@ -316,7 +318,7 @@
       inputId: msg.inputId,
       payload: null,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
+      coalesce: msg.coalesce,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -664,14 +666,14 @@
         const el = document.getElementById(msg.id);
         if (msg.source !== "widget" && !el) return;
         eventsRegistered.add(key);
-        if (msg.clientOnly) {
+        if (msg.source === "dom" && msg.clientOnly) {
           attachClientOnlyListener(el, msg);
           return;
         }
-        if (msg.mode === "throttle") {
-          setupThrottle(el, msg);
-        } else if (msg.mode === "debounce") {
-          setupDebounce(el, msg);
+        if (msg.timing.mode === "throttle") {
+          setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
+        } else if (msg.timing.mode === "debounce") {
+          setupDebounce(el, msg, msg.timing.ms);
         } else {
           setupImmediate(el, msg);
         }

@@ -211,15 +211,15 @@ export function registerHandlers(): void {
       const el = document.getElementById(msg.id);
       if (msg.source !== "widget" && !el) return;
       eventsRegistered.add(key);
-      if (msg.clientOnly) {
+      if (msg.source === "dom" && msg.clientOnly) {
         // No server handler — just apply DOM flags, no managed state.
         attachClientOnlyListener(el!, msg);
         return;
       }
-      if (msg.mode === "throttle") {
-        setupThrottle(el, msg);
-      } else if (msg.mode === "debounce") {
-        setupDebounce(el, msg);
+      if (msg.timing.mode === "throttle") {
+        setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
+      } else if (msg.timing.mode === "debounce") {
+        setupDebounce(el, msg, msg.timing.ms);
       } else {
         setupImmediate(el, msg);
       }
