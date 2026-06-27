@@ -1,5 +1,5 @@
 // The Shiny custom-message handlers that drive the client: irid-config,
-// irid-attr, irid-mutate, irid-events, irid-widget-init, irid-ready.
+// irid-attr, irid-mutate, irid-wire, irid-widget-init, irid-ready.
 
 import { isStaleEcho, sequences } from "./seq";
 import {
@@ -23,7 +23,7 @@ import { setStaleTimeout } from "./stale";
 import type {
   IridAttrMessage,
   IridConfigMessage,
-  IridEventEntry,
+  IridWireEntry,
   IridMutateMessage,
   IridReadyMessage,
   IridWidgetInitMessage,
@@ -36,7 +36,7 @@ const PROP_ATTRS: Record<string, boolean> = {
   innerHTML: true,
 };
 
-const eventsRegistered = new Set<string>(); // `${inputId}` keys
+const wireRegistered = new Set<string>(); // `${channel}` keys
 
 export function registerHandlers(): void {
   Shiny.addCustomMessageHandler("irid-config", (msg: IridConfigMessage) => {
@@ -165,16 +165,16 @@ export function registerHandlers(): void {
     }, 0);
   });
 
-  Shiny.addCustomMessageHandler("irid-events", (msgs: IridEventEntry[]) => {
+  Shiny.addCustomMessageHandler("irid-wire", (msgs: IridWireEntry[]) => {
     msgs.forEach((msg) => {
-      // Key on the (namespaced) inputId — unique per id/event/kind.
+      // Key on the (namespaced) channel — unique per id/event/kind.
       const key = msg.channel;
-      if (eventsRegistered.has(key)) return;
+      if (wireRegistered.has(key)) return;
       // DOM events need the element to exist for addEventListener; widget events
       // bypass that step.
       const el = document.getElementById(msg.id);
       if (msg.source !== "widget" && !el) return;
-      eventsRegistered.add(key);
+      wireRegistered.add(key);
       if (msg.source === "dom" && msg.clientOnly) {
         // No server handler — just apply DOM flags, no managed state.
         attachClientOnlyListener(el!, msg);
@@ -202,7 +202,7 @@ export function registerHandlers(): void {
     },
   );
 
-  // Readiness lifecycle. Sent by the server after a mount's `irid-events` (so its
+  // Readiness lifecycle. Sent by the server after a mount's `irid-wire` (so its
   // listeners are attached) and after its server observers exist; WebSocket
   // ordering means that when this lands, the mount is fully wired. We surface it
   // two ways: a public `irid:ready` DOM event app authors can hook (focus an

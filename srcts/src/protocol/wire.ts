@@ -1,8 +1,8 @@
 // The irid wire contract — the single typed shape the R and (future) Python
 // servers both target, and that the client implements. Both directions, and the
-// vocabulary they're built from, live here (see ARCHITECTURE.md §7): the
-// vocabulary, then the server -> client messages, then the client -> server
-// payload. The two directions are read jointly on a round-trip (an outbound
+// vocabulary they're built from, live here: the vocabulary, then the server ->
+// client messages, then the client -> server payload. The two directions are read
+// jointly on a round-trip (an outbound
 // `gate` is gated against the `seq` the inbound payload bumped on the same
 // `channel`), so they belong together.
 //
@@ -51,7 +51,7 @@ export interface DomOpts {
 // shapes: ms/leading exist only where the variant gives them meaning (semantic
 // absence, not elision — so they're absent by variant, required within it).
 // `coalesce` is NOT here — it means the same in every mode (mode only picks its
-// default), so it stays carrier-level (see IridEventCore).
+// default), so it stays carrier-level (see IridWireCore).
 export type Timing =
   | { mode: "immediate" }
   | { mode: "throttle"; ms: number; leading: boolean }
@@ -129,13 +129,14 @@ export interface IridMutateMessage {
 export type EventKind = "prop" | "event";
 
 /**
- * One `irid-events` registration entry; the message is an array of these. A
- * discriminated union on `source`: a DOM event carries listener options, a widget
- * event carries its stream `kind`. This makes the illegal states unrepresentable —
- * a throttle with no `ms` won't type, DOM flags don't exist on the widget arm, and
- * `kind` is required-without-null on the widget arm and absent on the dom arm.
+ * One `irid-wire` entry — the serialized per-slot `wire()` carrier for one
+ * channel; the message is an array of these. A discriminated union on `source`: a
+ * DOM event carries listener options, a widget event carries its stream `kind`.
+ * This makes the illegal states unrepresentable — a throttle with no `ms` won't
+ * type, DOM flags don't exist on the widget arm, and `kind` is required-without-
+ * null on the widget arm and absent on the dom arm.
  */
-export interface IridEventCore {
+export interface IridWireCore {
   id: ElementId;
   /** The DOM/widget event NAME. */
   event: string;
@@ -149,7 +150,7 @@ export interface IridEventCore {
 }
 
 /** DOM event: the listener options (incl. filter) + the config-only flag. */
-export type IridDomEvent = IridEventCore & {
+export type IridDomWire = IridWireCore & {
   source: "dom";
   /** Carries the flags AND filter (= R's `wire_dom_opts`). */
   domOpts: DomOpts;
@@ -158,12 +159,12 @@ export type IridDomEvent = IridEventCore & {
 };
 
 /** Widget event: carries kind; no DOM flags (no listener is attached). */
-export type IridWidgetEvent = IridEventCore & {
+export type IridWidgetWire = IridWireCore & {
   source: "widget";
   kind: EventKind;
 };
 
-export type IridEventEntry = IridDomEvent | IridWidgetEvent;
+export type IridWireEntry = IridDomWire | IridWidgetWire;
 
 /** `irid-widget-init` — mount a widget instance into its container. */
 export interface IridWidgetInitMessage {

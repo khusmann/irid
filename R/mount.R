@@ -82,11 +82,11 @@ irid_queue_widget_attr <- function(session, id, attr, value,
   }
   # Single-bracket assignment so a legitimate NULL value keeps its key in
   # the map rather than being dropped (`[[<-` with NULL removes the entry).
-  # The encoder (`wire_map`) applies the named-vector -> object discipline at
+  # The encoder (`json_map`) applies the named-vector -> object discipline at
   # drain time, so the raw R value is stored here.
   entry$values[attr] <- list(value)
   if (!is.null(sequence)) {
-    entry$value_gates[[attr]] <- list(seq = sequence, channel = channel)
+    entry$value_gates[[attr]] <- irid_encode_echo_gate(sequence, channel)
   }
   pending[[id]] <- entry
   invisible()
@@ -180,7 +180,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   }
 
   # `order` maps planner ids to their wrapper ids; the encoder forces each field
-  # to a JSON array (the array-typed-field discipline lives in `wire_array`).
+  # to a JSON array (the array-typed-field discipline lives in `json_array`).
   order_ids <- if (!is.null(plan$order)) {
     vapply(
       plan$order,
@@ -354,7 +354,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
   # Set up event listeners
   if (length(result$events) > 0L) {
-    event_msgs <- lapply(result$events, function(ev) {
+    wire_msgs <- lapply(result$events, function(ev) {
       # Two-way widget props ride a distinct input namespace
       # (`irid_prop_{id}_{key}`, written by the client's `setProp`); DOM and
       # widget events use `irid_ev_{id}_{event}`.
@@ -374,7 +374,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # The encoder builds the discriminated wire shape (nested timing/domOpts,
       # kind on widget rows, domOpts/clientOnly on dom rows). `clientOnly` is a
       # config-only dom wire — `dom_opts` with no server handler.
-      msg <- irid_encode_event(ev, channel, client_only = is.null(handler))
+      msg <- irid_encode_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
@@ -468,7 +468,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
       msg
     })
-    session$sendCustomMessage("irid-events", event_msgs)
+    session$sendCustomMessage("irid-wire", wire_msgs)
   }
 
   # Set up reactive attribute bindings. Lower priority than control flows

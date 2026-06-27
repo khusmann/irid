@@ -527,7 +527,7 @@
     checked: true,
     innerHTML: true
   };
-  var eventsRegistered = /* @__PURE__ */ new Set();
+  var wireRegistered = /* @__PURE__ */ new Set();
   function registerHandlers() {
     Shiny.addCustomMessageHandler("irid-config", (msg) => {
       setStaleTimeout(msg.staleTimeout);
@@ -625,13 +625,13 @@
         Shiny.bindAll(parent);
       }, 0);
     });
-    Shiny.addCustomMessageHandler("irid-events", (msgs) => {
+    Shiny.addCustomMessageHandler("irid-wire", (msgs) => {
       msgs.forEach((msg) => {
         const key = msg.channel;
-        if (eventsRegistered.has(key)) return;
+        if (wireRegistered.has(key)) return;
         const el = document.getElementById(msg.id);
         if (msg.source !== "widget" && !el) return;
-        eventsRegistered.add(key);
+        wireRegistered.add(key);
         if (msg.source === "dom" && msg.clientOnly) {
           attachClientOnlyListener(el, msg);
           return;

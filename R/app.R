@@ -10,9 +10,9 @@ irid_send_config <- function(session) {
 #
 # Registered to fire after the NEXT flush rather than sent inline: a top-level
 # mount creates control-flow observers (When/Each/Match) that only mount their
-# bodies — and send those bodies' `irid-events` — during that flush. Deferring
+# bodies — and send those bodies' `irid-wire` — during that flush. Deferring
 # to `onFlushed` guarantees `irid-ready` is queued after every nested
-# `irid-events`, so by WebSocket ordering a client that has seen `irid-ready`
+# `irid-wire`, so by WebSocket ordering a client that has seen `irid-ready`
 # has every listener attached and every server observer registered. The e2e
 # harness waits on this before driving the first interaction (see helper-e2e.R).
 irid_send_ready <- function(session, output = NULL) {

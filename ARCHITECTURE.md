@@ -9,9 +9,9 @@ R/
   event.R         wire carrier; wire_immediate/throttle/debounce timing
                   shapes; wire_dom_opts; merge.irid_wire
   encode.R        producer-side wire codec — irid_encode_* message constructors
-                  (attr/event/mutate/config/ready/widget-init) + irid_decode_payload;
-                  centralizes the jsonlite serialization discipline (wire_array/
-                  wire_map/wire_string/wire_gate)
+                  (attr/wire/mutate/config/ready/widget-init) + irid_decode_payload;
+                  centralizes the jsonlite serialization discipline (json_array/
+                  json_map/json_string/json_gate)
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
@@ -191,7 +191,7 @@ Takes the output of `process_tags` and a Shiny `session`, then wires up:
 2. **Event handlers** — Each event gets an `observeEvent()` on a namespaced
    input ID (`irid_ev_{id}_{event}`). The handler is dispatched based on its
    formal argument count (0, 1, or 2 args). Event registration is sent to the
-   client as a `irid-events` message.
+   client as a `irid-wire` message.
 3. **Shiny outputs** — Each output's render call is assigned to
    `session$output[[id]]`.
 4. **Control-flow nodes** — Each node gets an `observe()` that manages its
@@ -389,7 +389,7 @@ anchor references are preserved across moves.
 ## Client-Side Protocol
 
 `irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-mutate`, `irid-events`, `irid-widget-init`, and
+`irid-attr`, `irid-mutate`, `irid-wire`, `irid-widget-init`, and
 `irid-ready`.
 
 All server→client messages are built by the producer-side wire codec
@@ -472,7 +472,7 @@ control-flow rendering is unified as single-slot keyed reconciliation.
 After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
 initialize any new Shiny outputs.
 
-### `irid-events`
+### `irid-wire`
 
 The message is an array of entries, a discriminated union on `source`. A DOM
 event carries nested `domOpts` + `clientOnly`; a widget event carries `kind`
@@ -608,8 +608,8 @@ client:
 Signals that a mount is fully wired. The server (`irid_send_ready` in `R/app.R`)
 sends it from the mount's `onFlushed`, i.e. **after** the flush in which every
 control-flow body (`When`/`Each`/`Match`) has mounted and sent its own
-`irid-events`. Because WebSocket messages are ordered and an event's
-`observeEvent` is registered *before* its `irid-events` within
+`irid-wire`. Because WebSocket messages are ordered and an event's
+`observeEvent` is registered *before* its `irid-wire` within
 `irid_mount_processed`, a client that has seen `irid-ready` has every listener
 attached *and* every server observer registered.
 
@@ -760,7 +760,7 @@ controlled inputs.
 process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
 Plotly, Leaflet, ...). It expresses one R-side component on top of an
 init/update/destroy contract on the JS side, and reuses every existing
-irid channel — `irid-attr` for one-way prop updates, `irid-events` for
+irid channel — `irid-attr` for one-way prop updates, `irid-wire` for
 event payloads, the optimistic-update sequence counter, the `wire`
 timing config, the stale indicator, the comment-anchor lifecycle. No
 widget-specific code lives in the transport.

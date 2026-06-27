@@ -158,7 +158,7 @@ test_that("widget event messages carry kind and a namespaced inputId", {
   result <- process_tags(node)
   handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
 
-  ev_msg <- Filter(function(m) m$type == "irid-events", s$msgs())
+  ev_msg <- Filter(function(m) m$type == "irid-wire", s$msgs())
   expect_length(ev_msg, 1L)
   rows <- ev_msg[[1]]$message
   bykind <- stats::setNames(

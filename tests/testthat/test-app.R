@@ -83,7 +83,7 @@ test_that("iridApp server sends config synchronously and wires the tree", {
 
   types <- vapply(s$msgs(), function(m) m$type, character(1))
   expect_true("irid-config" %in% types)  # sent before mounting
-  expect_true("irid-events" %in% types)  # the value autobind registered an event
+  expect_true("irid-wire" %in% types)  # the value autobind registered an event
 })
 
 # --- iridOutput --------------------------------------------------------------

@@ -169,7 +169,7 @@ e2e_app <- function(fixture, env = parent.frame(), viewport = c(1280, 900)) {
   e2e_install_idle(app)
   # Readiness barrier. After `navigate` returns the page is loaded but NOT yet
   # interactive: Shiny connects asynchronously and irid wires its listeners on
-  # the initial flush's `irid-events`, so a first interaction dispatched here can
+  # the initial flush's `irid-wire`, so a first interaction dispatched here can
   # be silently dropped (issue #59). The server sends `irid-ready` only once
   # every mount's listeners and server observers exist — wait for the client to
   # see it before handing back the (now genuinely interactive) handle.

@@ -1,4 +1,5 @@
-# Wire encoder / decoder — see dev/protocol-types.md §9.
+# Producer-side wire codec: the `irid_encode_*` message constructors + the
+# `irid_decode_payload` inbound step, built on a handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
@@ -13,7 +14,7 @@
 # Force a JSON array (unnamed list): `[]` when empty, `[x]` for a length-1 value
 # (which would otherwise unbox to a scalar under `auto_unbox = TRUE`). Names are
 # stripped so the list never serializes as an object.
-wire_array <- function(x) {
+json_array <- function(x) {
   if (length(x) == 0L) return(list())
   as.list(unname(x))
 }
@@ -22,7 +23,7 @@ wire_array <- function(x) {
 # choice off list NAMES, so an empty *map* must be a named list. Named atomic
 # members are converted to named lists so an object-shaped value still serializes
 # as an object (and without the deprecated keep_vec_names warning).
-wire_map <- function(x) {
+json_map <- function(x) {
   if (length(x) == 0L) return(stats::setNames(list(), character(0)))
   irid_jsonify_names(as.list(x))
 }
@@ -31,7 +32,7 @@ wire_map <- function(x) {
 # `as.character(NULL)` is `character(0)` (serializes as `[]`) and `NA_character_`
 # serializes as `null`, so without this the wire type would be `string | null | []`
 # rather than the `string` the protocol declares.
-wire_string <- function(x) {
+json_string <- function(x) {
   x <- as.character(x)
   if (length(x) == 0L || is.na(x)) return("")
   x
@@ -39,7 +40,8 @@ wire_string <- function(x) {
 
 # An `EchoGate` `{seq, channel}`, or NULL (the key is OMITTED) when there's no
 # gating context — a programmatic write. Contextual absence, not a `null` value.
-wire_gate <- function(seq, channel) {
+# (Not a `json_*` shape primitive — it builds a domain value type.)
+irid_encode_echo_gate <- function(seq, channel) {
   if (is.null(seq)) return(NULL)
   list(seq = seq, channel = channel)
 }
@@ -75,7 +77,7 @@ irid_encode_ready <- function(output) {
 # props are kept as explicit `null` so the factory sees its full declared prop set
 # (the root-cause fix that deletes `__irid_state_keys`).
 irid_encode_widget_init <- function(id, name, props) {
-  list(id = id, name = name, props = wire_map(props))
+  list(id = id, name = name, props = json_map(props))
 }
 
 # --- irid-attr message constructors ----------------------------------------
@@ -83,7 +85,7 @@ irid_encode_widget_init <- function(id, name, props) {
 # DOM property/attribute write. `gate` is omitted for a programmatic write.
 irid_encode_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
   msg <- list(id = id, target = "dom", attr = attr, value = value)
-  gate <- wire_gate(seq, channel)
+  gate <- irid_encode_echo_gate(seq, channel)
   if (!is.null(gate)) msg$gate <- gate
   msg
 }
@@ -91,18 +93,18 @@ irid_encode_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
 # Text replacement inside a comment-anchor range. No gate (text never gates), and
 # `value` is normalized to a string so the wire type is `string`.
 irid_encode_attr_text <- function(id, value) {
-  list(id = id, target = "text", value = wire_string(value))
+  list(id = id, target = "text", value = json_string(value))
 }
 
 # Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
 # sparse per-key gate map, OMITTED entirely when no key is gated (all programmatic).
 irid_encode_attr_widget <- function(id, values, gates) {
-  msg <- list(id = id, target = "widget", values = wire_map(values))
-  if (length(gates) > 0L) msg$valueGates <- wire_map(gates)
+  msg <- list(id = id, target = "widget", values = json_map(values))
+  if (length(gates) > 0L) msg$valueGates <- json_map(gates)
   msg
 }
 
-# --- irid-events message constructors --------------------------------------
+# --- irid-wire message constructors ----------------------------------------
 
 # The nested `timing` sub-object, discriminated on `mode`. ms/leading exist only
 # where the variant gives them meaning (semantic absence by variant).
@@ -127,10 +129,11 @@ irid_encode_dom_opts <- function(prevent_default, stop_propagation, capture,
   )
 }
 
-# One `irid-events` entry. `channel` is the namespaced inputId. The wire shape is
-# a discriminated union on `source`: a dom event carries `domOpts` + `clientOnly`,
-# a widget event carries `kind` (each field omitted on the other arm).
-irid_encode_event <- function(ev, channel, client_only) {
+# One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
+# `channel` is the namespaced inputId. The wire shape is a discriminated union on
+# `source`: a dom event carries `domOpts` + `clientOnly`, a widget event carries
+# `kind` (each field omitted on the other arm).
+irid_encode_wire <- function(ev, channel, client_only) {
   msg <- list(
     id = ev$id,
     event = ev$event,
@@ -157,14 +160,14 @@ irid_encode_event <- function(ev, channel, client_only) {
 # Granular comment-anchor range mutations: the sole structural message, driving
 # Each (N keyed/positional children) AND When/Match (one child, keyed by active
 # branch/case). removes/inserts/order are contextual command-parts, each OMITTED
-# when this mutation doesn't do it. `wire_array` forces each to a JSON array (an
+# when this mutation doesn't do it. `json_array` forces each to a JSON array (an
 # unnamed list), centralizing the length-1-unbox / named-vector-as-object discipline
 # that used to live at every send site.
 irid_encode_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
   msg <- list(id = id)
-  if (length(removes) > 0L) msg$removes <- wire_array(removes)
-  if (length(inserts) > 0L) msg$inserts <- wire_array(inserts)
-  if (length(order) > 0L) msg$order <- wire_array(order)
+  if (length(removes) > 0L) msg$removes <- json_array(removes)
+  if (length(inserts) > 0L) msg$inserts <- json_array(inserts)
+  if (length(order) > 0L) msg$order <- json_array(order)
   msg
 }
 
@@ -174,7 +177,7 @@ irid_encode_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL)
 # envelope (`id` + per-channel `seq`) from the foreign event data. It does NOT do
 # value coercion (turning `list(40, 200)` into a numeric range, or `NA` back into
 # `NULL`) — that is semantic and field-specific, so it stays per-widget
-# (`coerce_plotly_value`). See §9 "Inbound decode".
+# (`coerce_plotly_value`).
 irid_decode_payload <- function(payload) {
   # NULL -> NA normalizes a field that arrived as JSON `null` (e.g. an empty
   # input's `valueAsNumber`) so it survives as an explicit list element rather

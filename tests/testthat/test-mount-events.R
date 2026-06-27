@@ -55,12 +55,12 @@ test_that("a 2-arg handler receives the event object and the source id", {
 })
 
 test_that("a config-only wire registers a client listener but no observer", {
-  # `wire` carrying only dom_opts (no handler) is client-only: the irid-events
+  # `wire` carrying only dom_opts (no handler) is client-only: the irid-wire
   # row is marked clientOnly and no server observer is created.
   m <- mount_node(shiny::tags$button(
     onClick = wire(dom_opts = wire_dom_opts(prevent_default = TRUE))
   ))
-  ev_msgs <- Filter(function(x) x$type == "irid-events", m$session$msgs())
+  ev_msgs <- Filter(function(x) x$type == "irid-wire", m$session$msgs())
   expect_length(ev_msgs, 1L)
   row <- ev_msgs[[1]]$message[[1]]
   expect_true(row$clientOnly)
