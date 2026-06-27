@@ -266,18 +266,19 @@ called identically from the dom path (`msg.gate`) and the widget per-key path
 
 ### Structure — comment-anchor range ops
 
-```ts
-/** `irid-swap` — replace a range's contents wholesale. */
-export interface IridSwapMessage {
-  id: AnchorId;
-  html: string;
-}
+One message for *all* dynamic content. `irid-swap` is **deleted** — When/Match now
+reconcile through `irid-mutate` like Each (§11: control-flow rendering is unified —
+When/Match are single-slot keyed reconciliation, a flip is `{removes:[old],
+inserts:[new]}`, an empty branch is `{removes:[old]}`).
 
-/** `irid-mutate` — granular range mutations (Each). Child ids are AnchorIds. */
+```ts
+/** `irid-mutate` — granular comment-anchor range mutations. The sole structural
+ *  message: drives Each (N keyed/positional children) AND When/Match (one child,
+ *  keyed by active branch/case). Child ids are AnchorIds. */
 export interface IridMutateMessage {
   id: AnchorId;
   removes?: AnchorId[];
-  inserts?: string[];     // HTML fragments
+  inserts?: string[];     // HTML fragments (each its own anchored child range)
   order?: AnchorId[];
 }
 ```
@@ -481,7 +482,9 @@ edit so the bytes match the type:
 | DOM flags | flat 4 fields → nested `domOpts`; **omit on widget rows** | [mount.R:368-371](../R/mount.R#L368-L371) |
 | `kind` | drop from DOM rows entirely (already NULL→absent); required on widget | [mount.R:363](../R/mount.R#L363) |
 | Ready id | `id` → `output` (optional; absent for `iridApp`) | [app.R:18-20](../R/app.R#L18) |
-| state keys | type-only: `string\|string[]` → `string[]` + drop client `.concat` ([plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)). **R already array-wraps** (`as.list`, no R change) | [plotly.R:345](../R/plotly.R#L345) |
+| Payload envelope | flat `{…fields, id, nonce, __irid_seq}` → `{ id, nonce, seq, data:{…fields} }`; deletes `__irid_seq` | client `attachPayloadMeta`; `irid_decode_payload` ([mount.R:402-420](../R/mount.R#L402)) |
+| Widget props | preserve NULL props (keep key as explicit `null`) → factory sees full set → **deletes `__irid_state_keys`**; drop client `.concat` ([plotly/index.ts:259](../srcts/src/widgets/plotly/index.ts#L259)) | widget-init seeding ([mount.R:326-333](../R/mount.R#L326)) |
+| Control flow | delete `irid-swap`; When/Match emit `irid-mutate` (anchor bodies as child ranges) | [mount.R:556,566,820,852](../R/mount.R#L556) → mutate |
 | array fields | move `as.list`/`USE.NAMES=FALSE` for `removes`/`inserts`/`order` into the encoder (no behavior change, cleanup) | [mount.R:195-208](../R/mount.R#L195-L208) |
 | text value | drop `number`; normalize empty/`NA`/`character(0)` → `""` so wire is `string` | [mount.R:39-500](../R/mount.R#L39) (`coerce_text_child`) |
 
@@ -618,12 +621,17 @@ encoder, backstopped by e2e and TS compile-time types.
    `timing`/`domOpts`, drop `kind` null, narrow the ratelimit helpers.
 4. Renames + type tightenings: `inputId`→`channel`, ready `id`→`output` (optional),
    delete `__irid_state_keys` (preserve NULL props; plotly derives keys from props).
-5. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
+5. Payload envelope: `{ id, nonce, seq, data }` (§5) — wrap on the client
+   (`attachPayloadMeta`), unwrap in `irid_decode_payload`; deletes `__irid_seq`.
+6. Unify control-flow rendering (§11): anchor When/Match bodies as child ranges,
+   emit `irid-mutate` from the When/Match mount, delete the `irid-swap` handler +
+   `IridSwapMessage`. Mostly mount.R + client; e2e covers When/Match/Each.
+7. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
    rules) and `irid_decode_payload` (inbound envelope, promoted from the mount.R
    inline). Land the encoder alongside the first R-touching step (it's where the
    nesting/`I()`/normalization rules belong); value coercion stays per-widget.
-6. Split TS into `protocol/` directory with barrel `index.ts`.
-7. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
+8. Split TS into `protocol/` directory with barrel `index.ts`.
+9. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
 
 Each step keeps the e2e suite green; the suite is what proves the wire still
 round-trips after each rename/nest.
@@ -636,6 +644,27 @@ round-trips after each rename/nest.
 
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
+
+**Decided — delete `irid-swap`; unify control-flow rendering on `irid-mutate`.**
+When/Match are **single-slot keyed reconciliation**: they already short-circuit,
+remounting only when the active branch/case *changes* and otherwise updating the body
+in place via its bindings — which *is* keyed Each's "kept key → reuse, changed key →
+remove+insert," with the key being the active branch instead of `by(item)`. So all
+four control-flow modes are one mechanism (When = 1 slot keyed by condition; Match = 1
+slot keyed by case; Each = N slots keyed by position or `by`). swap was the outlier
+only because When/Match mount their body *directly* in the container range rather than
+as a named child. Give the body its own child-anchor pair and a flip becomes
+`mutate {removes:[old], inserts:[new]}`, an empty branch `mutate {removes:[old]}` —
+swap deleted, no mode flag, one structural message, one client handler.
+*Rejected* Path A (a `replace`/`clear` mode on `mutate`): a false unification — one
+channel carrying two removal semantics under a flag, gaining nothing over today's two
+channels (the channel name already discriminates, like `irid-attr`'s `target`).
+Semantics preserved (verified vs current): flips still rebuild (widget identity/focus
+still don't survive a branch flip — unchanged); same-key updates still mutate in place
+(no message emitted); empty case is a remove with no insert. Cost: one comment-pair
+per active When/Match body. Touches the When/Match mount in `mount.R` (emit mutate +
+anchor the body) and deletes the client `irid-swap` handler — in scope because the new
+wire already rewrites the client.
 
 **Decided — delete `__irid_state_keys` by preserving NULL props (root cause).** The
 field exists only because a NULL-initialized prop is dropped from the props bag (R's
