@@ -367,8 +367,14 @@ srcts/src/protocol/
 The file boundaries follow **audience/stability** and **shared vocabulary**, not
 direction:
 
-- `common.ts` is the shared axis — referenced by *both* `wire.ts` and `widget.ts`
-  (e.g. `irid:ready`'s detail uses `OutputName`), so it's its own file.
+- `common.ts` is the **vocabulary leaf** — value-type primitives (`EchoGate`,
+  `DomOpts`, `Timing`, `EventKind`, id aliases) that exist independent of the message
+  structures that carry them. It's a dependency-free leaf referenced by *both*
+  `wire.ts` and `widget.ts` (e.g. `irid:ready`'s detail uses `OutputName`), which is
+  what keeps those two as *peers over a shared foundation* rather than coupling
+  `widget → wire`. Note this is the inverse of the payloads/messages call: those were
+  the same *layer* (transport structure) and wire-only, so they merged; `common` is a
+  *different* layer and genuinely shared, so it stays split.
 - `wire.ts` is the internal transport contract. Server→client messages and
   client→server payloads live together because they're one layer read *jointly* on a
   round-trip (the outbound `gate` is gated against the `__irid_seq` the inbound
