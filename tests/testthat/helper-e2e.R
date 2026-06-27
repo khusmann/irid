@@ -69,10 +69,13 @@ e2e_boot_fn <- function(fixture_path, pkg_root, port) {
     }, error = function(e) FALSE)
   }
   if (!loaded) library(irid)
-  app_fn <- source(fixture_path)$value
+  # A fixture's last value is normally a zero-arg App fn (wrapped in iridApp).
+  # A fixture exercising iridOutput/renderIrid instead returns a full
+  # shiny.appobj (its own ui/server) — run that verbatim.
+  sourced <- source(fixture_path)$value
+  app <- if (inherits(sourced, "shiny.appobj")) sourced else irid::iridApp(sourced)
   shiny::runApp(
-    irid::iridApp(app_fn),
-    port = port, host = "127.0.0.1", launch.browser = FALSE
+    app, port = port, host = "127.0.0.1", launch.browser = FALSE
   )
 }
 
