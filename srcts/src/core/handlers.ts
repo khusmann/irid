@@ -1,5 +1,5 @@
-// The six Shiny custom-message handlers that drive the client: irid-config,
-// irid-attr, irid-swap, irid-mutate, irid-events, irid-widget-init.
+// The Shiny custom-message handlers that drive the client: irid-config,
+// irid-attr, irid-swap, irid-mutate, irid-events, irid-widget-init, irid-ready.
 
 import { isStaleEcho, sequences } from "./seq";
 import {
@@ -25,6 +25,7 @@ import type {
   IridConfigMessage,
   IridEventEntry,
   IridMutateMessage,
+  IridReadyMessage,
   IridSwapMessage,
   IridWidgetInitMessage,
 } from "../protocol";
@@ -238,4 +239,17 @@ export function registerHandlers(): void {
       handleWidgetInit(msg);
     },
   );
+
+  // Readiness lifecycle. Sent by the server after a mount's `irid-events` (so its
+  // listeners are attached) and after its server observers exist; WebSocket
+  // ordering means that when this lands, the mount is fully wired. We surface it
+  // two ways: a public `irid:ready` DOM event app authors can hook (focus an
+  // input, hide a splash, start a tour…), and the `window.__iridReady` flag as
+  // the "missed the event" escape hatch. The e2e harness waits on the flag.
+  Shiny.addCustomMessageHandler("irid-ready", (msg: IridReadyMessage) => {
+    window.__iridReady = true;
+    document.dispatchEvent(
+      new CustomEvent("irid:ready", { detail: { id: msg?.id ?? null } }),
+    );
+  });
 }

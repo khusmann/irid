@@ -4,6 +4,23 @@ irid_send_config <- function(session) {
   ))
 }
 
+# Signal the client that a mount is fully wired (the `irid:ready` lifecycle
+# event + `window.__iridReady` flag). `id` is the output name for a renderIrid
+# mount, NULL for a top-level iridApp mount.
+#
+# Registered to fire after the NEXT flush rather than sent inline: a top-level
+# mount creates control-flow observers (When/Each/Match) that only mount their
+# bodies — and send those bodies' `irid-events` — during that flush. Deferring
+# to `onFlushed` guarantees `irid-ready` is queued after every nested
+# `irid-events`, so by WebSocket ordering a client that has seen `irid-ready`
+# has every listener attached and every server observer registered. The e2e
+# harness waits on this before driving the first interaction (see helper-e2e.R).
+irid_send_ready <- function(session, id = NULL) {
+  session$onFlushed(function() {
+    session$sendCustomMessage("irid-ready", list(id = id))
+  }, once = TRUE)
+}
+
 #' Create a irid application
 #'
 #' Builds a Shiny app from a function that returns a irid tag tree. The
@@ -30,6 +47,7 @@ iridApp <- function(fn, ...) {
     irid_send_config(session)
     result <- process_tags(fn())
     irid_mount_processed(result, session)
+    irid_send_ready(session)
   }
   shiny::shinyApp(ui, server, ...)
 }
@@ -73,6 +91,7 @@ renderIrid <- function(expr, env = parent.frame(), quoted = FALSE) {
     session$onFlushed(function() {
       irid_send_config(session)
       irid_mount_processed(result, session)
+      irid_send_ready(session, id = output_name)
     }, once = TRUE)
 
     result$tag
