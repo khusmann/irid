@@ -48,8 +48,10 @@
 
   // src/core/seq.ts
   var sequences = {};
-  function isStaleEcho(seq, channel, seqs) {
-    return seq !== void 0 && seq !== null && channel !== void 0 && channel !== null && seqs[channel] !== void 0 && seq < seqs[channel];
+  function isStaleEcho(gate, seqs) {
+    if (!gate) return false;
+    const latest = seqs[gate.channel];
+    return latest !== void 0 && gate.seq < latest;
   }
   function nextSequence(seqs, channel) {
     if (!seqs[channel]) seqs[channel] = 0;
@@ -541,12 +543,11 @@
         const w = widgets[msg.id];
         if (!w) return;
         let values = msg.values;
-        if (msg.value_meta) {
+        if (msg.valueGates) {
           const kept = {};
           let any = false;
           for (const k in values) {
-            const meta = msg.value_meta[k];
-            if (meta && isStaleEcho(meta.seq, meta.channel, sequences)) continue;
+            if (isStaleEcho(msg.valueGates[k], sequences)) continue;
             kept[k] = values[k];
             any = true;
           }
@@ -560,7 +561,6 @@
         }
         return;
       }
-      if (isStaleEcho(msg.sequence, msg.channel, sequences)) return;
       if (msg.target === "text") {
         const a = lookupAnchors(msg.id);
         if (!a) return;
@@ -578,6 +578,7 @@
         }
         return;
       }
+      if (isStaleEcho(msg.gate, sequences)) return;
       const el = document.getElementById(msg.id);
       if (!el) return;
       if (msg.attr === "value" && document.activeElement === el && el.value === msg.value) {

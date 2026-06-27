@@ -85,7 +85,7 @@ test_that("widgets drain in first-seen order, not alphabetical", {
   expect_equal(ids, c("w-2", "w-10"))
 })
 
-test_that("each key carries its own {seq, channel} in value_meta", {
+test_that("each key carries its own {seq, channel} in valueGates", {
   # The gate is per channel, so the sequence travels per key (not one batch-
   # level max): a box zoom can contribute xaxis_range + yaxis_range from two
   # different channels in one batch.
@@ -95,18 +95,18 @@ test_that("each key carries its own {seq, channel} in value_meta", {
   irid:::irid_queue_widget_attr(s, "w1", "c", 3, sequence = NULL)
   s$flushReact()
 
-  vm <- attr_msgs(s)[[1]]$message$value_meta
+  vm <- attr_msgs(s)[[1]]$message$valueGates
   expect_equal(vm$a, list(seq = 3, channel = "ch_a"))
   expect_equal(vm$b, list(seq = 7, channel = "ch_b"))
-  # A programmatic key (no sequence) gets no value_meta entry — applied always.
+  # A programmatic key (no sequence) gets no valueGates entry — applied always.
   expect_false("c" %in% names(vm))
 })
 
-test_that("a purely programmatic batch carries no value_meta", {
+test_that("a purely programmatic batch carries no valueGates", {
   s <- new_batch_session()
   irid:::irid_queue_widget_attr(s, "w1", "a", 1)
   s$flushReact()
-  expect_false("value_meta" %in% names(attr_msgs(s)[[1]]$message))
+  expect_false("valueGates" %in% names(attr_msgs(s)[[1]]$message))
 })
 
 test_that("a later attr overwrites an earlier value for the same key", {
@@ -203,7 +203,7 @@ test_that("props changing in separate flushes drain as separate messages", {
   m$handle$destroy()
 })
 
-test_that("a binding stamps its own (source, attr) channel into value_meta", {
+test_that("a binding stamps its own (source, attr) channel into valueGates", {
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()            # initial (programmatic) batch
@@ -218,14 +218,14 @@ test_that("a binding stamps its own (source, attr) channel into value_meta", {
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_equal(last$value_meta$content, list(seq = 42, channel = "ch_content"))
+  expect_equal(last$valueGates$content, list(seq = 42, channel = "ch_content"))
 
   m$handle$destroy()
 })
 
 test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   # A sibling channel recorded a DIFFERENT attr this flush; the content binding
-  # finds no entry for its own attr and sends no value_meta (programmatic).
+  # finds no entry for its own attr and sends no valueGates (programmatic).
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()
@@ -239,7 +239,7 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_false("value_meta" %in% names(last))
+  expect_false("valueGates" %in% names(last))
 
   m$handle$destroy()
 })

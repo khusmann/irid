@@ -6,29 +6,26 @@
 // The pure functions take `sequences` explicitly so they're unit-testable; the
 // runtime threads the shared `sequences` singleton below.
 
+import type { EchoGate } from "../protocol";
+
 export type Sequences = Record<string, number>;
 
 /** Shared runtime counter map: channel (send inputId) -> latest sent sequence. */
 export const sequences: Sequences = {};
 
 /**
- * Has the channel's counter already moved past this echo's seq? Inert when no
- * sequence/channel is present (programmatic updates) or when the counter hasn't
- * advanced beyond the echo.
+ * Has the gate's channel counter already moved past the echo's seq? Inert when
+ * no gate is present (a programmatic update) or when the counter hasn't advanced
+ * beyond the echo. One `EchoGate` shape, called identically from the dom path
+ * (`msg.gate`) and the widget per-key path (`valueGates[k]`).
  */
 export function isStaleEcho(
-  seq: number | null | undefined,
-  channel: string | null | undefined,
+  gate: EchoGate | undefined,
   seqs: Sequences,
 ): boolean {
-  return (
-    seq !== undefined &&
-    seq !== null &&
-    channel !== undefined &&
-    channel !== null &&
-    seqs[channel] !== undefined &&
-    seq < seqs[channel]
-  );
+  if (!gate) return false;
+  const latest = seqs[gate.channel];
+  return latest !== undefined && gate.seq < latest;
 }
 
 /** Bump the channel's counter and return the new value (mutates `seqs`). */

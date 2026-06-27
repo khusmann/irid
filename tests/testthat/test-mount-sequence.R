@@ -47,7 +47,7 @@ test_that("two props written in one flush each carry their own channel+seq", {
 
   msgs <- ctx$new_attrs()
   expect_length(msgs, 1L)                    # coalesced into one widget batch
-  vm <- msgs[[1]]$message$value_meta
+  vm <- msgs[[1]]$message$valueGates
   expect_equal(vm$a$seq, 5)
   expect_equal(vm$b$seq, 9)
   # Distinct channels — `a`'s is not `b`'s.
@@ -82,7 +82,7 @@ test_that("a sibling notification does not pollute a prop's echo sequence", {
 
   msgs <- ctx$new_attrs()
   expect_length(msgs, 1L)
-  vm <- msgs[[1]]$message$value_meta
+  vm <- msgs[[1]]$message$valueGates
   # The prop echo carries ITS seq (3), not the notification's later 8.
   expect_equal(vm$selected_ids$seq, 3)
   expect_true(grepl("_selected_ids$", vm$selected_ids$channel))
@@ -107,12 +107,11 @@ test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
   ctx$session$flushReact()
 
   msgs <- ctx$new_attrs()
-  # The value binding echoed the new value, but with no sequence/channel.
+  # The value binding echoed the new value, but with no gate.
   value_echo <- Filter(function(m) identical(m$message$attr, "value"), msgs)
   expect_length(value_echo, 1L)
   expect_equal(value_echo[[1]]$message$value, "typed")
-  expect_false("sequence" %in% names(value_echo[[1]]$message))
-  expect_false("channel" %in% names(value_echo[[1]]$message))
+  expect_false("gate" %in% names(value_echo[[1]]$message))
 
   ctx$handle$destroy()
 })
@@ -137,8 +136,8 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
   )
   expect_gte(length(value_echo), 1L)
   for (m in value_echo) {
-    expect_equal(m$message$sequence, 4)
-    expect_true(grepl("_input$", m$message$channel))
+    expect_equal(m$message$gate$seq, 4)
+    expect_true(grepl("_input$", m$message$gate$channel))
   }
 
   ctx$handle$destroy()

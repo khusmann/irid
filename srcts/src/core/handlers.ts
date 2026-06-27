@@ -55,15 +55,14 @@ export function registerHandlers(): void {
       const w = widgets[msg.id];
       if (!w) return;
       // `values` is a {attr -> value} map. The gate is PER KEY (a batch can carry
-      // props from different channels), via value_meta. Keys with no value_meta
+      // props from different channels), via valueGates. Keys with no valueGates
       // entry are programmatic and always apply.
       let values = msg.values;
-      if (msg.value_meta) {
+      if (msg.valueGates) {
         const kept: Record<string, unknown> = {};
         let any = false;
         for (const k in values) {
-          const meta = msg.value_meta[k];
-          if (meta && isStaleEcho(meta.seq, meta.channel, sequences)) continue;
+          if (isStaleEcho(msg.valueGates[k], sequences)) continue;
           kept[k] = values[k];
           any = true;
         }
@@ -79,10 +78,8 @@ export function registerHandlers(): void {
       return;
     }
 
-    // dom/text stale-echo gate (single channel per message).
-    if (isStaleEcho(msg.sequence, msg.channel, sequences)) return;
-
     if (msg.target === "text") {
+      // No gate — a text echo is always programmatic and applies unconditionally.
       const a = lookupAnchors(msg.id);
       if (!a) return;
       const parent = a.start.parentNode!;
@@ -100,7 +97,8 @@ export function registerHandlers(): void {
       return;
     }
 
-    // target === 'dom'
+    // target === 'dom' — single-channel stale-echo gate.
+    if (isStaleEcho(msg.gate, sequences)) return;
     const el = document.getElementById(msg.id) as HTMLInputElement | null;
     if (!el) return;
     // Cursor-preservation no-op skip — setting el.value to its current string

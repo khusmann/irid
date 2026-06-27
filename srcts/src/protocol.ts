@@ -67,40 +67,40 @@ export interface IridConfigMessage {
 }
 
 /** `irid-attr` — a binding update; discriminated on `target`. */
-export type IridAttrMessage =
-  | IridAttrDomMessage
-  | IridAttrTextMessage
-  | IridAttrWidgetMessage;
+export type IridAttrMessage = IridAttrDom | IridAttrText | IridAttrWidget;
 
 /** DOM property/attribute write on `getElementById(id)`. */
-export interface IridAttrDomMessage {
-  id: string;
+export interface IridAttrDom {
   target: "dom";
+  id: ElementId;
   attr: string;
   value: unknown;
-  /** Echo-gate seq; omitted for programmatic writes. */
-  sequence?: number;
-  /** The channel `sequence` is gated against; omitted for programmatic writes. */
-  channel?: string;
+  /** CONTEXTUAL absence: omitted for a programmatic write (no client channel to
+   *  gate against). Only dom carries it (value/checked echoes on focused inputs);
+   *  text never does. */
+  gate?: EchoGate;
 }
 
-/** Text replacement inside a comment-anchor range. */
-export interface IridAttrTextMessage {
-  id: string;
+/** Text replacement inside a comment-anchor range. NO gate — a comment-anchor
+ *  range is display-only (you can't type into it), so a text echo is always
+ *  programmatic and applies unconditionally. */
+export interface IridAttrText {
   target: "text";
+  id: AnchorId;
   value: string | number | null;
-  sequence?: number;
-  channel?: string;
 }
 
 /** Coalesced batch routed to a widget's `update()` hook. */
-export interface IridAttrWidgetMessage {
-  id: string;
+export interface IridAttrWidget {
   target: "widget";
-  /** `{ attr -> value }`, one or more keys coalesced in one server flush. */
+  id: ElementId;
+  /** `{ attr -> value }`, one or more keys coalesced in one server flush. The
+   *  DATA — always present. */
   values: Record<string, unknown>;
-  /** Per-key gate; keys absent here are programmatic and always apply. */
-  value_meta?: Record<string, EchoGate>;
+  /** Sparse per-key gate ANNOTATION: an entry only for a key from a client write;
+   *  an absent key is programmatic. Omitted (not present-empty `{}`) when no key
+   *  is gated — matches the scalar `gate`. */
+  valueGates?: Record<string, EchoGate>;
 }
 
 /** `irid-swap` — replace a comment-anchor range's contents wholesale. */
