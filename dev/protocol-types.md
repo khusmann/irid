@@ -461,6 +461,34 @@ the expected shape (or a JSON Schema generated from the protocol) in debug build
 which would have caught the `character(0)` → `[]` wart automatically. This is the
 R-side embodiment of the "producer emits total values" rule (§2).
 
+### Inbound decode — the symmetric half
+
+The encoder handles server→client. The client→server direction has a partner step
+that today is **inline** in the event observer ([mount.R:402-420](../R/mount.R#L402)):
+it reads the `__irid_seq` off the payload and strips the `PayloadMeta` envelope
+(`id`/`nonce`/`__irid_seq`) to build the user-facing `event_obj` (mapping
+`NULL → NA`). Promote it to a named **`irid_decode_payload()`** — the explicit mirror
+of the encoder. Two reasons beyond symmetry:
+
+- **One home for the envelope field names.** The `__irid_*`/`nonce`/`id` keys would
+  then be referenced in exactly one R function and one TS function
+  (`attachPayloadMeta`), mirror images — instead of inline string literals in the
+  observer. Rename-safe, single source of truth for the envelope.
+- **It clarifies what is NOT in this layer.** `irid_decode_payload` handles only the
+  **structural envelope** (extract meta, expose the rest as fields). It does **not**
+  do value coercion — turning `list(40, 200)` back into a numeric range, `NA` back
+  into `NULL` — because that is *semantic* and field-specific (a date-axis range
+  stays character), so it stays **per-widget** (`coerce_plotly_value`,
+  `coerce_state_prop`). This asymmetry is correct: outbound, the producer totalizes
+  values because it knows their types; inbound, only the consumer knows what a field
+  should coerce *to*.
+
+So the full codec is: **`irid_encode_*` (outbound, structural + value-total) +
+`irid_decode_payload` (inbound, structural envelope only)**, with value coercion
+explicitly scoped to widgets. The client does no runtime validation by design
+(type-only TS, zod rejected — §11); well-formedness is producer-guaranteed by the
+encoder, backstopped by e2e and TS compile-time types.
+
 ---
 
 ## 10. Commit plan (one concept per commit, feature branch)
@@ -472,21 +500,40 @@ R-side embodiment of the "producer emits total values" rule (§2).
 3. `irid-events` union: `IridEventCore` + `IridDomEvent | IridWidgetEvent`, nested
    `timing`/`domOpts`, drop `kind` null, narrow the ratelimit helpers.
 4. Renames: `inputId`→`channel`, ready `id`→`output`, `__irid_state_keys`→array.
-5. Split into `protocol/` directory with barrel `index.ts`.
-6. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
+5. R-side codec: extract `irid_encode_*` (outbound, applying the §9 construction
+   rules) and `irid_decode_payload` (inbound envelope, promoted from the mount.R
+   inline). Land the encoder alongside the first R-touching step (it's where the
+   nesting/`I()`/normalization rules belong); value coercion stays per-widget.
+6. Split TS into `protocol/` directory with barrel `index.ts`.
+7. Fold the resolved shapes back into ARCHITECTURE.md's protocol sections.
 
 Each step keeps the e2e suite green; the suite is what proves the wire still
 round-trips after each rename/nest.
 
 ---
 
-## 11. Open questions
+## 11. Open questions & rejected alternatives
+
+**Open:**
 
 - **Branded ids?** Plain aliases document intent but don't enforce (an `AnchorId`
   is assignable to an `ElementId`). Worth branding only if a real mix-up surfaces;
   branding adds a cast at every decode boundary.
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
+
+**Rejected — runtime schema validation (zod/valibot) on the wire.** Keep the client
+type-only. The wire is first-party and version-locked (the client is vendored into
+`inst/` and ships with the server, so no untrusted producer and no version skew); a
+malformed message is a bug in our own encoder, already caught by e2e. zod would also
+break `protocol.ts`'s deliberate type-only/zero-runtime property (it's imported by
+*both* bundles), add ~12kb gz + per-message parse cost on a substrate runtime's hot
+path, and validate only the TS *client* — not the R/Python *producers*, where drift
+actually originates (the language-neutral contract for that is this doc + the §9
+spike, optionally a generated JSON Schema). If runtime guards are ever wanted, the
+genuine third-party seam is the **widget-author API** (`defineWidget`/`setProp`/
+`sendEvent`), not the internal wire — and even there prefer tiny hand-rolled asserts
+or valibot over zod.
 (Resolved — was "`coalesce` into `Timing`?": it stays carrier-level. `coalesce`
 exists with the same meaning in every mode — immediate+coalesce is a wired,
 meaningful combination ([ratelimit.ts:322,331](../srcts/src/core/ratelimit.ts#L322):
