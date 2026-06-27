@@ -170,11 +170,18 @@ export interface IridConfigMessage {
                                  // (R always sends it — getOption default 200)
 }
 
-/** `irid-ready` — a mount is fully wired. `output` is null for a top-level
- *  iridApp mount, the output name for renderIrid/iridOutput. (Renamed from the
- *  overloaded `id`: this is an OutputName, not an element/anchor id.) */
+/** `irid-ready` — a mount is fully wired. `output` is the output name for a
+ *  renderIrid/iridOutput mount, and ABSENT for a top-level iridApp mount (which has
+ *  no output name). Optional, not `| null`: top-level is *semantic* absence (no name
+ *  exists to elide), so it's the `gate?`/`filter?` pattern — and R drops a NULL list
+ *  element, so the app case is literally absent on the wire, never JSON null (the
+ *  `| null` claimed a value the producer can't emit). The client maps absent → null
+ *  only when it synthesizes the PUBLIC `irid:ready` detail (`msg.output ?? null`),
+ *  where `{ id: string | null }` is the right shape for a JS consumer (§6). Wire =
+ *  optional/absent; public DOM detail = null. (Renamed from the overloaded `id`:
+ *  this is an OutputName, not an element/anchor id.) */
 export interface IridReadyMessage {
-  output: OutputName | null;
+  output?: OutputName;
 }
 ```
 
