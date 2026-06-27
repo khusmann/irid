@@ -47,14 +47,16 @@ dom_event <- list(
   source = "dom",
   timing = list(mode = "debounce", ms = 200L),
   coalesce = FALSE,
+  # DomOpts is a MATERIALIZED record: every field present with its off-default —
+  # `false` for the flags, `null` for filter (filter's "false"). list() keeps NULL.
   domOpts = list(preventDefault = FALSE, stopPropagation = FALSE,
-                 capture = FALSE, passive = FALSE),
+                 capture = FALSE, passive = FALSE, filter = NULL),
   clientOnly = FALSE
 )
 j <- show("dom event (all false)", dom_event)
 check("coalesce present as scalar false", j, grepl('"coalesce":false', j, fixed = TRUE))
-check("domOpts nested object of false", j,
-      grepl('"domOpts":{"preventDefault":false,"stopPropagation":false,"capture":false,"passive":false}', j, fixed = TRUE))
+check("domOpts: flags false + filter null (off-defaults)", j,
+      grepl('"domOpts":{"preventDefault":false,"stopPropagation":false,"capture":false,"passive":false,"filter":null}', j, fixed = TRUE))
 check("clientOnly present as false", j, grepl('"clientOnly":false', j, fixed = TRUE))
 check("timing nested w/ ms (debounce)", j, grepl('"timing":{"mode":"debounce","ms":200}', j, fixed = TRUE))
 

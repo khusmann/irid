@@ -71,14 +71,18 @@ Three axes organize everything:
 - **Default ownership.** Defaults are resolved by the **producer** (R, and the
   future Python server) into *total* values on the wire; consumers never re-derive
   them. It follows that **optionality marks semantic absence only — never
-  default-elision.** A field is optional iff its absence *means* something (no
-  client write to gate → no `gate`; no predicate → no `filter`; a variant simply
-  lacks the field → `ms` only under throttle/debounce). A field whose "absence"
-  would merely re-encode its default (`preventDefault`, `coalesce`, `clientOnly`,
-  throttle `leading`, `staleTimeout`) is **required**; R already sends these
-  concretely, so the client drops its defensive `!!`/coercion reads. Rationale:
+  default-elision.** A field is optional iff its absence is **contextual** — the
+  field doesn't apply here (no client write → no `gate`; app isn't an output → no
+  `output`; a variant lacks the field → `ms` only under throttle/debounce). A field
+  whose "absence" would merely re-encode its default is **required, with that default
+  explicit** — `false` for booleans (`preventDefault`, `coalesce`, `clientOnly`,
+  throttle `leading`, `staleTimeout`), and `null` for an optional-string member of a
+  materialized record (`DomOpts.filter` — `null` is its `false`). R already sends
+  these concretely, so the client drops its defensive `!!`/coercion reads. Rationale:
   with two servers and one client, a default belongs in the producers, resolved
   once, not re-implemented per consumer ("parse, don't validate" at the boundary).
+  The split: **contextual absence omits; a record field carries its off-default
+  (`false`/`null`).**
 - **Naming.** Wire envelope fields are **camelCase**. Verified across the complete
   field set (every `msg.<field>` the client reads + every R sender key): the lone
   offender today is `value_meta`, fixed to `valueGates` by this redesign — after
@@ -136,21 +140,23 @@ export interface EchoGate {
 
 // --- DOM listener options --------------------------------------------------
 // Mirrors R's `wire_dom_opts(prevent_default, stop_propagation, capture, passive,
-// filter)` 1:1 (event.R:119). DOM-only; a widget channel has no listener. The four
-// flags are required — R materializes them on every dom row, absent ≡ the `false`
-// default (pure elision), and the client reads each directly (no `!!`). `filter` is
-// optional: its R default is NULL (semantic absence — "no predicate"), so it follows
-// the gate?/filter? rule. The `domOpts` member that carries this is required too:
-// an absent DomOpts would just re-encode {4 false, no filter} — a plain listener.
+// filter)` 1:1 (event.R:119). DOM-only; a widget channel has no listener. This is a
+// fully-MATERIALIZED config record: every field is present, carrying its type's "off"
+// default — `false` for the flags, `null` for `filter`. None is omitted (a field here
+// is a config setting, not a contextual artifact like `gate`). So `domOpts` itself is
+// required too: an absent DomOpts would just re-encode {4 false, filter null}.
 export interface DomOpts {
   preventDefault: boolean;
   stopPropagation: boolean;
   capture: boolean;
   passive: boolean;
-  filter?: string;        // JS predicate over `e`. Optional/absent-only: R forbids
-                          // "" (allow_empty=FALSE) and an empty predicate is invalid,
-                          // so there's no present-empty form. Encoder omits when none
-                          // (today it's sent as `null` — see §9; never on the wire).
+  filter: string | null;  // JS predicate over `e`, or null for none. REQUIRED with an
+                          // explicit off-default — `null` is to filter what `false` is
+                          // to the flags above (every DomOpts field is present, carrying
+                          // its type's "off" value). Not omitted: filter is a member of
+                          // this materialized record, not a contextual field. (No "" —
+                          // R forbids it, allow_empty=FALSE.) R's list() already emits
+                          // `filter:null`, so the encoder does nothing special.
 }
 
 // --- Rate-limit timing -----------------------------------------------------
@@ -517,18 +523,28 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings
    `list()`/jsonlite path conflates them):
    - **`null` is NOT absent.** The drop-on-NULL rule is for `x[[k]] <- NULL`
      (assignment); the event message uses a single `list(...)` constructor, which
-     *keeps* NULL → jsonlite emits `"k":null`. So `filter`/`kind`/`ms`/`leading`/
-     ready-`id` are `"…":null` on the wire **today, not absent** — the encoder must
-     *actively omit* them. (Only the incrementally-assigned `gate`/`valueGates` are
-     genuinely absent today.) This corrects the earlier "R already drops these" claim.
+     *keeps* NULL → jsonlite emits `"k":null`. So `kind`/`ms`/`leading`/ready-`id` are
+     `"…":null` on the wire **today, not absent** — for the *contextual* ones the
+     encoder must *actively omit* (they don't apply); `filter` stays `null` (it's a
+     materialized off-default, see below). (Only the incrementally-assigned
+     `gate`/`valueGates` are genuinely absent today.) This corrects the earlier "R
+     already drops these" claim.
    - **present-empty survives** — empty array → `[]`, empty map → `{}`, empty string
      → `""`, and all are distinct from an omitted key. **But `[]` vs `{}` is keyed off
      list NAMES** (unnamed empty list → `[]`, named → `{}`), so the encoder must build
      an empty *array* field as an unnamed list and an empty *map* as a named list.
-   - Net rule the encoder enforces: **absent** (omit key) / **present-empty**
-     (`[]`/`{}`/`""`, only when empty is a valid value of the type) / **`null`**
-     (never on the wire). `filter` is *absent*-only — R forbids `""` (`allow_empty =
-     FALSE`) and an empty predicate is invalid, so it has no present-empty form.
+   - Net rule the encoder enforces — **four** distinct encodings for "no value,"
+     chosen per field by *why* it's empty:
+     - **absent** (omit key) — a *contextual* field that doesn't apply here:
+       `gate` (no client write), `output` (app isn't an output), `ms`/`kind` (wrong
+       variant). The concept itself is absent.
+     - **off-default in a materialized record** — a config field that's always
+       present carrying its type's "off" value: `DomOpts` flags → `false`, `filter` →
+       `null`. Here `null` *is* on the wire, and correctly so (it's `filter`'s `false`).
+     - **present-empty** (`[]`/`{}`/`""`) — only when empty is a valid value of the
+       type (empty array, empty text).
+     So `null` appears for materialized off-defaults (`filter`), *not* for contextual
+     absence (those omit). `filter` has no `""` form (R forbids it, `allow_empty=FALSE`).
 3. **Nests round-trip as objects.** `gate`, `timing` (incl. immediate→`{"mode":
    "immediate"}` with no ms, throttle→`{…,"ms":100,"leading":true}`), `domOpts`, and
    the per-key `valueGates` map all serialize as JSON objects. immediate+coalesce is
