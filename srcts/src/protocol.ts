@@ -9,15 +9,52 @@
 // sections; this is their machine-checked form.
 
 // ---------------------------------------------------------------------------
-// Echo / sequence gating (optimistic-update protocol)
+// Vocabulary — identity aliases + the value-types every message is built from
 // ---------------------------------------------------------------------------
 
-/** Per-key stale-echo gate carried on a widget batch. */
+// Identity aliases (documentation-only; all `string`; not branded). Each names
+// what the string resolves against, so a message's type says what its id points at.
+export type ElementId = string; // resolves via document.getElementById
+export type AnchorId = string; // a comment-anchor-pair id (range protocol)
+export type OutputName = string; // a Shiny output id (renderIrid / iridOutput)
+export type Channel = string; // a Shiny input id; also the per-channel seq key
+
+// --- Optimistic-update echo gate -------------------------------------------
+// The single representation everywhere a gate travels. Carried as `gate?: EchoGate`
+// (omitted/undefined for a programmatic write), NOT `EchoGate | null` and NOT a
+// tagged union. A gate is a *relationship* (a client send <-> its echo), so its
+// absence is CONTEXTUAL — a programmatic write has no client channel, so no gate.
 export interface EchoGate {
   seq: number;
-  /** The inputId (channel) the seq is counted on. */
-  channel: string;
+  channel: Channel;
 }
+
+// --- DOM listener options --------------------------------------------------
+// Mirrors R's `wire_dom_opts(prevent_default, stop_propagation, capture, passive,
+// filter)` 1:1. DOM-only; a widget channel has no listener. A fully-MATERIALIZED
+// config record: every field is present, carrying its type's "off" default —
+// `false` for the flags, `null` for `filter`. None is omitted, so `domOpts` itself
+// is required too (an absent DomOpts would just re-encode {4 false, filter null}).
+export interface DomOpts {
+  preventDefault: boolean;
+  stopPropagation: boolean;
+  capture: boolean;
+  passive: boolean;
+  // JS predicate over `e`, or null for none. REQUIRED with an explicit off-default
+  // — `null` is to filter what `false` is to the flags. (No "" — R forbids it.)
+  filter: string | null;
+}
+
+// --- Rate-limit timing -----------------------------------------------------
+// Discriminated on `mode`, mirroring R's pure wire_immediate/throttle/debounce
+// shapes: ms/leading exist only where the variant gives them meaning (semantic
+// absence, not elision — so they're absent by variant, required within it).
+// `coalesce` is NOT here — it means the same in every mode (mode only picks its
+// default), so it stays carrier-level (see IridEventCore).
+export type Timing =
+  | { mode: "immediate" }
+  | { mode: "throttle"; ms: number; leading: boolean }
+  | { mode: "debounce"; ms: number };
 
 // ---------------------------------------------------------------------------
 // Server -> client custom messages
