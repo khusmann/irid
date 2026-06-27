@@ -339,21 +339,43 @@ export interface IridWidgetInitMessage {
 
 ## 5. Client→server payloads (`protocol/wire.ts`, same file as §3–4)
 
+Every client→server payload is an **envelope wrapping the event data**, not a flat
+bag with metadata mixed in:
+
 ```ts
-/** The envelope every client->server payload carries (attachPayloadMeta).
- *  Both the irid_ev_* event path and the irid_prop_* write-back path use it. */
+/** irid transport metadata. Top-level of every client->server payload. */
 export interface PayloadMeta {
-  id: ElementId;
+  id: ElementId;        // source element (carried explicitly — robust under
+                        // Shiny-module namespacing, where the inputId is opaque)
   nonce: number;        // Math.random() — forces Shiny to treat repeats as new
-  __irid_seq: number;   // per-channel monotonic; excluded from the user event obj
+  seq: number;          // per-channel monotonic sequence (the echo gate)
 }
 
-export type EventPayload = PayloadMeta & Record<string, unknown>;
+/** What actually goes on the wire: the envelope + the event data under `data`.
+ *  `data` is the foreign-keyed bag (DOM event fields, or a widget author's
+ *  sendEvent payload); the envelope owns the top level. */
+export interface EventPayload extends PayloadMeta {
+  data: Record<string, unknown>;
+}
 ```
 
-`__irid_seq` keeps its prefix: it is deliberately namespaced to stay out of the
-user-facing event object. (Same rationale keeps `__irid_state_keys`'s prefix; only
-its *type* changes — see §6.)
+**Why the envelope, not flat-with-prefix.** The payload is both irid's transport
+*and* the source of the user's event object. If the two share one flat namespace,
+irid's bookkeeping must dodge collisions with DOM event fields *and* arbitrary
+widget-author `sendEvent` keys — which is why today's wire smuggles a *prefixed*
+`__irid_seq` next to *un*prefixed `id`/`nonce` (an inconsistency: a widget author's
+`sendEvent("x", { id })` silently clobbers the envelope's `id`). Nesting the foreign
+data under `data` gives irid sole ownership of the top level, so **no prefix is
+needed at all** — `seq` is just `seq`. The user handler still gets `e$value` flat:
+the decoder hands it `payload$data` (§9), so the nesting is wire-only. This is the
+idiomatic "envelope wraps payload" shape, and it deletes the entire `__irid_*`
+convention from the client→server direction. `irid_decode_payload` becomes
+`event_obj <- payload$data` — a field read, no strip-list.
+
+(The other prefixed field, `__irid_state_keys`, is a *different* case — server→client
+metadata **delivered to** the widget factory via its `props` bag, not stripped before
+a user. The same instinct (lift it out of the foreign bag) applies but the mechanics
+differ; tracked as an open item in §11.)
 
 ---
 
@@ -557,15 +579,17 @@ the R-side embodiment of the "producer emits total values" rule (§2).
 
 The encoder handles server→client. The client→server direction has a partner step
 that today is **inline** in the event observer ([mount.R:402-420](../R/mount.R#L402)):
-it reads the `__irid_seq` off the payload and strips the `PayloadMeta` envelope
-(`id`/`nonce`/`__irid_seq`) to build the user-facing `event_obj` (mapping
-`NULL → NA`). Promote it to a named **`irid_decode_payload()`** — the explicit mirror
-of the encoder. Two reasons beyond symmetry:
+it reads `__irid_seq` off the payload and strips the flat envelope via
+`setdiff(names, c("id", "nonce", "__irid_seq"))` to build the user-facing
+`event_obj`. With the §5 envelope shape (`{ id, nonce, seq, data }`) this collapses to
+**`irid_decode_payload(payload)` returning `list(meta = payload[c("id","nonce","seq")],
+event = payload$data)`** — a field read, no strip-list to keep in sync, no
+`__irid_*` names. Promote it to that named function — the explicit mirror of
+`attachPayloadMeta` on the client. Two reasons beyond symmetry:
 
-- **One home for the envelope field names.** The `__irid_*`/`nonce`/`id` keys would
-  then be referenced in exactly one R function and one TS function
-  (`attachPayloadMeta`), mirror images — instead of inline string literals in the
-  observer. Rename-safe, single source of truth for the envelope.
+- **One home for the envelope.** `attachPayloadMeta` (client) wraps `{ id, nonce, seq,
+  data }`; `irid_decode_payload` (R) unwraps it. The envelope shape lives in exactly
+  those two mirror functions, not as inline string literals in the observer.
 - **It clarifies what is NOT in this layer.** `irid_decode_payload` handles only the
   **structural envelope** (extract meta, expose the rest as fields). It does **not**
   do value coercion — turning `list(40, 200)` back into a numeric range, `NA` back
@@ -611,6 +635,15 @@ round-trips after each rename/nest.
 
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
+- **`__irid_state_keys` — lift it out of the `props` bag?** The §5 envelope deletes
+  `__irid_seq` smuggling, but `__irid_state_keys` is a different shape: server→client
+  metadata *delivered to* the widget factory (it reads `props.__irid_state_keys`,
+  plotly/index.ts:260), riding in the author's own `props` namespace. The same
+  instinct — give irid its own namespace instead of prefixing inside a foreign bag —
+  suggests lifting it to a top-level field on `IridWidgetInitMessage`
+  (`{ id, name, props, stateKeys }`). The open question is the factory contract: does
+  the factory get `stateKeys` as a separate arg, or does the client re-merge it into
+  `props` before calling? (Brainstorm pending.)
 
 **Decided — plain aliases, not branded ids.** Use plain `type ElementId = string`
 etc. The aliases' real win is *documentation* of what each string resolves against,
