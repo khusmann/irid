@@ -124,6 +124,15 @@ export interface IridWidgetInitMessage {
   props: WidgetProps;
 }
 
+/**
+ * `irid-ready` — a mount is fully wired (listeners attached, server observers
+ * registered). `id` is the output name for a `renderIrid`/`iridOutput` mount,
+ * absent for a top-level `iridApp` mount.
+ */
+export interface IridReadyMessage {
+  id?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Client -> server payloads
 // ---------------------------------------------------------------------------
@@ -186,5 +195,24 @@ export interface Irid {
 declare global {
   interface Window {
     irid: Irid;
+    /**
+     * Set true once at least one mount is fully wired (listeners attached,
+     * server observers registered). The escape hatch for code that may attach
+     * its `irid:ready` listener too late to catch the event:
+     *
+     *   if (window.__iridReady) init();
+     *   else document.addEventListener("irid:ready", init);
+     *
+     * The e2e harness waits on this before the first interaction (helper-e2e.R).
+     */
+    __iridReady?: boolean;
+  }
+  interface DocumentEventMap {
+    /**
+     * Fired on `document` each time an irid mount becomes interactive.
+     * `detail.id` is the output name (`renderIrid`/`iridOutput`) or `null`
+     * (top-level `iridApp`). The public "irid is ready" lifecycle hook.
+     */
+    "irid:ready": CustomEvent<{ id: string | null }>;
   }
 }

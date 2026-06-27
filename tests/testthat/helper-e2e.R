@@ -167,6 +167,19 @@ e2e_app <- function(fixture, env = parent.frame(), viewport = c(1280, 900)) {
   )
   b$Page$navigate(app$url, wait_ = TRUE)
   e2e_install_idle(app)
+  # Readiness barrier. After `navigate` returns the page is loaded but NOT yet
+  # interactive: Shiny connects asynchronously and irid wires its listeners on
+  # the initial flush's `irid-events`, so a first interaction dispatched here can
+  # be silently dropped (issue #59). The server sends `irid-ready` only once
+  # every mount's listeners and server observers exist — wait for the client to
+  # see it before handing back the (now genuinely interactive) handle.
+  #
+  # `window.__iridReady` flips on the FIRST mount that becomes ready, which is
+  # exactly right for every current fixture (each is single-output). A
+  # multi-output fixture should instead wait on its specific output's readiness:
+  # the `irid:ready` DOM event carries `detail.id` (the output name), so record
+  # the ready ids and wait on membership rather than this global flag.
+  e2e_wait_until(app, "window.__iridReady === true", timeout = 30)
   app
 }
 

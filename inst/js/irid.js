@@ -685,6 +685,13 @@
         handleWidgetInit(msg);
       }
     );
+    Shiny.addCustomMessageHandler("irid-ready", (msg) => {
+      var _a;
+      window.__iridReady = true;
+      document.dispatchEvent(
+        new CustomEvent("irid:ready", { detail: { id: (_a = msg == null ? void 0 : msg.id) != null ? _a : null } })
+      );
+    });
   }
 
   // src/core/index.ts

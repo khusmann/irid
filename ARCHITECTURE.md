@@ -383,8 +383,8 @@ anchor references are preserved across moves.
 ## Client-Side Protocol
 
 `irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-swap`, `irid-mutate`, `irid-events`, and
-`irid-widget-init`.
+`irid-attr`, `irid-swap`, `irid-mutate`, `irid-events`,
+`irid-widget-init`, and `irid-ready`.
 
 ### `irid-attr`
 
@@ -580,6 +580,37 @@ client:
    the resolved handle is **disposed** (its `destroy` runs) instead of
    adopted, so no detached zombie survives. The init message is
    idempotent — a duplicate for an already-mounted id is dropped.
+
+### `irid-ready`
+
+```js
+{id: "myOutput"}  // output name (renderIrid), or {} for a top-level iridApp mount
+```
+
+Signals that a mount is fully wired. The server (`irid_send_ready` in `R/app.R`)
+sends it from the mount's `onFlushed`, i.e. **after** the flush in which every
+control-flow body (`When`/`Each`/`Match`) has mounted and sent its own
+`irid-events`. Because WebSocket messages are ordered and an event's
+`observeEvent` is registered *before* its `irid-events` within
+`irid_mount_processed`, a client that has seen `irid-ready` has every listener
+attached *and* every server observer registered.
+
+The handler surfaces it two ways:
+
+- A public **`irid:ready` DOM event** dispatched on `document`, with
+  `detail.id` = the output name (`renderIrid`/`iridOutput`) or `null`
+  (`iridApp`). This is the lifecycle hook app authors use to run JS once the UI
+  is interactive (focus an input, hide a loading splash, start a tour). It fires
+  once per mount, so a multi-output page emits one per output.
+- The **`window.__iridReady`** flag (set `true` on the first event) as the
+  escape hatch for a listener attached too late to catch the event:
+  `if (window.__iridReady) init(); else document.addEventListener("irid:ready", init)`.
+
+This also closes a harness race: when `Page.navigate` returns the page is loaded
+but not yet interactive (Shiny connects asynchronously and irid wires listeners
+on the initial flush), so a first interaction dispatched too early can be
+silently dropped. `e2e_app()` waits on `window.__iridReady` before handing back
+the handle (see `helper-e2e.R`).
 
 ## Controlled Input: Optimistic Updates
 
