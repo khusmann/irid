@@ -104,6 +104,12 @@ check("empty map -> {} (named list)", j_map, grepl('"values":{}', j_map, fixed =
 check("present-empty `[]` is distinct from absent (key present)",
       as.character(toJSON(list(a = 1, removes = list()))),
       grepl('"removes":[]', as.character(toJSON(list(a = 1, removes = list()))), fixed = TRUE))
+# Live trap: a propless widget's props (empty list) wrongly serializes as [].
+j_props_bug <- show("propless widget list(props=list())", list(props = list()))
+j_props_fix <- show("  fixed: named empty list", list(props = setNames(list(), character(0))))
+check("empty props is [] unless built as a named list (the trap)", j_props_bug,
+      grepl('"props":[]', j_props_bug, fixed = TRUE))
+check("named empty props -> {}", j_props_fix, grepl('"props":{}', j_props_fix, fixed = TRUE))
 
 # --------------------------------------------------------------------------
 section(4, "Empty-text wire shape (drives the normalize -> '' fix)")

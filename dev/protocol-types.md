@@ -192,8 +192,9 @@ The Shiny message-channel name is the discriminant *between* messages; within
 ```ts
 /** `irid-config` — session options pushed at start. Extensible bag. */
 export interface IridConfigMessage {
+  // Materialized config field: required, `null` is its off/special value (disabled),
+  // exactly like `DomOpts.filter`. R always sends it (getOption default 200).
   staleTimeout: number | null;   // ms before stale indicator; null disables
-                                 // (R always sends it — getOption default 200)
 }
 
 /** `irid-ready` — a mount is fully wired. `output` is the output name for a
@@ -286,6 +287,11 @@ inserts:[new]}`, an empty branch is `{removes:[old]}`).
  *  message: drives Each (N keyed/positional children) AND When/Match (one child,
  *  keyed by active branch/case). Child ids are AnchorIds. */
 export interface IridMutateMessage {
+  // removes/inserts/order are CONTEXTUAL command-parts, each omitted when this
+  // mutation doesn't do it (an append is just `inserts`, a reorder just `order`).
+  // Omit, not present-empty `[]`: unlike DomOpts (a uniform record where every field
+  // always applies), a mutate is independent optional operations — "doesn't reorder"
+  // → omit `order`, like "no client write" → omit `gate`.
   id: AnchorId;
   removes?: AnchorId[];
   inserts?: string[];     // HTML fragments (each its own anchored child range)
@@ -564,6 +570,11 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 21/21 verdicts pass. Findings
    A NULL-valued widget prop must serialize as `"k": null`, not be dropped — built via
    `props[k] <- list(NULL)` (single-bracket keeps it), not `props[[k]] <- NULL`
    (drops it). Same constructor-vs-assignment distinction as finding 2.
+7. **Empty `props` must be `{}`, not `[]`** (present-empty MAP, finding 3 live). A
+   propless widget (`IridWidget(props = list())`) yields an empty R list, which
+   serializes as `[]` unless built as a *named* list — and the factory expects an
+   object. The encoder must emit `{}` for an empty `props` (and any map field). `data`
+   in the payload is the same shape but client→server (JS `{}` is unambiguous).
 
 No surprises against the design except finding 2 (which corrects an earlier wrong
 assumption). The empty-text normalization (finding 4) is the one
