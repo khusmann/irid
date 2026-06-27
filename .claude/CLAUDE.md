@@ -15,6 +15,8 @@
 
 - One-line commit messages unless directed otherwise
 - Do not include Co-Authored-By
+- Do not add "created with Claude"-type attribution to commits, issues, or PRs
+- Do not hard-wrap (e.g. at 80 chars) issue or PR descriptions — let them flow
 
 - If there are uncommitted changes and the user asks for something unrelated to the current work, suggest committing first before switching directions
 
