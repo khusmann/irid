@@ -428,6 +428,39 @@ shiny 1.7.4, jsonlite 2.0.0; re-confirm on bump.** 16/16 verdicts pass. Findings
 No surprises against the design — the only action item the spike *surfaces* (vs.
 merely confirms) is the empty-text normalization, already captured in §8.
 
+### Predictable serialization — a producer-side encoder
+
+We cannot make jsonlite itself strict on this path: Shiny owns the `toJSON` call in
+`sendCustomMessage` (`auto_unbox = TRUE`, hardcoded), with no per-message config
+hook. Pre-serializing ourselves and shipping a string would double-encode and fight
+Shiny's model. So predictability is a **producer-construction** concern, not a
+config knob — and the spike shows the non-determinism is narrow and enumerable:
+
+- **array-typed fields that are contingently length-1** unbox to a scalar
+  (`__irid_state_keys`, `removes`/`inserts`/`order`) — shape depends on runtime
+  *length*;
+- **empty/sentinel values** encode by content (`NULL` dropped, `character(0)` →
+  `[]`, `NA` → `null`) — shape depends on runtime *content*.
+
+Everything else (scalars, named lists → objects) is already deterministic under
+`auto_unbox = TRUE`. The strict-jsonlite idiom (`auto_unbox = FALSE` + explicit
+`unbox()`) is the inverse discipline; since we can't flip the flag, we **emulate it
+at construction** — make each field's wire shape a function of its *declared
+protocol type*, never the runtime value:
+
+- array fields always `I()`/`as.list()`-wrapped (length-1 can't collapse them);
+- `string` fields normalize empty/`NA`/`character(0)` → `""`;
+- required fields resolve `NULL` defaults to concrete values before send.
+
+**Centralize this in one producer-side wire encoder** — a thin `irid_*` message
+constructor per message type (mirroring the protocol types in §4–6) that applies the
+rules, rather than scattering `I()` across every `sendCustomMessage` site. Strictness
+then lives in one place that tracks the type definitions. It also gives a natural
+**dev-mode assertion**: the encoder can re-parse its own output and check it against
+the expected shape (or a JSON Schema generated from the protocol) in debug builds —
+which would have caught the `character(0)` → `[]` wart automatically. This is the
+R-side embodiment of the "producer emits total values" rule (§2).
+
 ---
 
 ## 10. Commit plan (one concept per commit, feature branch)
