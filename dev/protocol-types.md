@@ -126,13 +126,14 @@ export type Channel   = string;   // a Shiny input id; also the per-channel seq 
 ```ts
 // --- Optimistic-update echo gate -------------------------------------------
 // The single representation everywhere a gate travels. Carried as `gate?: EchoGate`
-// (optional), NOT a tagged union `{type:'echo',…} | {type:'programmatic'}`: the
-// "programmatic" state carries no payload, so a tag would just be a verbose synonym
-// for `undefined` (TS already narrows `EchoGate | undefined` to block seq/channel
-// access until checked), and it would force the common programmatic path to ship an
-// object instead of omitting the key — also un-composing with the sparse valueGates
-// map. Rule: empty alternative state → optional; data-bearing arms → union. (This is
-// the mirror of the DomOpts call, where absence re-encoded a *default* → required.)
+// (omitted/undefined for a programmatic write), NOT `EchoGate | null` and NOT a
+// tagged union. A gate is a *relationship* (a client send ↔ its echo), so its absence
+// is CONTEXTUAL — a programmatic write has no client channel, so there's no gate, vs
+// `DomOpts.filter` whose null IS a materialized off-default value. `gate: null` would
+// be incoherent ("a gate that is null") and would split how "programmatic" is encoded:
+// the SAME concept on the widget side (valueGates) is a sparse map that *omits*
+// programmatic keys, so the dom gate omits too — one encoding for "no gate". (Also:
+// programmatic is the common path; null'ing every such message is verbose for nothing.)
 export interface EchoGate {
   seq: number;
   channel: Channel;       // same-file alias (see Vocabulary above)
@@ -187,6 +188,11 @@ export type EventKind = "prop" | "event";
 The Shiny message-channel name is the discriminant *between* messages; within
 `irid-attr`, `target` discriminates. No synthetic `type` field is added.
 
+(`irid-attr` discriminates on `target`, `irid-events` on `source` — *not* an
+inconsistency: an attr is server→client so it names a **destination** (`target`); an
+event is client→server so it names an **origin** (`source`). The names are
+directional on purpose; don't unify them.)
+
 ### Lifecycle
 
 ```ts
@@ -225,29 +231,23 @@ export interface IridAttrDom {
   target: "dom";
   id: ElementId;
   attr: string;
-  value: unknown;
-  gate?: EchoGate;          // was sequence? + channel?. Optional, but SEMANTIC
-                            // absence (not elision): absent = programmatic write,
-                            // no client channel to gate against. There is no
-                            // "default gate" — so it stays optional by the §2 rule.
-                            // Only dom carries this (value/checked echoes on focused
-                            // inputs); text never does (see IridAttrText).
+  value: unknown;           // string | number | boolean | null in practice; `unknown`
+                            // so the handler makes no coercion assumptions
+  gate?: EchoGate;          // CONTEXTUAL absence (§2): omitted for a programmatic
+                            // write (no client channel to gate against). Only dom
+                            // carries it (value/checked echoes on focused inputs);
+                            // text never does (see IridAttrText).
 }
 
 /** Text replacement inside a comment-anchor range. */
 export interface IridAttrText {
   target: "text";
   id: AnchorId;
-  // Was `string | number | null`. `number` is dead: R's coerce_text_child runs
-  // as.character() before send (mount.R:500), so the wire never carries a number —
-  // a reactive returning 42 arrives as "42". Tightened to `string`: the client
-  // treats "", null, and undefined identically as "clear the range", so empty IS
-  // the canonical clear signal — no distinct null state is needed.
-  //
-  // PRODUCER FIX REQUIRED to make this honest: as.character(NULL) is character(0),
-  // which today serializes as `[]` (empty array), not "" — so coerce_text_child
-  // must normalize the empty/NA case to "" (or NULL→clean null if we keep
-  // `string | null`). Until then the truthful wire type is `string | null | []`.
+  // `string`, not the old `string | number | null`. `number` is dead — coerce_text_child
+  // runs as.character() before send (mount.R:500), so 42 arrives as "42". The client
+  // treats "" as "clear the range", so empty IS the canonical clear signal — no null
+  // needed. PRODUCER FIX (§8): as.character(NULL) is character(0) → serializes as `[]`
+  // today, so coerce_text_child must normalize empty/NA → "" for `value: string` to hold.
   value: string;
   // NO gate. The echo gate exists for cursor/focus preservation on a controlled
   // input being typed into; a text node is display-only — you can't type into a
@@ -690,6 +690,12 @@ round-trips after each rename/nest.
 
 - **Split vs single-file.** Proposal favors the `protocol/` directory; if the team
   prefers one file, the section-layout fallback in §7 gives the same shapes.
+- **Is `PayloadMeta.nonce` vestigial?** Every payload is sent with
+  `{priority: "event"}`, and event-priority inputs are processed on every send
+  regardless of value equality — so the `Math.random()` nonce that forces distinctness
+  may be redundant. Verify with a ~10-line spike (two identical event-priority sends
+  with no nonce → does the `observeEvent` fire twice?); if so, the envelope shrinks to
+  `{ id, seq, data }`. Verify-then-maybe-delete, not a redesign.
 
 **Decided — delete `irid-swap`; unify control-flow rendering on `irid-mutate`.**
 When/Match are **single-slot keyed reconciliation**: they already short-circuit,
