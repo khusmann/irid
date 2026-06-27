@@ -1,7 +1,7 @@
 # Per-channel stale-echo sequencing (#28).
 #
 # Drives the event observers in `irid_mount_processed` with simulated client
-# inputs (each carrying `__irid_seq`, `id`, `nonce`) and inspects the resulting
+# inputs (each an `{ id, seq, data }` envelope) and inspects the resulting
 # `irid-attr` echoes. The core invariant: an echo is stamped with the sequence
 # of ITS OWN channel, so a sibling channel firing in the same flush — another
 # prop, or a notification — cannot make a current echo look stale.
@@ -39,9 +39,9 @@ test_that("two props written in one flush each carry their own channel+seq", {
 
   ctx$session$setInputs(
     !!paste0("irid_prop_", wid, "_a") :=
-      list(value = "a1", id = wid, `__irid_seq` = 5, nonce = 0.1),
+      list(id = wid, seq = 5, data = list(value = "a1")),
     !!paste0("irid_prop_", wid, "_b") :=
-      list(value = "b1", id = wid, `__irid_seq` = 9, nonce = 0.2)
+      list(id = wid, seq = 9, data = list(value = "b1"))
   )
   ctx$session$flushReact()
 
@@ -74,9 +74,9 @@ test_that("a sibling notification does not pollute a prop's echo sequence", {
 
   ctx$session$setInputs(
     !!paste0("irid_prop_", wid, "_selected_ids") :=
-      list(value = list("p1"), id = wid, `__irid_seq` = 3, nonce = 0.1),
+      list(id = wid, seq = 3, data = list(value = list("p1"))),
     !!paste0("irid_ev_", wid, "_relayout") :=
-      list(id = wid, `__irid_seq` = 8, nonce = 0.2)
+      list(id = wid, seq = 8, data = list())
   )
   ctx$session$flushReact()
 
@@ -102,7 +102,7 @@ test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
 
   ctx$session$setInputs(
     !!paste0("irid_ev_", wid, "_keydown") :=
-      list(id = wid, key = "a", `__irid_seq` = 7, nonce = 0.1)
+      list(id = wid, seq = 7, data = list(key = "a"))
   )
   ctx$session$flushReact()
 
@@ -125,7 +125,7 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
 
   ctx$session$setInputs(
     !!paste0("irid_ev_", wid, "_input") :=
-      list(value = "y", id = wid, `__irid_seq` = 4, nonce = 0.1)
+      list(id = wid, seq = 4, data = list(value = "y"))
   )
   ctx$session$flushReact()
 

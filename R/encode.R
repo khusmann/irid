@@ -160,10 +160,9 @@ irid_encode_event <- function(ev, channel, client_only) {
 # `NULL`) — that is semantic and field-specific, so it stays per-widget
 # (`coerce_plotly_value`). See §9 "Inbound decode".
 irid_decode_payload <- function(payload) {
-  meta <- list(id = payload[["id"]], seq = payload[["__irid_seq"]])
-  event <- lapply(
-    payload[setdiff(names(payload), c("id", "nonce", "__irid_seq"))],
-    function(x) if (is.null(x)) NA else x
-  )
-  list(meta = meta, event = event)
+  # NULL -> NA normalizes a field that arrived as JSON `null` (e.g. an empty
+  # input's `valueAsNumber`) so it survives as an explicit list element rather
+  # than reading back as "missing" — presence normalization, not value coercion.
+  event <- lapply(payload$data, function(x) if (is.null(x)) NA else x)
+  list(meta = payload[c("id", "seq")], event = event)
 }

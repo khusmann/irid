@@ -8,9 +8,16 @@
 
 import { onEventSent } from "./stale";
 import { attachPayloadMeta, buildPayload } from "./payload";
-import type { DomOpts, IridDomEvent, IridEventEntry } from "../protocol";
+import type {
+  DomOpts,
+  EventPayload,
+  IridDomEvent,
+  IridEventEntry,
+} from "../protocol";
 
-type Payload = Record<string, unknown> | null;
+// An opaque buffered payload: the `{ id, seq, data }` envelope in the runtime, or
+// a bare object in unit tests that exercise the timing/queue logic directly.
+type Payload = EventPayload | Record<string, unknown> | null;
 
 export interface ManagedStream {
   id: string;

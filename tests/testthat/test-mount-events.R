@@ -18,25 +18,25 @@ test_that("a 0-arg handler is invoked with no arguments", {
   m <- mount_node(shiny::tags$button(onClick = function() fired <<- fired + 1L))
   id <- event_id(m$result)
   m$session$setInputs(
-    !!paste0("irid_ev_", id, "_click") := list(id = id, nonce = 0.1)
+    !!paste0("irid_ev_", id, "_click") := list(id = id, data = list())
   )
   m$session$flushReact()
   expect_equal(fired, 1L)
   m$handle$destroy()
 })
 
-test_that("a 1-arg handler receives the cleaned event object", {
+test_that("a 1-arg handler receives the event data under the envelope", {
   seen <- NULL
   m <- mount_node(shiny::tags$button(onClick = function(e) seen <<- e))
   id <- event_id(m$result)
   m$session$setInputs(
-    !!paste0("irid_ev_", id, "_click") := list(id = id, x = 5, nonce = 0.1)
+    !!paste0("irid_ev_", id, "_click") := list(id = id, data = list(x = 5))
   )
   m$session$flushReact()
   expect_equal(seen$x, 5)
-  # internal fields are stripped from the handler's view
+  # The envelope (id/seq) is unwrapped — the handler sees only the event data.
   expect_false("id" %in% names(seen))
-  expect_false("nonce" %in% names(seen))
+  expect_false("seq" %in% names(seen))
   m$handle$destroy()
 })
 
@@ -47,7 +47,7 @@ test_that("a 2-arg handler receives the event object and the source id", {
   ))
   id <- event_id(m$result)
   m$session$setInputs(
-    !!paste0("irid_ev_", id, "_click") := list(id = id, nonce = 0.1)
+    !!paste0("irid_ev_", id, "_click") := list(id = id, data = list())
   )
   m$session$flushReact()
   expect_equal(seen_id, id)
@@ -73,7 +73,7 @@ test_that("irid.debug.latency does not suppress the handler", {
   id <- event_id(m$result)
   withr::with_options(list(irid.debug.latency = 0.001), {
     m$session$setInputs(
-      !!paste0("irid_ev_", id, "_click") := list(id = id, nonce = 0.1)
+      !!paste0("irid_ev_", id, "_click") := list(id = id, data = list())
     )
     m$session$flushReact()
   })

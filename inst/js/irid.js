@@ -59,33 +59,29 @@
   }
 
   // src/core/payload.ts
-  function attachPayloadMeta(payload, id, channel) {
-    const p = payload;
-    p.id = id;
-    p.nonce = Math.random();
-    p.__irid_seq = nextSequence(sequences, channel);
-    return p;
+  function attachPayloadMeta(data, id, channel) {
+    return { id, seq: nextSequence(sequences, channel), data };
   }
   function buildPayload(e, el, id, channel) {
-    const payload = {};
+    const data = {};
     for (const key in e) {
       try {
         const val = e[key];
         if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
-          payload[key] = val;
+          data[key] = val;
         }
       } catch {
       }
     }
     const input = el;
-    payload.value = input.value;
+    data.value = input.value;
     if (typeof input.valueAsNumber === "number") {
-      payload.valueAsNumber = input.valueAsNumber;
+      data.valueAsNumber = input.valueAsNumber;
     }
     if (typeof input.checked === "boolean") {
-      payload.checked = input.checked;
+      data.checked = input.checked;
     }
-    return attachPayloadMeta(payload, id, channel);
+    return attachPayloadMeta(data, id, channel);
   }
 
   // src/core/ratelimit.ts

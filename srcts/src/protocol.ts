@@ -187,16 +187,21 @@ export interface IridReadyMessage {
 // Client -> server payloads
 // ---------------------------------------------------------------------------
 
-/** The envelope every client->server payload carries (see `attachPayloadMeta`). */
-export interface PayloadMeta {
-  id: string;
-  nonce: number;
-  /** Per-channel monotonic sequence; excluded from the user-facing event object. */
-  __irid_seq: number;
+/**
+ * What goes on the wire for every client->server payload: irid's transport
+ * envelope owning the top level, with the foreign-keyed event data under `data`
+ * (DOM event fields, or a widget author's sendEvent payload). No `nonce` (event-
+ * priority bypasses Shiny's dedup, so it was vestigial) and no `__irid_*` prefix
+ * (the envelope gives irid sole ownership of the top level). The R partner is
+ * `irid_decode_payload`.
+ */
+export interface EventPayload {
+  /** Source element id (carried explicitly — robust under Shiny-module namespacing). */
+  id: ElementId;
+  /** Per-channel monotonic sequence (the echo gate). */
+  seq: number;
+  data: Record<string, unknown>;
 }
-
-/** A dispatched event payload: the envelope plus event/element fields. */
-export type EventPayload = PayloadMeta & Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
 // Public client API (window.irid) + widget-author contract
