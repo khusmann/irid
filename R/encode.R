@@ -1,4 +1,4 @@
-# Producer-side wire codec: the `protocol_*` message constructors + the
+# Producer-side wire codec: the `msg_irid_*` message constructors + the
 # `irid_decode_payload` inbound step, built on a handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
@@ -109,7 +109,7 @@ json_bool <- function(x, null_ok = FALSE) {
 #
 # `as_protocol()` renders an irid value object (a classed config/value type) into
 # the plain-list protocol shape jsonlite serializes. It is the value tier of the
-# codec; `protocol_*` (below) is the message tier and calls it on nested value
+# codec; `msg_irid_*` (below) is the message tier and calls it on nested value
 # objects. (Naming: `as_protocol` returns an R list — the protocol *shape* — not a
 # JSON string, so it is deliberately NOT `to_json`.)
 #' @keywords internal
@@ -163,13 +163,13 @@ irid_echo_gate <- function(seq, channel) {
 # --- lifecycle message constructors ----------------------------------------
 
 # irid-config: materialized stale-timeout (always present; `null` disables).
-protocol_config <- function(stale_timeout) {
+msg_irid_config <- function(stale_timeout) {
   list(staleTimeout = json_number(stale_timeout, null_ok = TRUE))
 }
 
 # irid-ready: `output` is present only for a renderIrid/iridOutput mount; it is
 # OMITTED for a top-level iridApp mount (no output name exists), never sent as null.
-protocol_ready <- function(output) {
+msg_irid_ready <- function(output) {
   msg <- list()
   if (!is.null(output)) msg$output <- json_string(output)
   msg
@@ -178,7 +178,7 @@ protocol_ready <- function(output) {
 # irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
 # props are kept as explicit `null` so the factory sees its full declared prop set
 # (the root-cause fix that deletes `__irid_state_keys`).
-protocol_widget_init <- function(id, name, props) {
+msg_irid_widget_init <- function(id, name, props) {
   list(id = json_string(id), name = json_string(name), props = json_map(props))
 }
 
@@ -186,7 +186,7 @@ protocol_widget_init <- function(id, name, props) {
 
 # DOM property/attribute write. `value` is arbitrary user data (left as-is); `gate`
 # is omitted for a programmatic write.
-protocol_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
+msg_irid_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
   msg <- list(
     id = json_string(id), target = "dom", attr = json_string(attr), value = value
   )
@@ -198,13 +198,13 @@ protocol_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
 # Text replacement inside a comment-anchor range. No gate (text never gates).
 # `value` arrives already normalized to a string by `coerce_text_child` (empty/NA
 # -> ""), so `json_string` just asserts it.
-protocol_attr_text <- function(id, value) {
+msg_irid_attr_text <- function(id, value) {
   list(id = json_string(id), target = "text", value = json_string(value))
 }
 
 # Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
 # sparse per-key gate map, OMITTED entirely when no key is gated (all programmatic).
-protocol_attr_widget <- function(id, values, gates) {
+msg_irid_attr_widget <- function(id, values, gates) {
   msg <- list(id = json_string(id), target = "widget", values = json_map(values))
   if (length(gates) > 0L) msg$valueGates <- json_map(gates)
   msg
@@ -217,7 +217,7 @@ protocol_attr_widget <- function(id, values, gates) {
 # `source`: a dom event carries `domOpts` + `clientOnly`, a widget event carries
 # `kind` (each field omitted on the other arm). The nested value objects (`timing`,
 # `dom_opts`) ride the event row whole and are rendered via `as_protocol()`.
-protocol_wire <- function(ev, channel, client_only) {
+msg_irid_wire <- function(ev, channel, client_only) {
   msg <- list(
     id = json_string(ev$id),
     event = json_string(ev$event),
@@ -245,7 +245,7 @@ protocol_wire <- function(ev, channel, client_only) {
 # when this mutation doesn't do it. `json_array` forces each to a JSON array (an
 # unnamed list), centralizing the length-1-unbox / named-vector-as-object discipline
 # that used to live at every send site.
-protocol_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
+msg_irid_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
   msg <- list(id = json_string(id))
   if (length(removes) > 0L) msg$removes <- json_array(removes)
   if (length(inserts) > 0L) msg$inserts <- json_array(inserts)

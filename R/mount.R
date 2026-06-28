@@ -75,7 +75,7 @@ irid_queue_widget_attr <- function(session, id, attr, value,
       for (wid in ids) {
         entry <- pending[[wid]]
         session$sendCustomMessage("irid-attr",
-          protocol_attr_widget(wid, entry$values, entry$value_gates))
+          msg_irid_attr_widget(wid, entry$values, entry$value_gates))
       }
     }, once = TRUE)
   }
@@ -192,7 +192,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
       character(1L)
     )
   } else NULL
-  session$sendCustomMessage("irid-mutate", protocol_mutate(
+  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
     cf_id, removes = removes, inserts = inserts, order = order_ids
   ))
 
@@ -235,7 +235,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
   if (is.null(body_tag)) {
     if (!is.null(removes)) {
       session$sendCustomMessage("irid-mutate",
-        protocol_mutate(cf_id, removes = removes))
+        msg_irid_mutate(cf_id, removes = removes))
     }
     return(list(child_id = NULL, mount = NULL))
   }
@@ -246,7 +246,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
     htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
   )
   processed <- process_tags(wrapped, counter = counter)
-  session$sendCustomMessage("irid-mutate", protocol_mutate(
+  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
     cf_id, removes = removes, inserts = list(as.character(processed$tag))
   ))
   mount <- irid_mount_processed(processed, session, depth = depth + 1L)
@@ -353,7 +353,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     }
     deliver_widget_deps(session, wi$deps)
     session$sendCustomMessage("irid-widget-init",
-      protocol_widget_init(wi$id, wi$name, props))
+      msg_irid_widget_init(wi$id, wi$name, props))
   }
 
   # Set up event listeners
@@ -378,7 +378,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # The encoder builds the discriminated wire shape (nested timing/domOpts,
       # kind on widget rows, domOpts/clientOnly on dom rows). `clientOnly` is a
       # config-only dom wire — `dom_opts` with no server handler.
-      msg <- protocol_wire(ev, channel, client_only = is.null(handler))
+      msg <- msg_irid_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
@@ -459,9 +459,9 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               irid_queue_widget_attr(session, sb$id, sb$attr, val, seq, channel)
             } else {
               msg <- if (sb$target == "text") {
-                protocol_attr_text(sb$id, coerce_text_child(val))
+                msg_irid_attr_text(sb$id, coerce_text_child(val))
               } else {
-                protocol_attr_dom(sb$id, sb$attr, val, seq, channel)
+                msg_irid_attr_dom(sb$id, sb$attr, val, seq, channel)
               }
               session$sendCustomMessage("irid-attr", msg)
             }
@@ -502,9 +502,9 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         msg <- if (b$target == "text") {
           # Text never gates (it is never an event write_target), so seq/channel
           # are always NULL here — the encoder carries no gate for it.
-          protocol_attr_text(b$id, coerce_text_child(val))
+          msg_irid_attr_text(b$id, coerce_text_child(val))
         } else {
-          protocol_attr_dom(b$id, b$attr, val, seq, channel)
+          msg_irid_attr_dom(b$id, b$attr, val, seq, channel)
         }
         session$sendCustomMessage("irid-attr", msg)
       }
