@@ -104,18 +104,18 @@ export interface IridWireCore {
 }
 
 /** DOM event: the listener options (incl. filter) + the config-only flag. */
-export type IridWireDom = IridWireCore & {
+export interface IridWireDom extends IridWireCore {
   source: "dom";
   /** Carries the flags AND filter (= R's `wire_dom_opts`). */
   domOpts: DomOpts;
   /** Config-only wire: attach flags, never round-trip. */
   clientOnly: boolean;
-};
+}
 
 /** Widget event: no DOM flags (no listener is attached), no extra fields. */
-export type IridWireWidget = IridWireCore & {
+export interface IridWireWidget extends IridWireCore {
   source: "widget";
-};
+}
 
 export type IridWire = IridWireDom | IridWireWidget;
 
