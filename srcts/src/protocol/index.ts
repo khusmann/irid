@@ -1,7 +1,10 @@
 // The single import surface for the typed protocol: `import type { … } from
-// "../protocol"` resolves here. Two substantive files split on audience/stability
-// — the internal wire contract vs the public widget-author API. There is no
-// `common.ts`: every value-type and id alias is wire-only, and widget.ts
-// references nothing from wire.ts.
-export * from "./wire";
+// "../protocol"` resolves here. Three files split by role:
+//   - vocab.ts    — the value-types + id aliases every message is built from
+//   - messages.ts — the wire messages (both directions), built on vocab
+//   - widget.ts   — the public widget-author API
+// `Irid`-prefixed names are messages (messages.ts); unprefixed names are
+// vocabulary (vocab.ts). widget.ts references nothing from the other two.
+export * from "./vocab";
+export * from "./messages";
 export * from "./widget";

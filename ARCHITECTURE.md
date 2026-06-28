@@ -35,9 +35,9 @@ srcts/             TypeScript source for the client — the single source vendor
                    into inst/ (eventually shared with a Python server). Built with
                    esbuild, typechecked with tsc, unit-tested with vitest; see
                    TESTING.md.
-  src/protocol/          Typed protocol (type-only): wire.ts (the wire contract +
-                         vocabulary, both directions) + widget.ts (public
-                         widget-author API) + index.ts barrel
+  src/protocol/          Typed protocol (type-only): messages.ts (wire messages,
+                         both directions) + vocab.ts (value-types + id aliases) +
+                         widget.ts (public widget-author API) + index.ts barrel
   src/core/*             core runtime (seq, payload, anchors, ratelimit, stale,
                          widgets, handlers, index) -> inst/js/irid.js
   src/widgets/plotly/*   plotly factory (pure + index) -> plotly-irid.js

@@ -1,62 +1,22 @@
-// The irid wire contract — the single typed shape the R and (future) Python
-// servers both target, and that the client implements. Both directions, and the
-// vocabulary they're built from, live here: the vocabulary, then the server ->
-// client messages, then the client -> server payload. The two directions are read
-// jointly on a round-trip (an outbound
-// `gate` is gated against the `seq` the inbound payload bumped on the same
-// `channel`), so they belong together.
+// The irid wire messages — the typed shapes the R and (future) Python servers
+// both target, and the client implements: the server -> client custom messages,
+// then the client -> server payload. The two directions are read jointly on a
+// round-trip (an outbound `gate` is gated against the `seq` the inbound payload
+// bumped on the same `channel`), so they belong together. The value-types they're
+// built from live in `./vocab`.
 //
 // TYPE-ONLY: declares types, no runtime code, so it is erased at build and both
 // bundles import it with zero duplication.
 
-// ---------------------------------------------------------------------------
-// Vocabulary — identity aliases + the value-types every message is built from
-// ---------------------------------------------------------------------------
-
-// Identity aliases (documentation-only; all `string`; not branded). Each names
-// what the string resolves against, so a message's type says what its id points at.
-export type ElementId = string; // resolves via document.getElementById
-export type AnchorId = string; // a comment-anchor-pair id (range protocol)
-export type OutputName = string; // a Shiny output id (renderIrid / iridOutput)
-export type Channel = string; // a Shiny input id; also the per-channel seq key
-
-// --- Optimistic-update echo gate -------------------------------------------
-// The single representation everywhere a gate travels: the scalar `gate: EchoGate
-// | null` on a dom attr (`null` = programmatic write), and the per-key
-// `valueGates: { key -> EchoGate }` on a widget batch (a key absent = programmatic).
-// A gate is a *relationship* (a client send <-> its echo); a programmatic write has
-// no client channel, so no gate. `isStaleEcho` treats null/absent as "apply".
-export interface EchoGate {
-  seq: number;
-  channel: Channel;
-}
-
-// --- DOM listener options --------------------------------------------------
-// Mirrors R's `wire_dom_opts(prevent_default, stop_propagation, capture, passive,
-// filter)` 1:1. DOM-only; a widget channel has no listener. A fully-MATERIALIZED
-// config record: every field is present, carrying its type's "off" default —
-// `false` for the flags, `null` for `filter`. None is omitted, so `domOpts` itself
-// is required too (an absent DomOpts would just re-encode {4 false, filter null}).
-export interface DomOpts {
-  preventDefault: boolean;
-  stopPropagation: boolean;
-  capture: boolean;
-  passive: boolean;
-  // JS predicate over `e`, or null for none. REQUIRED with an explicit off-default
-  // — `null` is to filter what `false` is to the flags. (No "" — R forbids it.)
-  filter: string | null;
-}
-
-// --- Rate-limit timing -----------------------------------------------------
-// Discriminated on `mode`, mirroring R's pure wire_immediate/throttle/debounce
-// shapes: ms/leading exist only where the variant gives them meaning (semantic
-// absence, not elision — so they're absent by variant, required within it).
-// `coalesce` is NOT here — it means the same in every mode (mode only picks its
-// default), so it stays carrier-level (see IridWireCore).
-export type Timing =
-  | { mode: "immediate" }
-  | { mode: "throttle"; ms: number; leading: boolean }
-  | { mode: "debounce"; ms: number };
+import type {
+  ElementId,
+  AnchorId,
+  OutputName,
+  Channel,
+  EchoGate,
+  DomOpts,
+  Timing,
+} from "./vocab";
 
 // ---------------------------------------------------------------------------
 // Server -> client custom messages
@@ -186,8 +146,9 @@ export interface IridReady {
  * envelope owning the top level, with the foreign-keyed event data under `data`
  * (DOM event fields, or a widget author's sendEvent payload). No `nonce` (event-
  * priority bypasses Shiny's dedup, so it was vestigial) and no `__irid_*` prefix
- * (the envelope gives irid sole ownership of the top level). The R partner is
- * `irid_decode_payload`.
+ * (the envelope gives irid sole ownership of the top level). The R partner reads
+ * these envelope fields directly (`coerce_value_as_number` applies the one inbound
+ * normalization).
  */
 export interface EventPayload {
   /** Source element id (carried explicitly — robust under Shiny-module namespacing). */
