@@ -50,9 +50,8 @@ export interface IridAttrDom {
 export interface IridAttrText {
   target: "text";
   id: AnchorId;
-  /** `string`, not `string | number | null`: `number` is dead (R runs
-   *  `as.character()` before send), and the producer normalizes empty/NA to `""`
-   *  (the canonical clear signal), so the wire type is exactly `string`. */
+  /** The producer normalizes empty/NA to `""` (the canonical clear signal), so
+   *  the wire type is exactly `string`. */
   value: string;
 }
 
@@ -94,8 +93,7 @@ export interface IridWireCore {
   id: ElementId;
   /** The DOM/widget event NAME. */
   event: string;
-  /** The Shiny input id the client sends on AND the per-channel sequence key.
-   *  Replaces the old `inputId` — one name for one value. */
+  /** The Shiny input id the client sends on AND the per-channel sequence key. */
   channel: Channel;
   /** Nested timing; `ms`/`leading` live inside per mode. */
   timing: Timing;
@@ -144,9 +142,8 @@ export interface IridReady {
 /**
  * What goes on the wire for every client->server payload: irid's transport
  * envelope owning the top level, with the foreign-keyed event data under `data`
- * (DOM event fields, or a widget author's sendEvent payload). No `nonce` (event-
- * priority bypasses Shiny's dedup, so it was vestigial) and no `__irid_*` prefix
- * (the envelope gives irid sole ownership of the top level). The R partner reads
+ * (DOM event fields, or a widget author's sendEvent payload). No `__irid_*` prefix
+ * — the envelope gives irid sole ownership of the top level. The R partner reads
  * these envelope fields directly (`coerce_value_as_number` applies the one inbound
  * normalization).
  */

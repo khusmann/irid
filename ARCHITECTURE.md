@@ -457,9 +457,7 @@ The **sole structural message** — granular range mutations between the
 container's anchors. It drives both `Each` (N keyed/positional children) and
 `When`/`Match` (one child range, keyed by the active branch/case): a branch flip
 is `{removes: [old], inserts: [new]}`, an empty branch a bare `{removes: [old]}`.
-This is what let `irid-swap` (wholesale range replacement) be deleted —
-control-flow rendering is unified as single-slot keyed reconciliation.
-`removes`/`inserts`/`order` are each omitted when the mutation doesn't do them.
+`removes`/`inserts`/`order` are always present; an empty array is a no-op.
 
 1. **Removes** — For each child ID, looks up its anchor pair and moves the
    entire `[start..end]` range into a detached fragment (unbinding elements

@@ -4,9 +4,8 @@
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
 # not a config knob. These helpers centralize the discipline so each field's wire
-# shape is a function of its declared protocol type, never the runtime value —
-# absorbing the `as.list`/`USE.NAMES`/named-list tricks that used to be scattered
-# across every `sendCustomMessage` site. The non-determinism under `auto_unbox` is
+# shape is a function of its declared protocol type, never the runtime value.
+# The non-determinism under `auto_unbox` is
 # narrow and enumerable: array-typed fields that are contingently length-1 unbox
 # to a scalar, and empty/sentinel values encode by content (`NULL` -> `null` with
 # the key kept, `character(0)` -> `[]`, `NA` -> `null`). The combinators below pin
@@ -45,8 +44,7 @@ json_array <- function(x, null_ok = FALSE) {
 # wrongly serialize as an array — the strict check rejects it. Member VALUES are
 # recursively converted from named atomic vectors to named lists, so an object-
 # shaped value like `c("8" = "legendonly")` (plotly's trace_visibility) serializes
-# as `{ "8": "legendonly" }` and not via jsonlite's deprecated keep_vec_names;
-# unnamed vectors and scalars pass through as arrays/scalars.
+# as `{ "8": "legendonly" }`; unnamed vectors and scalars pass through unchanged.
 json_map <- function(x, null_ok = FALSE) {
   if (is.null(x)) {
     if (null_ok) return(NULL)
@@ -176,8 +174,7 @@ msg_irid_ready <- function(output) {
 }
 
 # irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
-# props are kept as explicit `null` so the factory sees its full declared prop set
-# (the root-cause fix that deletes `__irid_state_keys`).
+# props are kept as explicit `null` so the factory sees its full declared prop set.
 msg_irid_widget_init <- function(id, name, props) {
   list(id = json_string(id), name = json_string(name), props = json_map(props))
 }
@@ -246,9 +243,7 @@ msg_irid_wire <- function(ev, channel, client_only) {
 # branch/case). removes/inserts/order are ALWAYS present: an absent command-part
 # is an empty array, not an omitted field — the client iterates each, so `[]` is
 # a no-op indistinguishable from omission, and a uniform shape beats a contextual
-# one. `json_array` forces each to a JSON array (an unnamed list), centralizing
-# the length-1-unbox / named-vector-as-object discipline that used to live at
-# every send site.
+# one. `json_array` forces each to a JSON array (an unnamed list).
 msg_irid_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
   list(
     id = json_string(id),

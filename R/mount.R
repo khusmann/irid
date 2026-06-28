@@ -218,17 +218,15 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
   invisible()
 }
 
-# Single-slot keyed reconciliation for `When`/`Match` — the unification that lets
-# control flow drop `irid-swap` and ride `irid-mutate` like `Each` (one child slot
-# keyed by the active branch/case). The body is given its own child-anchor pair
-# (a named child range inside the container `cf_id`), so a flip is
+# Single-slot keyed reconciliation for `When`/`Match`: one child slot keyed by
+# the active branch/case. The body is given its own child-anchor pair (a named
+# child range inside the container `cf_id`), so a flip is
 # `mutate {removes:[old], inserts:[new]}` and an empty branch `mutate {removes:[old]}`.
 #
 # `body_tag` is the already-evaluated tag tree, or NULL for an empty branch.
 # `old_child_id` is the previous body's wrapper id (NULL on first render). Returns
 # `list(child_id, mount)` — the caller stores both for the next flip and teardown.
-# The mount runs AFTER the DOM insert (mutate first), matching the binding/event
-# ordering the old swap path relied on.
+# The mount runs AFTER the DOM insert (mutate first).
 cf_render_child <- function(session, cf_id, old_child_id, body_tag,
                             counter, depth) {
   removes <- if (!is.null(old_child_id)) old_child_id else NULL
@@ -347,8 +345,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     for (key in names(wi$prop_fns)) {
       # Single-bracket assignment so a NULL-initialized reactive prop keeps its
       # key as explicit `null` (the encoder emits `"k":null`), giving the factory
-      # its full declared prop set — the root-cause fix that deletes
-      # `__irid_state_keys`. (`[[<-` with NULL would drop the key.)
+      # its full declared prop set. (`[[<-` with NULL would drop the key.)
       props[key] <- list(isolate(wi$prop_fns[[key]]()))
     }
     deliver_widget_deps(session, wi$deps)
