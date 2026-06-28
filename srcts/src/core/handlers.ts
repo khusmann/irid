@@ -122,42 +122,39 @@ export function registerHandlers(): void {
     if (!a) return;
     const parent = a.start.parentNode!;
 
+    // Each command-part is always present (possibly empty) — forEach over `[]`
+    // is a no-op, so no presence guards are needed.
+
     // 1. Remove children — each child is itself an anchored range.
-    if (msg.removes) {
-      msg.removes.forEach((childId) => {
-        const child = anchors.get(childId);
-        if (!child) return;
-        const detached = detachRange(child.start, child.end);
-        unregisterAnchorsIn(detached);
-      });
-    }
+    msg.removes.forEach((childId) => {
+      const child = anchors.get(childId);
+      if (!child) return;
+      const detached = detachRange(child.start, child.end);
+      unregisterAnchorsIn(detached);
+    });
 
     // 2. Insert new children (parsed in the container's parent context).
-    if (msg.inserts) {
-      msg.inserts.forEach((html) => {
-        const fragment = parseFragment(html, parent);
-        indexAnchors(fragment);
-        parent.insertBefore(fragment, a.end);
-      });
-    }
+    msg.inserts.forEach((html) => {
+      const fragment = parseFragment(html, parent);
+      indexAnchors(fragment);
+      parent.insertBefore(fragment, a.end);
+    });
 
     // 3. Reorder children — lift each child's range into a fragment and reinsert
     // before the container's end anchor (preserves element identity + anchors).
-    if (msg.order) {
-      msg.order.forEach((childId) => {
-        const child = anchors.get(childId);
-        if (!child) return;
-        const frag = document.createDocumentFragment();
-        let node: Node | null = child.start;
-        while (node && node !== child.end) {
-          const next: Node | null = node.nextSibling;
-          frag.appendChild(node);
-          node = next;
-        }
-        frag.appendChild(child.end);
-        parent.insertBefore(frag, a.end);
-      });
-    }
+    msg.order.forEach((childId) => {
+      const child = anchors.get(childId);
+      if (!child) return;
+      const frag = document.createDocumentFragment();
+      let node: Node | null = child.start;
+      while (node && node !== child.end) {
+        const next: Node | null = node.nextSibling;
+        frag.appendChild(node);
+        node = next;
+      }
+      frag.appendChild(child.end);
+      parent.insertBefore(frag, a.end);
+    });
 
     // Defer bindAll so Shiny finishes processing all messages in the flush.
     setTimeout(() => {

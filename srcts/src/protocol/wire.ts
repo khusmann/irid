@@ -111,14 +111,15 @@ export interface IridAttrWidget {
 /**
  * `irid-mutate` — granular comment-anchor range mutations. The sole structural
  * message: drives `Each` (N keyed/positional children) AND `When`/`Match` (one
- * child, keyed by active branch/case). removes/inserts/order are contextual
- * command-parts, each omitted when this mutation doesn't do it.
+ * child, keyed by active branch/case). removes/inserts/order are always present:
+ * a command-part this mutation doesn't do is an empty array, not an omitted
+ * field. The handler iterates each, so `[]` is a no-op — a uniform shape.
  */
 export interface IridMutateMessage {
   id: AnchorId;
-  removes?: AnchorId[];
-  inserts?: string[];
-  order?: AnchorId[];
+  removes: AnchorId[];
+  inserts: string[];
+  order: AnchorId[];
 }
 
 /**

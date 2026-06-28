@@ -591,36 +591,30 @@
       const a = lookupAnchors(msg.id);
       if (!a) return;
       const parent = a.start.parentNode;
-      if (msg.removes) {
-        msg.removes.forEach((childId) => {
-          const child = anchors.get(childId);
-          if (!child) return;
-          const detached = detachRange(child.start, child.end);
-          unregisterAnchorsIn(detached);
-        });
-      }
-      if (msg.inserts) {
-        msg.inserts.forEach((html) => {
-          const fragment = parseFragment(html, parent);
-          indexAnchors(fragment);
-          parent.insertBefore(fragment, a.end);
-        });
-      }
-      if (msg.order) {
-        msg.order.forEach((childId) => {
-          const child = anchors.get(childId);
-          if (!child) return;
-          const frag = document.createDocumentFragment();
-          let node = child.start;
-          while (node && node !== child.end) {
-            const next = node.nextSibling;
-            frag.appendChild(node);
-            node = next;
-          }
-          frag.appendChild(child.end);
-          parent.insertBefore(frag, a.end);
-        });
-      }
+      msg.removes.forEach((childId) => {
+        const child = anchors.get(childId);
+        if (!child) return;
+        const detached = detachRange(child.start, child.end);
+        unregisterAnchorsIn(detached);
+      });
+      msg.inserts.forEach((html) => {
+        const fragment = parseFragment(html, parent);
+        indexAnchors(fragment);
+        parent.insertBefore(fragment, a.end);
+      });
+      msg.order.forEach((childId) => {
+        const child = anchors.get(childId);
+        if (!child) return;
+        const frag = document.createDocumentFragment();
+        let node = child.start;
+        while (node && node !== child.end) {
+          const next = node.nextSibling;
+          frag.appendChild(node);
+          node = next;
+        }
+        frag.appendChild(child.end);
+        parent.insertBefore(frag, a.end);
+      });
       setTimeout(() => {
         Shiny.bindAll(parent);
       }, 0);
