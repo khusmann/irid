@@ -394,7 +394,7 @@ anchor references are preserved across moves.
 `irid-ready`.
 
 All server→client messages are built by the producer-side wire codec
-(`R/encode.R`, the `irid_encode_*` constructors), which materializes each
+(`R/encode.R`, the `msg_irid_*` constructors), which materializes each
 field's wire shape from its declared protocol type rather than from the runtime
 value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 

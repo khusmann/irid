@@ -48,8 +48,8 @@ coerce_text_child <- function(val) {
 #'
 #' The stale-echo gate is keyed PER CHANNEL, and a batch can mix props from
 #' different channels (e.g. `xaxis_range` + `yaxis_range` from one box zoom),
-#' so the sequence travels per key: `valueGates: {attr -> {seq, channel}}`.
-#' A key contributed without a sequence (purely programmatic) gets no
+#' so the gate travels per key: `valueGates: {attr -> {seq, channel}}`.
+#' A key contributed without a gate (purely programmatic) gets no
 #' `valueGates` entry and the client applies it unconditionally; a batch with
 #' no gated keys carries an empty `valueGates` (`{}`).
 #'
@@ -58,8 +58,7 @@ coerce_text_child <- function(val) {
 #'
 #' @keywords internal
 #' @noRd
-irid_queue_widget_attr <- function(session, id, attr, value,
-                                   sequence = NULL, channel = NULL) {
+irid_queue_widget_attr <- function(session, id, attr, value, gate = NULL) {
   pending <- session$userData$irid_widget_pending
   if (is.null(pending)) {
     pending <- new.env(parent = emptyenv())
@@ -89,11 +88,24 @@ irid_queue_widget_attr <- function(session, id, attr, value,
   # The encoder (`json_map`) applies the named-vector -> object discipline at
   # drain time, so the raw R value is stored here.
   entry$values[attr] <- list(value)
-  if (!is.null(sequence)) {
-    entry$value_gates[[attr]] <- as_protocol(irid_echo_gate(sequence, channel))
+  if (!is.null(gate)) {
+    # Store the raw gate value object; the drain (`msg_irid_attr_widget`)
+    # renders the whole map to its wire shape via `as_protocol`.
+    entry$value_gates[[attr]] <- gate
   }
   pending[[id]] <- entry
   invisible()
+}
+
+# Optimistic-update echo gate value object: the classed `{seq, channel}` an
+# irid-managed binding stamps on its echo so the client can drop it if a newer
+# local edit has superseded it. NULL when there is no gating context (a
+# programmatic write — nothing to gate against); the message constructor renders
+# that absence as the wire's `null`/omitted gate. The `as_protocol` method lives
+# in the codec (R/encode.R), mirroring wire_timing/dom_opts.
+irid_echo_gate <- function(seq, channel) {
+  if (is.null(seq)) return(NULL)
+  structure(list(seq = seq, channel = channel), class = "irid_echo_gate")
 }
 
 # Pure reconciliation planner for `Each`. Decides *what* changes between two
@@ -413,8 +425,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           if (is.null(cur)) cur <- list()
           entry <- cur[[source_id]]
           if (is.null(entry)) entry <- list()
-          info <- list(seq = seq, channel = channel)
-          for (tgt in write_targets) entry[[tgt]] <- info
+          gate <- irid_echo_gate(seq, channel)
+          for (tgt in write_targets) entry[[tgt]] <- gate
           cur[[source_id]] <- entry
           session$userData$irid_current_sequence <- cur
           session$onFlushed(function() {
@@ -450,6 +462,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         source_bindings <- bindings_by_id[[source_id]]
         if (!is.null(seq) && length(source_bindings) > 0L &&
             !is.null(write_targets)) {
+          gate <- irid_echo_gate(seq, channel)
           for (sb in source_bindings) {
             if (!(sb$attr %in% write_targets)) next
             val <- isolate(sb$fn())
@@ -457,12 +470,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               # Same per-widget batch as the binding observers — the
               # force-send echo coalesces with them in this flush. Stamps
               # this event's channel so the client gates per channel.
-              irid_queue_widget_attr(session, sb$id, sb$attr, val, seq, channel)
+              irid_queue_widget_attr(session, sb$id, sb$attr, val, gate)
             } else {
               msg <- if (sb$target == "text") {
                 msg_irid_attr_text(sb$id, coerce_text_child(val))
               } else {
-                msg_irid_attr_dom(sb$id, sb$attr, val, seq, channel)
+                msg_irid_attr_dom(sb$id, sb$attr, val, gate)
               }
               session$sendCustomMessage("irid-attr", msg)
             }
@@ -488,24 +501,22 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      # Look up this binding's own channel: the entry keyed by (source, attr)
+      # Look up this binding's own gate: the entry keyed by (source, attr)
       # that an event in this flush recorded for the target `b$attr`. Absent
       # for a programmatic update, a cross-element write, or a binding driven
       # only by a hand-rolled handler — all of which echo ungated.
       cur <- session$userData$irid_current_sequence
-      info <- if (!is.null(cur) && !is.null(cur[[b$id]])) cur[[b$id]][[b$attr]] else NULL
-      seq <- if (!is.null(info)) info$seq else NULL
-      channel <- if (!is.null(info)) info$channel else NULL
+      gate <- if (!is.null(cur) && !is.null(cur[[b$id]])) cur[[b$id]][[b$attr]] else NULL
       if (b$target == "widget") {
         # Coalesced per-widget; drained as one `values` map at flush end.
-        irid_queue_widget_attr(session, b$id, b$attr, val, seq, channel)
+        irid_queue_widget_attr(session, b$id, b$attr, val, gate)
       } else {
         msg <- if (b$target == "text") {
-          # Text never gates (it is never an event write_target), so seq/channel
-          # are always NULL here — the encoder carries no gate for it.
+          # Text never gates (it is never an event write_target), so `gate` is
+          # always NULL here — the encoder carries no gate for it.
           msg_irid_attr_text(b$id, coerce_text_child(val))
         } else {
-          msg_irid_attr_dom(b$id, b$attr, val, seq, channel)
+          msg_irid_attr_dom(b$id, b$attr, val, gate)
         }
         session$sendCustomMessage("irid-attr", msg)
       }

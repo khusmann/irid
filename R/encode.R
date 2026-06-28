@@ -145,18 +145,11 @@ as_protocol.irid_dom_opts <- function(x) {
   )
 }
 
-# Optimistic-update echo gate.
+# Optimistic-update echo gate (constructor `irid_echo_gate` lives in R/mount.R,
+# the producer; this is its wire-shape method, mirroring wire_timing/dom_opts).
 #' @export
 as_protocol.irid_echo_gate <- function(x) {
   list(seq = json_number(x$seq), channel = json_string(x$channel))
-}
-
-# Constructor for the echo gate value object: the classed `{seq, channel}`, or NULL
-# when there's no gating context — a programmatic write. The R-side NULL is the
-# absence; the message constructor wires it as an explicit `null` gate field.
-irid_echo_gate <- function(seq, channel) {
-  if (is.null(seq)) return(NULL)
-  structure(list(seq = seq, channel = channel), class = "irid_echo_gate")
 }
 
 # --- lifecycle message constructors ----------------------------------------
@@ -182,10 +175,9 @@ msg_irid_widget_init <- function(id, name, props) {
 # --- irid-attr message constructors ----------------------------------------
 
 # DOM property/attribute write. `value` is arbitrary user data (left as-is); `gate`
-# is the `{seq, channel}` echo gate, or `null` for a programmatic write (no echo to
-# gate). Always present.
-msg_irid_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
-  gate <- irid_echo_gate(seq, channel)
+# is an `irid_echo_gate` value object, or NULL for a programmatic write (no echo to
+# gate, rendered as the wire's `null`). Always present.
+msg_irid_attr_dom <- function(id, attr, value, gate = NULL) {
   list(
     id = json_string(id), target = "dom", attr = json_string(attr), value = value,
     gate = if (is.null(gate)) NULL else as_protocol(gate)
@@ -199,8 +191,9 @@ msg_irid_attr_text <- function(id, value) {
   list(id = json_string(id), target = "text", value = json_string(value))
 }
 
-# Coalesced widget batch. `values` is a map (always >= 1 key); `valueGates` is the
-# sparse per-key gate map, ALWAYS present — empty `{}` when no key is gated (all
+# Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
+# sparse per-key map of `irid_echo_gate` value objects, rendered to wire shape
+# here. `valueGates` is ALWAYS present — empty `{}` when no key is gated (all
 # programmatic). The client reads gates per key, so an absent key (undefined gate)
 # applies unconditionally, making `{}` indistinguishable from omission.
 msg_irid_attr_widget <- function(id, values, gates) {
@@ -208,7 +201,7 @@ msg_irid_attr_widget <- function(id, values, gates) {
     id = json_string(id),
     target = "widget",
     values = json_map(values),
-    valueGates = json_map(gates)
+    valueGates = json_map(lapply(gates, as_protocol))
   )
 }
 

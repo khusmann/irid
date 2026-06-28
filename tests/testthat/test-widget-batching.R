@@ -90,9 +90,9 @@ test_that("each key carries its own {seq, channel} in valueGates", {
   # level max): a box zoom can contribute xaxis_range + yaxis_range from two
   # different channels in one batch.
   s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1, sequence = 3, channel = "ch_a")
-  irid:::irid_queue_widget_attr(s, "w1", "b", 2, sequence = 7, channel = "ch_b")
-  irid:::irid_queue_widget_attr(s, "w1", "c", 3, sequence = NULL)
+  irid:::irid_queue_widget_attr(s, "w1", "a", 1, irid:::irid_echo_gate(3, "ch_a"))
+  irid:::irid_queue_widget_attr(s, "w1", "b", 2, irid:::irid_echo_gate(7, "ch_b"))
+  irid:::irid_queue_widget_attr(s, "w1", "c", 3, irid:::irid_echo_gate(NULL, NULL))
   s$flushReact()
 
   vm <- attr_msgs(s)[[1]]$message$valueGates
@@ -217,7 +217,7 @@ test_that("a binding stamps its own (source, attr) channel into valueGates", {
   # New per-channel shape: keyed by source id, then write-target attr.
   m$session$userData$irid_current_sequence <- list()
   m$session$userData$irid_current_sequence[[wid]] <-
-    list(content = list(seq = 42, channel = "ch_content"))
+    list(content = irid:::irid_echo_gate(42, "ch_content"))
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
@@ -238,7 +238,7 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   shiny::isolate(content("yo"))
   m$session$userData$irid_current_sequence <- list()
   m$session$userData$irid_current_sequence[[wid]] <-
-    list(other_attr = list(seq = 9, channel = "ch_other"))
+    list(other_attr = irid:::irid_echo_gate(9, "ch_other"))
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
