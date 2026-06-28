@@ -256,14 +256,26 @@ msg_irid_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
 # --- Inbound: client -> server payload decode ------------------------------
 
 # The structural mirror of the client's `attachPayloadMeta`. Splits the transport
-# envelope (`id` + per-channel `seq`) from the foreign event data. It does NOT do
-# value coercion (turning `list(40, 200)` into a numeric range, or `NA` back into
-# `NULL`) — that is semantic and field-specific, so it stays per-widget
-# (`coerce_plotly_value`).
+# envelope (`id` + per-channel `seq`) from the foreign event data. Generic over
+# every inbound event (DOM and widget): it does NOT coerce values (turning
+# `list(40, 200)` into a numeric range, or a JSON `null` into anything else) and
+# keeps nulls verbatim — that is semantic and field-specific, so it stays per
+# source (DOM via `coerce_value_as_number` below, widgets via `coerce_plotly_value`).
+# A widget author's `null` therefore reaches the handler as `NULL`, untouched.
 irid_decode_payload <- function(payload) {
-  # NULL -> NA normalizes a field that arrived as JSON `null` (e.g. an empty
-  # input's `valueAsNumber`) so it survives as an explicit list element rather
-  # than reading back as "missing" — presence normalization, not value coercion.
-  event <- lapply(payload$data, function(x) if (is.null(x)) NA else x)
-  list(meta = payload[c("id", "seq")], event = event)
+  list(meta = payload[c("id", "seq")], event = payload$data)
+}
+
+# The one inbound normalization irid owns, applied to DOM events ONLY (gated on
+# `ev$source` at the observer). A number/range/date input reports
+# `valueAsNumber = NaN` when empty, and JSON serializes NaN as null, landing here
+# as R NULL. Re-key just that field to a typed `NA_real_` so a handler reads an
+# empty input as a missing *value* (`is.na()`, matching base Shiny's numericInput)
+# rather than a `NULL`. Scoped to `valueAsNumber`: it is the only field
+# `buildPayload` can send as null, and knowing it is numeric lets us type the NA.
+coerce_value_as_number <- function(event) {
+  if ("valueAsNumber" %in% names(event) && is.null(event$valueAsNumber)) {
+    event$valueAsNumber <- NA_real_
+  }
+  event
 }

@@ -394,6 +394,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         source_id <- decoded$meta$id
         write_targets <- ev$write_targets
 
+        # DOM-only: empty number inputs arrive with `valueAsNumber` null; map it
+        # to NA_real_. Widget event data is left verbatim (a widget's null stays
+        # null).
+        event_obj <- decoded$event
+        if (identical(ev$source, "dom")) event_obj <- coerce_value_as_number(event_obj)
+
         # Thread the event sequence for optimistic-update tracking, keyed PER
         # CHANNEL. `irid_current_sequence[[source_id]][[attr]] = {seq, channel}`
         # records, for each binding attr this event declares it writes
@@ -420,7 +426,6 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           }, once = TRUE)
         }
 
-        event_obj <- decoded$event
         if (nformals == 0L) {
           handler()
         } else if (nformals == 1L) {
