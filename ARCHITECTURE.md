@@ -6,8 +6,13 @@
 R/
   app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Match/Case/Default, Output
-  event.R         wire carrier; wire_immediate/throttle/debounce timing
+  wire.R          wire carrier; wire_immediate/throttle/debounce timing
                   shapes; wire_dom_opts; merge.irid_wire
+  encode.R        producer-side wire codec — msg_irid_* message constructors
+                  (attr/wire/mutate/config/ready/widget-init), as_protocol value
+                  tier, + coerce_value_as_number inbound step; centralizes the
+                  jsonlite serialization discipline (json_array/json_map/
+                  json_string/json_number/json_bool)
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
@@ -30,7 +35,9 @@ srcts/             TypeScript source for the client — the single source vendor
                    into inst/ (eventually shared with a Python server). Built with
                    esbuild, typechecked with tsc, unit-tested with vitest; see
                    TESTING.md.
-  src/protocol.ts        Typed wire protocol + public client API (type-only)
+  src/protocol/          Typed protocol (type-only): messages.ts (wire messages,
+                         both directions) + values.ts (value-types + id aliases) +
+                         widget.ts (public widget-author API) + index.ts barrel
   src/core/*             core runtime (seq, payload, anchors, ratelimit, stale,
                          widgets, handlers, index) -> inst/js/irid.js
   src/widgets/plotly/*   plotly factory (pure + index) -> plotly-irid.js
@@ -103,10 +110,10 @@ Walks the tag tree recursively and produces:
   coalesce, prevent_default, stop_propagation, capture, passive}`, one entry
   per `(id, event)`. `source = "dom"` for events attached to a DOM element
   via `addEventListener`; `source = "widget"` for widget events (pushed via
-  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). A
-  `kind` field distinguishes a `"prop"` write-back (input
-  `irid_prop_{id}_{key}`) from a regular `"event"` (input
-  `irid_ev_{id}_{event}`); DOM-event rows omit `kind`. A given DOM event is
+  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). All
+  inbound rows — DOM events, widget events, and prop write-backs — share one
+  input namespace, `irid_input_{id}_{event}`; a widget's prop and event names
+  can't collide (enforced in `IridWidget`), so `(id, event)` is unique. A given DOM event is
   claimed by **at most one** of {value-binding autobind, explicit `on*`} —
   there is no merge (see the one-channel rule below). `handler` is `NULL` for
   a config-only event (an `wire` with `dom_opts` but no subject) — the
@@ -183,9 +190,9 @@ Takes the output of `process_tags` and a Shiny `session`, then wires up:
 1. **Reactive bindings** — Each binding gets an `observe()` that sends
    `irid-attr` messages when the reactive value changes.
 2. **Event handlers** — Each event gets an `observeEvent()` on a namespaced
-   input ID (`irid_ev_{id}_{event}`). The handler is dispatched based on its
+   input ID (`irid_input_{id}_{event}`). The handler is dispatched based on its
    formal argument count (0, 1, or 2 args). Event registration is sent to the
-   client as a `irid-events` message.
+   client as a `irid-wire` message.
 3. **Shiny outputs** — Each output's render call is assigned to
    `session$output[[id]]`.
 4. **Control-flow nodes** — Each node gets an `observe()` that manages its
@@ -383,28 +390,36 @@ anchor references are preserved across moves.
 ## Client-Side Protocol
 
 `irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-swap`, `irid-mutate`, `irid-events`,
-`irid-widget-init`, and `irid-ready`.
+`irid-attr`, `irid-mutate`, `irid-wire`, `irid-widget-init`, and
+`irid-ready`.
+
+All server→client messages are built by the producer-side wire codec
+(`R/encode.R`, the `msg_irid_*` constructors), which materializes each
+field's wire shape from its declared protocol type rather than from the runtime
+value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 
 ### `irid-attr`
 
 ```js
-// target = "dom" — DOM property/attribute write. `sequence`+`channel` gate the
-// echo against the channel that produced it (omitted for programmatic writes).
+// target = "dom" — DOM property/attribute write. `gate` ({seq, channel}) gates the
+// echo against the channel that produced it (OMITTED for programmatic writes).
 {id: "irid-3", target: "dom",  attr: "value", value: "hello",
- sequence: 12, channel: "irid_ev_irid-3_input"}
+ gate: {seq: 12, channel: "irid_input_irid-3_input"}}
 
-// target = "text" — text replacement in a comment-anchor range
+// target = "text" — text replacement in a comment-anchor range. `value` is always
+// a string ("" is the canonical "clear the range" signal); no gate (text is never
+// a write target).
 {id: "irid-5", target: "text", value: "Count: 42"}
 
 // target = "widget" — route a coalesced batch to a widget's update() hook.
 // `values` is always a {attr -> value} map (one or more keys), built by
 // coalescing every widget binding that fired in the same server flush.
-// `value_meta` carries the per-key {seq, channel} for the stale-echo gate (only
-// for keys that came from a client write; programmatic keys are omitted).
+// `valueGates` carries the per-key {seq, channel} for the stale-echo gate (only
+// for keys that came from a client write; programmatic keys are omitted, and the
+// whole field is omitted when no key is gated).
 {id: "irid-7", target: "widget",
  values: {content: "...", cursor: {line: 1, ch: 1}},
- value_meta: {content: {seq: 12, channel: "irid_prop_irid-7_content"}}}
+ valueGates: {content: {seq: 12, channel: "irid_input_irid-7_content"}}}
 ```
 
 Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
@@ -417,27 +432,15 @@ has focus and `msg.attr === "value"` (optimistic update — see below).
 For `"text"`: looks up the comment-anchor pair `msg.id`, removes
 everything between the start and end anchors (running
 `Shiny.unbindAll` on each removed element), and inserts a single
-text node when `value` is non-empty. For `"widget"`: looks up the
+text node when `value` is non-`""`. For `"widget"`: looks up the
 widget registered at `msg.id` and calls `handle.update(msg.values)`
 with the coalesced `{attr -> value}` map; the widget's update hook
 owns the "compare against current state, skip on match" logic — irid
 stays generic because what counts as "current state" is
-library-specific. The per-key stale-echo gate (via `value_meta`) drops any
+library-specific. The per-key stale-echo gate (via `valueGates`) drops any
 stale key from the batch before the hook runs, so the hook never sees an
 out-of-order value and doesn't need a sequence argument. See [Widgets](#widgets)
 for the per-flush batching that builds `values`.
-
-### `irid-swap`
-
-```js
-{id: "irid-5", html: "<li>new content</li>"}
-```
-
-Looks up the anchor pair for `id`, detaches everything between the start
-and end anchors (running `Shiny.unbindAll` on each removed element), parses
-`html` as a contextual fragment, registers nested anchors, inserts the
-fragment before the end anchor, then defers `Shiny.bindAll` on the parent
-to initialize any Shiny outputs in the new content.
 
 ### `irid-mutate`
 
@@ -450,9 +453,11 @@ to initialize any Shiny outputs in the new content.
 }
 ```
 
-Performs granular range mutations between the container's anchors. Used by
-`Each` instead of `irid-swap` to avoid destroying and recreating all
-children on every list change.
+The **sole structural message** — granular range mutations between the
+container's anchors. It drives both `Each` (N keyed/positional children) and
+`When`/`Match` (one child range, keyed by the active branch/case): a branch flip
+is `{removes: [old], inserts: [new]}`, an empty branch a bare `{removes: [old]}`.
+`removes`/`inserts`/`order` are always present; an empty array is a no-op.
 
 1. **Removes** — For each child ID, looks up its anchor pair and moves the
    entire `[start..end]` range into a detached fragment (unbinding elements
@@ -466,48 +471,59 @@ children on every list change.
 After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
 initialize any new Shiny outputs.
 
-### `irid-events`
+### `irid-wire`
+
+The message is an array of entries, a discriminated union on `source`. A DOM
+event carries nested `domOpts` + `clientOnly`; the widget arm adds no extra
+fields. `timing` is nested and discriminated on `mode` (`ms`/`leading` exist
+only where the variant gives them meaning):
 
 ```js
 [
+  // DOM event
   {
     id: "irid-2",
     event: "input",
-    inputId: "irid_ev_irid-2_input",
+    channel: "irid_input_irid-2_input",
     source: "dom",
-    kind: null,            // "prop" / "event" for widget channels; null for DOM
-    mode: "throttle",
-    ms: 100,
-    leading: true,
+    timing: { mode: "throttle", ms: 100, leading: true },
     coalesce: true,
-    preventDefault: false,
-    stopPropagation: false,
-    capture: false,
-    passive: false,
+    domOpts: { preventDefault: false, stopPropagation: false,
+               capture: false, passive: false, filter: null },
     clientOnly: false,
+  },
+  // widget event
+  {
+    id: "irid-7",
+    event: "content",
+    channel: "irid_input_irid-7_content",
+    source: "widget",
+    timing: { mode: "debounce", ms: 200 },
+    coalesce: true,
   },
 ];
 ```
 
-For each entry, initializes a managed-state record under `inputId`
+For each entry, initializes a managed-state record under `channel`
 (throttle/debounce/coalesce/sequence gating). If `source = "dom"`, also
 attaches a DOM event listener on the element — the listener applies the
-`preventDefault` / `stopPropagation` flags (and registers with the
+`domOpts.preventDefault` / `stopPropagation` flags (and registers with the
 `capture` / `passive` options), reads the element's `value` (and other
 event fields), and pushes the payload through the managed-state via
-`Shiny.setInputValue(inputId, payload, {priority: "event"})`. A
+`Shiny.setInputValue(channel, payload, {priority: "event"})`. A
 `clientOnly` entry (a config-only `wire` with `dom_opts` but no
 handler) attaches a bare listener that applies the DOM flags and never
 sends — no managed state, no round-trip. If `source = "widget"`, the
 listener-attach step is skipped; the entry is also indexed in
-`widgetStreams` under `{kind}:{id}:{event}`, and the widget JS pushes payloads
+`widgetStreams` under `{id}:{event}` (props and events can't share a name, so
+the pair is unique), and the widget JS pushes payloads
 through `irid.sendWidgetEvent(id, event, payload)` / `setProp`, which resolve
-their stream through that index. The index (rather than rebuilding the inputId
+their stream through that index. The index (rather than rebuilding the channel
 on the client) is what makes widget channels work under Shiny modules, where
-the namespaced `inputId` is unknowable to a widget factory.
+the namespaced `channel` is unknowable to a widget factory.
 
 **Per-channel sequencing.** Every outbound send bumps a counter keyed by its
-`inputId` (`sequences[channel]`), and each echo carries the `channel` (and seq)
+`channel` (`sequences[channel]`), and each echo carries the `channel` (and seq)
 it should be gated against. A channel is one client→server stream — a DOM
 event, a widget event, or a widget prop write-back — so a sibling channel's send
 can never gate another channel's echo. This matters for widgets, where one
@@ -584,14 +600,15 @@ client:
 ### `irid-ready`
 
 ```js
-{id: "myOutput"}  // output name (renderIrid), or {} for a top-level iridApp mount
+{output: "myOutput"}  // output name (renderIrid); `output` is OMITTED for a
+                      // top-level iridApp mount (no output name exists)
 ```
 
 Signals that a mount is fully wired. The server (`irid_send_ready` in `R/app.R`)
 sends it from the mount's `onFlushed`, i.e. **after** the flush in which every
 control-flow body (`When`/`Each`/`Match`) has mounted and sent its own
-`irid-events`. Because WebSocket messages are ordered and an event's
-`observeEvent` is registered *before* its `irid-events` within
+`irid-wire`. Because WebSocket messages are ordered and an event's
+`observeEvent` is registered *before* its `irid-wire` within
 `irid_mount_processed`, a client that has seen `irid-ready` has every listener
 attached *and* every server observer registered.
 
@@ -620,28 +637,28 @@ overwrite characters the user typed while the server was processing. Conversely,
 programmatic updates (e.g. clearing an input after form submission) must always
 apply, even while the element is focused.
 
-**Per-channel sequence numbers** solve this. Each event payload includes an
-incrementing `__irid_seq`, counted PER CHANNEL on the client (`sequences[channel]`,
-keyed by the `inputId` the payload is sent on). A *channel* is one client→server
+**Per-channel sequence numbers** solve this. Each event payload's envelope carries
+an incrementing `seq`, counted PER CHANNEL on the client (`sequences[channel]`,
+keyed by the `channel` the payload is sent on). A *channel* is one client→server
 stream from an element: a DOM event, a widget event, or a widget prop write-back.
 The R event observer records, for each binding attr the event declares it writes
 (`write_targets`), the `{seq, channel}` a binding observer should stamp on its
 echo — stored on `session$userData$irid_current_sequence` keyed by
 `[[source_id]][[attr]]`, cleared via `session$onFlushed`. Binding observers stamp
-both `sequence` and `channel`; the echo gate compares the echo's `sequence`
-against `sequences[channel]`. On the client, `irid-attr` for `value` on a focused
+a `gate: {seq, channel}`; the echo gate compares the echo's `gate.seq` against
+`sequences[gate.channel]`. On the client, `irid-attr` for `value` on a focused
 element decides:
 
-- **Stale echo** (sequence < the channel's latest sent) → skip.
+- **Stale echo** (`gate.seq` < the channel's latest sent) → skip.
 - **Current echo, same value** (not stale, `el.value === msg.value`)
   → no-op skip (avoids cursor position reset).
 - **Server transform** (not stale, different value) → apply (e.g.
   server uppercases input).
-- **Programmatic update** (no sequence/channel) → always apply.
+- **Programmatic update** (no `gate`) → always apply.
 
 Keying by channel (not by element) is what lets a widget multiplex many
 props/events through one element without a sibling channel's send gating another
-channel's echo. A widget batch carries the gate per key (`value_meta:
+channel's echo. A widget batch carries the gate per key (`valueGates:
 {key -> {seq, channel}}`) since one batch can coalesce props from different
 channels (e.g. `xaxis_range` + `yaxis_range` from a box zoom).
 
@@ -671,8 +688,10 @@ Key design points:
   write DISJOINT keys (each channel owns its `write_targets`), so neither steals
   the other's entry — each echo carries its own channel's seq.
 
-- **`__irid_seq` is excluded** from the `event_obj` passed to user handlers, so
-  it is an internal-only field.
+- **The envelope is read** before the user handler runs: the inbound payload is a
+  flat `{ id, seq, data }`, and the observer reads those fields directly — the
+  handler receives only `data`. The `seq` is internal-only — never in the user
+  event object.
 
 - **Force-send on no-op.** After running the user's event handler, the event
   observer reads the source element's bindings whose attr is in `write_targets`
@@ -741,7 +760,7 @@ controlled inputs.
 process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
 Plotly, Leaflet, ...). It expresses one R-side component on top of an
 init/update/destroy contract on the JS side, and reuses every existing
-irid channel — `irid-attr` for one-way prop updates, `irid-events` for
+irid channel — `irid-attr` for one-way prop updates, `irid-wire` for
 event payloads, the optimistic-update sequence counter, the `wire`
 timing config, the stale indicator, the comment-anchor lifecycle. No
 widget-specific code lives in the transport.
@@ -776,7 +795,7 @@ widget JS chooses what to fire via `sendEvent()`. Each value is a handler
 or an `wire` (to tune timing); `NULL` (or a `merge()` resolving to a
 subject-less wire) is dropped, so optional handlers forward declaratively.
 
-### Two-way props: `setProp` + `irid_prop_*`
+### Two-way props: `setProp` + `irid_input_*`
 
 irid hard-codes DOM autobind for `value`/`checked` because the DOM IDL
 gives every element a uniform (prop, event, event-field) triple. Widget
@@ -784,13 +803,14 @@ props get the same treatment by construction: R always sets up the
 inbound-accept + snap-back for a callable prop, and whether it's *actually*
 two-way is decided by whether the widget JS pushes through the prop channel.
 
-The new primitive is **`setProp` + a per-prop `irid_prop_{id}_{key}`
+The primitive is **`setProp` + a per-prop `irid_input_{id}_{key}`
 input** — the client → server partner of the existing server → client
 `irid-attr target="widget"` → `update` hook. `setProp("content", value)`
 pushes through the **same managed-state / sequence transport as
-`sendEvent`** (so optimistic-update gating and echo-sequencing apply), but
-to `irid_prop_{id}_{key}` instead of `irid_ev_{id}_{event}`. process_tags
-emits, per callable prop, a `kind = "prop"` event row whose synthesized
+`sendEvent`** (so optimistic-update gating and echo-sequencing apply), on the
+**same `irid_input_{id}_{event}` namespace** as events — a prop and event
+can't share a name (enforced in `IridWidget`), so there's no collision.
+process_tags emits, per callable prop, a write-back event row whose synthesized
 handler writes the bound reactive (gated by the internal `can_accept_write`
 predicate); mount wires an `observeEvent` on that input. A read-only
 reactive's write is dropped, and the force-send-on-no-op loop (scoped
@@ -903,7 +923,7 @@ surface to the contract alone.
 
 The widget's R-side observers (per callable prop: one server→client
 binding plus one client→server write-back; one per event) are owned by
-the enclosing mount; `destroy()` on the mount tears them down. Client-side, `detachRange` (used by `irid-swap` and
+the enclosing mount; `destroy()` on the mount tears them down. Client-side, `detachRange` (used by
 `irid-mutate`) walks the removed fragment for `[data-irid-widget]`
 elements and calls each widget's `destroy()` before `Shiny.unbindAll`.
 No `irid-widget-destroy` message — the teardown is purely client-driven
@@ -1037,9 +1057,10 @@ its surface onto the substrate above:
   `selected_ids`, `trace_visibility` (and subplot axes `xaxis<n>_range`, …) are a
   *translation table*: the R side only validates the names; the JS factory holds
   the authoritative mirror mapping each name to a spec path, an `apply`/
-  `applyDeferred`/`matchesCurrent`, and a source plotly event. NULL-initialized
-  args are shipped explicitly (`__irid_state_keys`) because R list semantics drop
-  a `NULL` from the init props object.
+  `applyDeferred`/`matchesCurrent`, and a source plotly event. The factory derives
+  its entries from the full prop set (`Object.keys(props)`): a NULL-initialized
+  arg is preserved as explicit `null` in the init props (irid's widget-init seeding
+  keeps NULL-valued keys), so no separate key list is shipped.
 - **Discrete events → widget events** (`onClick`, `onHover`, legend, …); the raw
   `plotly_relayout` payload is an `onRelayout` escape hatch for fields outside the
   table.

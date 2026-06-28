@@ -10,12 +10,11 @@
 
 import { sendWidgetEvent, setWidgetProp } from "./ratelimit";
 import type {
-  IridWidgetInitMessage,
+  IridWidgetInit,
   SendEvent,
   SetProp,
   WidgetFactory,
   WidgetHandle,
-  WidgetProps,
 } from "../protocol";
 
 interface WidgetEntry {
@@ -26,14 +25,14 @@ interface WidgetEntry {
 }
 
 const defined = new Map<string, WidgetFactory>();
-const pendingInits: Record<string, Array<{ id: string; props: WidgetProps }>> =
+const pendingInits: Record<string, Array<{ id: string; props: Record<string, unknown> }>> =
   {};
 export const widgets: Record<string, WidgetEntry> = {};
 
 function mountWidget(
   id: string,
   name: string,
-  props: WidgetProps,
+  props: Record<string, unknown>,
   factory: WidgetFactory,
 ): void {
   if (widgets[id]) return; // idempotent — duplicate init (in-flight or live)
@@ -115,7 +114,7 @@ function destroyWidget(id: string): void {
   delete widgets[id];
 }
 
-// Destroy any widget instances inside `root`. Called from detachRange / irid-swap
+// Destroy any widget instances inside `root`. Called from detachRange
 // BEFORE Shiny.unbindAll so destroy() runs while the subtree is intact.
 export function destroyWidgetsIn(root: Node): void {
   if (
@@ -146,7 +145,7 @@ export function defineWidget(name: string, factory: WidgetFactory): void {
 // script is delivered via insertUI at mount time, so window.irid exists when it
 // calls defineWidget. An init that still beats its factory parks under
 // pendingInits and drains on defineWidget.
-export function handleWidgetInit(msg: IridWidgetInitMessage): void {
+export function handleWidgetInit(msg: IridWidgetInit): void {
   if (widgets[msg.id]) return; // idempotent
   const factory = defined.get(msg.name);
   if (!factory) {

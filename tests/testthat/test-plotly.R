@@ -224,12 +224,13 @@ test_that("PlotlyOutput builds an irid_widget with spec/state props, events, dep
   expect_s3_class(w, "irid_widget")
   expect_equal(w$name, "plotly")
 
-  # spec is a callable prop that serializes to a JSON string; bound state keys
-  # are shipped explicitly (so a NULL-initialized arg survives R list semantics).
-  expect_true(all(c("spec", "__irid_state_keys", "xaxis_range") %in% names(w$props)))
+  # spec is a callable prop that serializes to a JSON string. State args ride as
+  # ordinary props (no `__irid_state_keys` list — the factory derives them from
+  # the full prop set, with NULL-initialized args preserved as explicit null).
+  expect_true(all(c("spec", "xaxis_range") %in% names(w$props)))
+  expect_false("__irid_state_keys" %in% names(w$props))
   expect_true(is.function(w$props$spec))
   expect_type(shiny::isolate(w$props$spec()), "character")
-  expect_equal(w$props$`__irid_state_keys`, list("xaxis_range"))
 
   # NULL discrete handlers drop out; the supplied onClick survives as `click`.
   expect_true("click" %in% names(w$events))

@@ -2,9 +2,9 @@ test_that("coerce_text_child accepts length-1 atomics and NULL", {
   expect_equal(irid:::coerce_text_child("hello"), "hello")
   expect_equal(irid:::coerce_text_child(42), "42")
   expect_equal(irid:::coerce_text_child(TRUE), "TRUE")
-  expect_equal(irid:::coerce_text_child(NULL), character(0))
-  # NA coerces to NA_character_ (client treats as empty)
-  expect_equal(irid:::coerce_text_child(NA), NA_character_)
+  # NULL / NA / empty all normalize to "" (the wire's "clear" signal).
+  expect_equal(irid:::coerce_text_child(NULL), "")
+  expect_equal(irid:::coerce_text_child(NA), "")
 })
 
 test_that("coerce_text_child rejects HTML tags", {

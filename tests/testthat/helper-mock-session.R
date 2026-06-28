@@ -3,7 +3,7 @@
 
 # A MockShinySession that captures the custom messages a mount would send.
 # `s$msgs()` returns the captured list of {type, message} entries; tests filter
-# it for irid-attr / irid-swap / irid-events / irid-config to assert behavior.
+# it for irid-attr / irid-mutate / irid-wire / irid-config to assert behavior.
 new_fake_session <- function() {
   s <- shiny::MockShinySession$new()
   store <- new.env(parent = emptyenv())

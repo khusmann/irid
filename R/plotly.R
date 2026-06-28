@@ -338,11 +338,10 @@ PlotlyOutput <- function(
 
   state <- list(...)
   validate_plotly_state_args(state)
-  # The JS factory builds its translation-table entries from this list, not
-  # from which props happen to be non-NULL at init: a NULL-initialized state
-  # arg (`xaxis_range = reactiveVal(NULL)`) is dropped from the init `props`
-  # object (R list semantics), so the bound keys must be shipped explicitly.
-  state_keys <- as.list(names(state))
+  # The JS factory derives its translation-table entries from the full prop set
+  # (`Object.keys(props)`): a NULL-initialized state arg is now preserved as
+  # explicit `null` in the init props (irid's seeding keeps NULL keys), so no
+  # explicit key list is shipped.
 
   # The spec is always a function; wrap it as a callable prop that serializes
   # to the plotly JSON string each time its deps change. Two-way-capable like
@@ -362,7 +361,7 @@ PlotlyOutput <- function(
   IridWidget(
     name  = "plotly",
     props = c(
-      list(spec = spec_prop, `__irid_state_keys` = state_keys),
+      list(spec = spec_prop),
       prepare_state_props(state)
     ),
     events = list(

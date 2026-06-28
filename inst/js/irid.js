@@ -48,8 +48,10 @@
 
   // src/core/seq.ts
   var sequences = {};
-  function isStaleEcho(seq, channel, seqs) {
-    return seq !== void 0 && seq !== null && channel !== void 0 && channel !== null && seqs[channel] !== void 0 && seq < seqs[channel];
+  function isStaleEcho(gate, seqs) {
+    if (!gate) return false;
+    const latest = seqs[gate.channel];
+    return latest !== void 0 && gate.seq < latest;
   }
   function nextSequence(seqs, channel) {
     if (!seqs[channel]) seqs[channel] = 0;
@@ -57,33 +59,29 @@
   }
 
   // src/core/payload.ts
-  function attachPayloadMeta(payload, id, channel) {
-    const p = payload;
-    p.id = id;
-    p.nonce = Math.random();
-    p.__irid_seq = nextSequence(sequences, channel);
-    return p;
+  function attachPayloadMeta(data, id, channel) {
+    return { id, seq: nextSequence(sequences, channel), data };
   }
   function buildPayload(e, el, id, channel) {
-    const payload = {};
+    const data = {};
     for (const key in e) {
       try {
         const val = e[key];
         if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
-          payload[key] = val;
+          data[key] = val;
         }
       } catch {
       }
     }
     const input = el;
-    payload.value = input.value;
+    data.value = input.value;
     if (typeof input.valueAsNumber === "number") {
-      payload.valueAsNumber = input.valueAsNumber;
+      data.valueAsNumber = input.valueAsNumber;
     }
     if (typeof input.checked === "boolean") {
-      payload.checked = input.checked;
+      data.checked = input.checked;
     }
-    return attachPayloadMeta(payload, id, channel);
+    return attachPayloadMeta(data, id, channel);
   }
 
   // src/core/ratelimit.ts
@@ -156,12 +154,12 @@
       }
     }
   }
-  function compileFilter(msg) {
-    if (!msg.filter) return null;
+  function compileFilter(opts) {
+    if (!opts.filter) return null;
     try {
-      return new Function("e", "return (" + msg.filter + ");");
+      return new Function("e", "return (" + opts.filter + ");");
     } catch (err) {
-      console.error("irid: invalid event filter expression:", msg.filter, err);
+      console.error("irid: invalid event filter expression:", opts.filter, err);
       return null;
     }
   }
@@ -170,42 +168,30 @@
     return eventName === "change" && el.tagName === "INPUT" && input.type === "radio" && !input.checked;
   }
   function attachListener(el, msg, dispatch) {
-    const filter = compileFilter(msg);
+    const opts = msg.domOpts;
+    const filter = compileFilter(opts);
     el.addEventListener(
       msg.event,
       (e) => {
         if (shouldSkip(el, msg.event)) return;
         if (filter && !filter(e)) return;
-        if (msg.preventDefault) e.preventDefault();
-        if (msg.stopPropagation) e.stopPropagation();
-        dispatch(buildPayload(e, el, msg.id, msg.inputId));
+        if (opts.preventDefault) e.preventDefault();
+        if (opts.stopPropagation) e.stopPropagation();
+        dispatch == null ? void 0 : dispatch(buildPayload(e, el, msg.id, msg.channel));
       },
-      { capture: !!msg.capture, passive: !!msg.passive }
+      { capture: opts.capture, passive: opts.passive }
     );
   }
-  function attachClientOnlyListener(el, msg) {
-    const filter = compileFilter(msg);
-    el.addEventListener(
-      msg.event,
-      (e) => {
-        if (shouldSkip(el, msg.event)) return;
-        if (filter && !filter(e)) return;
-        if (msg.preventDefault) e.preventDefault();
-        if (msg.stopPropagation) e.stopPropagation();
-      },
-      { capture: !!msg.capture, passive: !!msg.passive }
-    );
-  }
-  function setupThrottle(el, msg) {
+  function setupThrottle(el, msg, ms, leading) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       timerRunning: false,
       timerReady: false,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
-      leading: msg.leading,
+      coalesce: msg.coalesce,
+      leading,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -221,7 +207,7 @@
         s.timerRunning = false;
         s.timerReady = true;
         s.maybeSend();
-      }, msg.ms);
+      }, ms);
     }
     s.maybeSend = () => {
       if (s.coalesce && s.serverBusy) return;
@@ -252,19 +238,19 @@
       s.timerReady = false;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
-  function setupDebounce(el, msg) {
+  function setupDebounce(el, msg, ms) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       timerId: null,
       timerReady: false,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
+      coalesce: msg.coalesce,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -292,7 +278,7 @@
         s.timerId = null;
         s.timerReady = true;
         s.maybeSend();
-      }, msg.ms);
+      }, ms);
     };
     s.qFlush = () => {
       if (s.timerId !== null && s.timerId !== void 0) {
@@ -304,17 +290,17 @@
       s.payload = null;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
   function setupImmediate(el, msg) {
     const s = {
       id: msg.id,
-      inputId: msg.inputId,
+      inputId: msg.channel,
       payload: null,
       serverBusy: false,
-      coalesce: !!msg.coalesce,
+      coalesce: msg.coalesce,
       qPayload: null,
       qReady: false,
       maybeSend: () => {
@@ -341,7 +327,7 @@
       s.payload = null;
       s.qReady = true;
     };
-    managed[msg.inputId] = s;
+    managed[msg.channel] = s;
     if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
     return s;
   }
@@ -351,10 +337,10 @@
     s.dispatch(p);
   }
   function sendWidgetEvent(id, event, payload) {
-    pushManaged(widgetStreams["event:" + id + ":" + event], id, payload || {});
+    pushManaged(widgetStreams[id + ":" + event], id, payload || {});
   }
   function setWidgetProp(id, key, value) {
-    pushManaged(widgetStreams["prop:" + id + ":" + key], id, { value });
+    pushManaged(widgetStreams[id + ":" + key], id, { value });
   }
 
   // src/core/widgets.ts
@@ -527,32 +513,24 @@
     checked: true,
     innerHTML: true
   };
-  var eventsRegistered = /* @__PURE__ */ new Set();
+  var wireRegistered = /* @__PURE__ */ new Set();
   function registerHandlers() {
     Shiny.addCustomMessageHandler("irid-config", (msg) => {
-      if (msg.staleTimeout !== void 0 && msg.staleTimeout !== null) {
-        setStaleTimeout(msg.staleTimeout);
-      } else {
-        setStaleTimeout(null);
-      }
+      setStaleTimeout(msg.staleTimeout);
     });
     Shiny.addCustomMessageHandler("irid-attr", (msg) => {
       if (msg.target === "widget") {
         const w = widgets[msg.id];
         if (!w) return;
-        let values = msg.values;
-        if (msg.value_meta) {
-          const kept = {};
-          let any = false;
-          for (const k in values) {
-            const meta = msg.value_meta[k];
-            if (meta && isStaleEcho(meta.seq, meta.channel, sequences)) continue;
-            kept[k] = values[k];
-            any = true;
-          }
-          if (!any) return;
-          values = kept;
+        const kept = {};
+        let any = false;
+        for (const k in msg.values) {
+          if (isStaleEcho(msg.valueGates[k], sequences)) continue;
+          kept[k] = msg.values[k];
+          any = true;
         }
+        if (!any) return;
+        const values = kept;
         if (w.handle) {
           if (typeof w.handle.update === "function") w.handle.update(values);
         } else {
@@ -560,7 +538,6 @@
         }
         return;
       }
-      if (isStaleEcho(msg.sequence, msg.channel, sequences)) return;
       if (msg.target === "text") {
         const a = lookupAnchors(msg.id);
         if (!a) return;
@@ -572,12 +549,12 @@
           parent.removeChild(n);
           n = next;
         }
-        const val = msg.value;
-        if (val !== null && val !== void 0 && val !== "") {
-          parent.insertBefore(document.createTextNode(String(val)), a.end);
+        if (msg.value !== "") {
+          parent.insertBefore(document.createTextNode(msg.value), a.end);
         }
         return;
       }
+      if (isStaleEcho(msg.gate, sequences)) return;
       const el = document.getElementById(msg.id);
       if (!el) return;
       if (msg.attr === "value" && document.activeElement === el && el.value === msg.value) {
@@ -593,89 +570,58 @@
         el.setAttribute(msg.attr, msg.value);
       }
     });
-    Shiny.addCustomMessageHandler("irid-swap", (msg) => {
-      const a = lookupAnchors(msg.id);
-      if (!a) return;
-      const parent = a.start.parentNode;
-      const detached = document.createDocumentFragment();
-      let n = a.start.nextSibling;
-      while (n && n !== a.end) {
-        const next = n.nextSibling;
-        if (n.nodeType === 1) {
-          destroyWidgetsIn(n);
-          Shiny.unbindAll(n);
-        }
-        detached.appendChild(n);
-        n = next;
-      }
-      unregisterAnchorsIn(detached);
-      if (msg.html) {
-        const fragment = parseFragment(msg.html, parent);
-        indexAnchors(fragment);
-        parent.insertBefore(fragment, a.end);
-      }
-      setTimeout(() => {
-        Shiny.bindAll(parent);
-      }, 0);
-    });
     Shiny.addCustomMessageHandler("irid-mutate", (msg) => {
       const a = lookupAnchors(msg.id);
       if (!a) return;
       const parent = a.start.parentNode;
-      if (msg.removes) {
-        msg.removes.forEach((childId) => {
-          const child = anchors.get(childId);
-          if (!child) return;
-          const detached = detachRange(child.start, child.end);
-          unregisterAnchorsIn(detached);
-        });
-      }
-      if (msg.inserts) {
-        msg.inserts.forEach((html) => {
-          const fragment = parseFragment(html, parent);
-          indexAnchors(fragment);
-          parent.insertBefore(fragment, a.end);
-        });
-      }
-      if (msg.order) {
-        msg.order.forEach((childId) => {
-          const child = anchors.get(childId);
-          if (!child) return;
-          const frag = document.createDocumentFragment();
-          let node = child.start;
-          while (node && node !== child.end) {
-            const next = node.nextSibling;
-            frag.appendChild(node);
-            node = next;
-          }
-          frag.appendChild(child.end);
-          parent.insertBefore(frag, a.end);
-        });
-      }
+      msg.removes.forEach((childId) => {
+        const child = anchors.get(childId);
+        if (!child) return;
+        const detached = detachRange(child.start, child.end);
+        unregisterAnchorsIn(detached);
+      });
+      msg.inserts.forEach((html) => {
+        const fragment = parseFragment(html, parent);
+        indexAnchors(fragment);
+        parent.insertBefore(fragment, a.end);
+      });
+      msg.order.forEach((childId) => {
+        const child = anchors.get(childId);
+        if (!child) return;
+        const frag = document.createDocumentFragment();
+        let node = child.start;
+        while (node && node !== child.end) {
+          const next = node.nextSibling;
+          frag.appendChild(node);
+          node = next;
+        }
+        frag.appendChild(child.end);
+        parent.insertBefore(frag, a.end);
+      });
       setTimeout(() => {
         Shiny.bindAll(parent);
       }, 0);
     });
-    Shiny.addCustomMessageHandler("irid-events", (msgs) => {
+    Shiny.addCustomMessageHandler("irid-wire", (msgs) => {
       msgs.forEach((msg) => {
-        const key = msg.inputId;
-        if (eventsRegistered.has(key)) return;
+        const key = msg.channel;
+        if (wireRegistered.has(key)) return;
         const el = document.getElementById(msg.id);
         if (msg.source !== "widget" && !el) return;
-        eventsRegistered.add(key);
-        if (msg.clientOnly) {
-          attachClientOnlyListener(el, msg);
+        wireRegistered.add(key);
+        if (msg.source === "dom" && msg.clientOnly) {
+          attachListener(el, msg);
           return;
         }
-        if (msg.mode === "throttle") {
-          setupThrottle(el, msg);
-        } else if (msg.mode === "debounce") {
-          setupDebounce(el, msg);
+        if (msg.timing.mode === "throttle") {
+          setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
+        } else if (msg.timing.mode === "debounce") {
+          setupDebounce(el, msg, msg.timing.ms);
         } else {
           setupImmediate(el, msg);
         }
         if (msg.source === "widget") {
-          widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] = managed[msg.inputId];
+          widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
         }
       });
     });
@@ -686,10 +632,9 @@
       }
     );
     Shiny.addCustomMessageHandler("irid-ready", (msg) => {
-      var _a;
       window.__iridReady = true;
       document.dispatchEvent(
-        new CustomEvent("irid:ready", { detail: { id: (_a = msg == null ? void 0 : msg.id) != null ? _a : null } })
+        new CustomEvent("irid:ready", { detail: { id: msg.output } })
       );
     });
   }

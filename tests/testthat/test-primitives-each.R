@@ -379,8 +379,9 @@ test_that("Each keyed reorder emits an order payload that serializes to a JSON a
   msgs <- m$session$msgs()
   last <- msgs[[length(msgs)]]
   expect_equal(last$type, "irid-mutate")
-  expect_null(last$message$removes)
-  expect_null(last$message$inserts)
+  # removes/inserts are always present — empty arrays here, not omitted.
+  expect_length(last$message$removes, 0L)
+  expect_length(last$message$inserts, 0L)
   expect_equal(length(last$message$order), 3L)
 
   # The payload must be an unnamed list so Shiny serializes it as a JSON

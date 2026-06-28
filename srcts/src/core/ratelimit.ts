@@ -8,9 +8,16 @@
 
 import { onEventSent } from "./stale";
 import { attachPayloadMeta, buildPayload } from "./payload";
-import type { IridEventEntry } from "../protocol";
+import type {
+  DomOpts,
+  IridClientEvent,
+  IridWireDom,
+  IridWire,
+} from "../protocol";
 
-type Payload = Record<string, unknown> | null;
+// An opaque buffered payload: the `{ id, seq, data }` envelope in the runtime, or
+// a bare object in unit tests that exercise the timing/queue logic directly.
+type Payload = IridClientEvent | Record<string, unknown> | null;
 
 export interface ManagedStream {
   id: string;
@@ -31,8 +38,8 @@ export interface ManagedStream {
 }
 
 export const managed: Record<string, ManagedStream> = {}; // inputId -> stream
-// Widget client->server streams indexed by the `{kind}:{id}:{event}` triple a
-// factory's sendEvent/setProp resolves against (module-namespace-agnostic).
+// Widget client->server streams indexed by the `{id}:{event}` pair a factory's
+// sendEvent/setProp resolves against (module-namespace-agnostic).
 export const widgetStreams: Record<string, ManagedStream> = {};
 const elementQueues: Record<string, ManagedStream[]> = {}; // elementId -> pending
 let idleListenerActive = false;
@@ -116,14 +123,14 @@ function drainQueue(elId: string): void {
 
 // Compile a `wire_dom_opts(filter = ...)` expression into a predicate over the
 // DOM event `e`, or null when no filter is set.
-function compileFilter(msg: IridEventEntry): ((e: Event) => boolean) | null {
-  if (!msg.filter) return null;
+function compileFilter(opts: DomOpts): ((e: Event) => boolean) | null {
+  if (!opts.filter) return null;
   try {
-    return new Function("e", "return (" + msg.filter + ");") as (
+    return new Function("e", "return (" + opts.filter + ");") as (
       e: Event,
     ) => boolean;
   } catch (err) {
-    console.error("irid: invalid event filter expression:", msg.filter, err);
+    console.error("irid: invalid event filter expression:", opts.filter, err);
     return null;
   }
 }
@@ -140,41 +147,27 @@ function shouldSkip(el: HTMLElement, eventName: string): boolean {
   );
 }
 
-function attachListener(
+// Attach the DOM listener: apply the wire's `dom_opts` flags (preventDefault /
+// stopPropagation, under the capture/passive/filter options), then dispatch the
+// payload. Omitting `dispatch` is a config-only wire (dom_opts, no server handler):
+// the flags are applied client-side and the event never round-trips.
+export function attachListener(
   el: HTMLElement,
-  msg: IridEventEntry,
-  dispatch: (payload: Payload) => void,
+  msg: IridWireDom,
+  dispatch?: (payload: Payload) => void,
 ): void {
-  const filter = compileFilter(msg);
+  const opts = msg.domOpts;
+  const filter = compileFilter(opts);
   el.addEventListener(
     msg.event,
     (e) => {
       if (shouldSkip(el, msg.event)) return;
       if (filter && !filter(e)) return;
-      if (msg.preventDefault) e.preventDefault();
-      if (msg.stopPropagation) e.stopPropagation();
-      dispatch(buildPayload(e, el, msg.id, msg.inputId));
+      if (opts.preventDefault) e.preventDefault();
+      if (opts.stopPropagation) e.stopPropagation();
+      dispatch?.(buildPayload(e, el, msg.id, msg.channel));
     },
-    { capture: !!msg.capture, passive: !!msg.passive },
-  );
-}
-
-// A config-only event (wire with dom_opts but no handler): apply the DOM listener
-// flags client-side and never round-trip.
-export function attachClientOnlyListener(
-  el: HTMLElement,
-  msg: IridEventEntry,
-): void {
-  const filter = compileFilter(msg);
-  el.addEventListener(
-    msg.event,
-    (e) => {
-      if (shouldSkip(el, msg.event)) return;
-      if (filter && !filter(e)) return;
-      if (msg.preventDefault) e.preventDefault();
-      if (msg.stopPropagation) e.stopPropagation();
-    },
-    { capture: !!msg.capture, passive: !!msg.passive },
+    { capture: opts.capture, passive: opts.passive },
   );
 }
 
@@ -182,17 +175,19 @@ export function attachClientOnlyListener(
 
 export function setupThrottle(
   el: HTMLElement | null,
-  msg: IridEventEntry,
+  msg: IridWire,
+  ms: number,
+  leading: boolean,
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     timerRunning: false,
     timerReady: false,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
-    leading: msg.leading,
+    coalesce: msg.coalesce,
+    leading,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},
@@ -206,7 +201,7 @@ export function setupThrottle(
       s.timerRunning = false;
       s.timerReady = true;
       s.maybeSend();
-    }, msg.ms);
+    }, ms);
   }
 
   s.maybeSend = () => {
@@ -244,23 +239,24 @@ export function setupThrottle(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }
 
 export function setupDebounce(
   el: HTMLElement | null,
-  msg: IridEventEntry,
+  msg: IridWire,
+  ms: number,
 ): ManagedStream {
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     timerId: null,
     timerReady: false,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
+    coalesce: msg.coalesce,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},
@@ -287,7 +283,7 @@ export function setupDebounce(
       s.timerId = null;
       s.timerReady = true;
       s.maybeSend();
-    }, msg.ms);
+    }, ms);
   };
 
   // Preempt: a later sibling is ready and we're the head. Cancel the timer and
@@ -303,23 +299,23 @@ export function setupDebounce(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }
 
 export function setupImmediate(
   el: HTMLElement | null,
-  msg: IridEventEntry,
+  msg: IridWire,
 ): ManagedStream {
   // All immediate streams route through the element queue so a plain immediate
   // event can preemptively flush a sibling debounced stream before sending.
   const s: ManagedStream = {
     id: msg.id,
-    inputId: msg.inputId,
+    inputId: msg.channel,
     payload: null,
     serverBusy: false,
-    coalesce: !!msg.coalesce,
+    coalesce: msg.coalesce,
     qPayload: null,
     qReady: false,
     maybeSend: () => {},
@@ -349,7 +345,7 @@ export function setupImmediate(
     s.qReady = true;
   };
 
-  managed[msg.inputId] = s;
+  managed[msg.channel] = s;
   if (msg.source !== "widget" && el) attachListener(el, msg, s.dispatch);
   return s;
 }
@@ -375,10 +371,10 @@ export function sendWidgetEvent(
   event: string,
   payload?: Record<string, unknown>,
 ): void {
-  pushManaged(widgetStreams["event:" + id + ":" + event], id, payload || {});
+  pushManaged(widgetStreams[id + ":" + event], id, payload || {});
 }
 
 /** `setProp(key, value)` — the client->server half of a two-way prop. */
 export function setWidgetProp(id: string, key: string, value: unknown): void {
-  pushManaged(widgetStreams["prop:" + id + ":" + key], id, { value });
+  pushManaged(widgetStreams[id + ":" + key], id, { value });
 }

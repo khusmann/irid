@@ -61,7 +61,7 @@ mount_when <- function(node) {
   list(
     session = session,
     handle = handle,
-    swaps = function() Filter(function(m) m$type == "irid-swap", session$msgs()),
+    mutates = function() Filter(function(m) m$type == "irid-mutate", session$msgs()),
     attr_msgs = function(attr) Filter(
       function(m) m$type == "irid-attr" && identical(m$message$attr, attr),
       session$msgs()
@@ -69,30 +69,34 @@ mount_when <- function(node) {
   )
 }
 
+# The body rides a child-anchor range, so its HTML arrives in the mutate's
+# `inserts` (a list of fragments). Concatenate them for a substring assertion.
+mutate_inserts <- function(msg) paste(unlist(msg$message$inserts), collapse = "")
+
 test_that("renders the yes branch when the condition is TRUE", {
   m <- mount_when(When(\() TRUE, \() tags$p("yes"), \() tags$p("no")))
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 1L)
-  expect_match(sw[[1]]$message$html, "yes")
+  mu <- m$mutates()
+  expect_length(mu, 1L)
+  expect_match(mutate_inserts(mu[[1]]), "yes")
   m$handle$destroy()
 })
 
 test_that("renders the otherwise branch when the condition is FALSE", {
   m <- mount_when(When(\() FALSE, \() tags$p("yes"), \() tags$p("no")))
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 1L)
-  expect_match(sw[[1]]$message$html, "no")
+  mu <- m$mutates()
+  expect_length(mu, 1L)
+  expect_match(mutate_inserts(mu[[1]]), "no")
   m$handle$destroy()
 })
 
-test_that("renders nothing (empty swap) when FALSE and no otherwise", {
+test_that("renders nothing when FALSE and no otherwise", {
+  # Empty branch on initial mount: nothing to remove, nothing to insert, so no
+  # mutate is emitted at all (the container range is already empty).
   m <- mount_when(When(\() FALSE, \() tags$p("yes")))
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 1L)
-  expect_equal(sw[[1]]$message$html, "")
+  expect_length(m$mutates(), 0L)
   m$handle$destroy()
 })
 
@@ -111,26 +115,28 @@ test_that("re-evaluating with the same condition does not rebuild (short-circuit
   ))
   flushReact()
   expect_equal(builds, 1L)
-  n_swaps <- length(m$swaps())
+  n_mutates <- length(m$mutates())
 
   src(2L) # still > 0 — condition stays TRUE
   flushReact()
   expect_equal(builds, 1L) # no rebuild
-  expect_equal(length(m$swaps()), n_swaps) # no new swap
+  expect_equal(length(m$mutates()), n_mutates) # no new mutate
   m$handle$destroy()
 })
 
-test_that("switching branches re-renders the other branch", {
+test_that("switching branches re-renders the other branch (remove old + insert new)", {
   cond <- shiny::reactiveVal(TRUE)
   m <- mount_when(When(cond, \() tags$p("yes"), \() tags$p("no")))
   flushReact()
-  expect_match(m$swaps()[[1]]$message$html, "yes")
+  expect_match(mutate_inserts(m$mutates()[[1]]), "yes")
 
   cond(FALSE)
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 2L)
-  expect_match(sw[[2]]$message$html, "no")
+  mu <- m$mutates()
+  expect_length(mu, 2L)
+  # The flip removes the old child range and inserts the new branch.
+  expect_length(mu[[2]]$message$removes, 1L)
+  expect_match(mutate_inserts(mu[[2]]), "no")
   m$handle$destroy()
 })
 

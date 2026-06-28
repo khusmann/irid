@@ -118,6 +118,16 @@ IridWidget <- function(
     }
   }
   events <- normalize_widget_events(events)
+  # Props and events share one per-widget `(id, name)` channel namespace, so a
+  # name cannot be both — otherwise `setProp(name)` and `sendEvent(name)` would
+  # cross-wire to the same stream.
+  clash <- intersect(names(props), names(events))
+  if (length(clash) > 0L) {
+    cli::cli_abort(c(
+      "A widget prop and event must not share a name.",
+      "x" = "Shared by {.arg props} and {.arg events}: {.val {clash}}."
+    ))
+  }
   if (!is.null(deps)) {
     if (inherits(deps, "html_dependency")) {
       deps <- list(deps)

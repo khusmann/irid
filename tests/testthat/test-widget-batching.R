@@ -85,28 +85,31 @@ test_that("widgets drain in first-seen order, not alphabetical", {
   expect_equal(ids, c("w-2", "w-10"))
 })
 
-test_that("each key carries its own {seq, channel} in value_meta", {
+test_that("each key carries its own {seq, channel} in valueGates", {
   # The gate is per channel, so the sequence travels per key (not one batch-
   # level max): a box zoom can contribute xaxis_range + yaxis_range from two
   # different channels in one batch.
   s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1, sequence = 3, channel = "ch_a")
-  irid:::irid_queue_widget_attr(s, "w1", "b", 2, sequence = 7, channel = "ch_b")
-  irid:::irid_queue_widget_attr(s, "w1", "c", 3, sequence = NULL)
+  irid:::irid_queue_widget_attr(s, "w1", "a", 1, irid:::irid_echo_gate(3, "ch_a"))
+  irid:::irid_queue_widget_attr(s, "w1", "b", 2, irid:::irid_echo_gate(7, "ch_b"))
+  irid:::irid_queue_widget_attr(s, "w1", "c", 3, irid:::irid_echo_gate(NULL, NULL))
   s$flushReact()
 
-  vm <- attr_msgs(s)[[1]]$message$value_meta
+  vm <- attr_msgs(s)[[1]]$message$valueGates
   expect_equal(vm$a, list(seq = 3, channel = "ch_a"))
   expect_equal(vm$b, list(seq = 7, channel = "ch_b"))
-  # A programmatic key (no sequence) gets no value_meta entry — applied always.
+  # A programmatic key (no sequence) gets no valueGates entry — applied always.
   expect_false("c" %in% names(vm))
 })
 
-test_that("a purely programmatic batch carries no value_meta", {
+test_that("a purely programmatic batch carries an empty valueGates", {
   s <- new_batch_session()
   irid:::irid_queue_widget_attr(s, "w1", "a", 1)
   s$flushReact()
-  expect_false("value_meta" %in% names(attr_msgs(s)[[1]]$message))
+  msg <- attr_msgs(s)[[1]]$message
+  # valueGates is always present; empty `{}` when no key is gated.
+  expect_true("valueGates" %in% names(msg))
+  expect_length(msg$valueGates, 0L)
 })
 
 test_that("a later attr overwrites an earlier value for the same key", {
@@ -203,7 +206,7 @@ test_that("props changing in separate flushes drain as separate messages", {
   m$handle$destroy()
 })
 
-test_that("a binding stamps its own (source, attr) channel into value_meta", {
+test_that("a binding stamps its own (source, attr) channel into valueGates", {
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()            # initial (programmatic) batch
@@ -214,18 +217,18 @@ test_that("a binding stamps its own (source, attr) channel into value_meta", {
   # New per-channel shape: keyed by source id, then write-target attr.
   m$session$userData$irid_current_sequence <- list()
   m$session$userData$irid_current_sequence[[wid]] <-
-    list(content = list(seq = 42, channel = "ch_content"))
+    list(content = irid:::irid_echo_gate(42, "ch_content"))
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_equal(last$value_meta$content, list(seq = 42, channel = "ch_content"))
+  expect_equal(last$valueGates$content, list(seq = 42, channel = "ch_content"))
 
   m$handle$destroy()
 })
 
 test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   # A sibling channel recorded a DIFFERENT attr this flush; the content binding
-  # finds no entry for its own attr and sends no value_meta (programmatic).
+  # finds no entry for its own attr, so its key carries no gate (programmatic).
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()
@@ -235,28 +238,31 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   shiny::isolate(content("yo"))
   m$session$userData$irid_current_sequence <- list()
   m$session$userData$irid_current_sequence[[wid]] <-
-    list(other_attr = list(seq = 9, channel = "ch_other"))
+    list(other_attr = irid:::irid_echo_gate(9, "ch_other"))
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_false("value_meta" %in% names(last))
+  # valueGates is present but has no entry for the ungated key.
+  expect_false("content" %in% names(last$valueGates))
 
   m$handle$destroy()
 })
 
-test_that("irid_jsonify_names converts named vectors to named lists (JSON objects)", {
-  # A named atomic vector would serialize via Shiny's keep_vec_names path and
-  # warn; a named list gives the same JSON object without the deprecation.
-  expect_identical(irid_jsonify_names(c("8" = "legendonly")), list(`8` = "legendonly"))
-  # Unnamed vectors stay vectors (JSON arrays); scalars pass through.
-  expect_identical(irid_jsonify_names(c(40, 200)), c(40, 200))
-  expect_identical(irid_jsonify_names("pan"), "pan")
-  expect_null(irid_jsonify_names(NULL))
-  # Recurses into lists, preserving keys.
+test_that("json_map converts named-vector members to named lists (JSON objects)", {
+  # A named atomic value would serialize via Shiny's keep_vec_names path and warn;
+  # json_map converts it to a named list — same JSON object, no deprecation.
   expect_identical(
-    irid_jsonify_names(list(a = c(x = 1), b = 1:3)),
-    list(a = list(x = 1), b = 1:3)
+    json_map(list(vis = c("8" = "legendonly"))),
+    list(vis = list(`8` = "legendonly"))
   )
+  # Unnamed vectors stay vectors (JSON arrays); scalars pass through; recursion
+  # preserves keys at depth.
+  expect_identical(
+    json_map(list(r = c(40, 200), m = "pan", nested = list(x = c(a = 1)))),
+    list(r = c(40, 200), m = "pan", nested = list(x = list(a = 1)))
+  )
+  # An empty map serializes as `{}` (a named empty list), not `[]`.
+  expect_identical(json_map(list()), stats::setNames(list(), character(0)))
 })
 
 test_that("a named-vector prop round-trips through mount as a JSON object", {

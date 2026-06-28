@@ -309,15 +309,12 @@
         if (name === "trace_visibility") return visibilityEntry();
         return null;
       }
-      const stateKeys = [].concat(
-        props.__irid_state_keys || []
-      );
       const entries = [];
-      stateKeys.forEach((key) => {
+      Object.keys(props).forEach((key) => {
         const e = makeEntry(key);
         if (e) {
           entries.push(e);
-          state[key] = key in props ? props[key] : null;
+          state[key] = props[key];
         }
       });
       function merge() {

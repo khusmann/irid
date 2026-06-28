@@ -110,9 +110,13 @@ mount_match <- function(node) {
   list(
     session = s,
     handle = handle,
-    swaps = function() Filter(function(m) m$type == "irid-swap", s$msgs())
+    mutates = function() Filter(function(m) m$type == "irid-mutate", s$msgs())
   )
 }
+
+# The active case body rides a child-anchor range, so its HTML arrives in the
+# mutate's `inserts`. Concatenate for a substring assertion.
+mutate_inserts <- function(msg) paste(unlist(msg$message$inserts), collapse = "")
 
 test_that("Match renders the first matching case", {
   m <- mount_match(Match(
@@ -121,18 +125,17 @@ test_that("Match renders the first matching case", {
     Case("b", \() tags$p("B"))
   ))
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 1L)
-  expect_match(sw[[1]]$message$html, "B")
+  mu <- m$mutates()
+  expect_length(mu, 1L)
+  expect_match(mutate_inserts(mu[[1]]), "B")
   m$handle$destroy()
 })
 
-test_that("Match emits an empty swap when no case matches and no Default", {
+test_that("Match emits nothing when no case matches and no Default", {
+  # Empty case on initial mount: nothing to remove or insert, so no mutate.
   m <- mount_match(Match(\() "z", Case("a", \() tags$p("A"))))
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 1L)
-  expect_equal(sw[[1]]$message$html, "")
+  expect_length(m$mutates(), 0L)
   m$handle$destroy()
 })
 
@@ -144,10 +147,10 @@ test_that("Match short-circuits while the active case is unchanged", {
     Default(\() tags$p("other"))
   ))
   flushReact()
-  n <- length(m$swaps())
+  n <- length(m$mutates())
   v("a2") # still matches the first case
   flushReact()
-  expect_equal(length(m$swaps()), n) # no remount
+  expect_equal(length(m$mutates()), n) # no remount
   m$handle$destroy()
 })
 
@@ -159,13 +162,14 @@ test_that("Match destroys the previous case when the active case changes", {
     Case("b", \() tags$p("B"))
   ))
   flushReact()
-  expect_match(m$swaps()[[1]]$message$html, "A")
+  expect_match(mutate_inserts(m$mutates()[[1]]), "A")
 
   v("b")
   flushReact()
-  sw <- m$swaps()
-  expect_length(sw, 2L)
-  expect_match(sw[[2]]$message$html, "B")
+  mu <- m$mutates()
+  expect_length(mu, 2L)
+  expect_length(mu[[2]]$message$removes, 1L)
+  expect_match(mutate_inserts(mu[[2]]), "B")
   m$handle$destroy()
 })
 

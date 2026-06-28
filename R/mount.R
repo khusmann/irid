@@ -1,28 +1,3 @@
-#' Coalesce per-widget `irid-attr` updates within a Shiny flush
-#'
-#' A widget can expose several bound props whose binding observers fire in
-#' the same flush. Sending one `irid-attr` per binding races them on the
-#' wire — for atomic-render libraries (Plotly, Mapbox) each message triggers
-#' a full re-render, so two messages mean two redraws and a visible flash.
-#'
-#' Instead of sending immediately, each `(attr, value)` is accumulated into a
-#' per-widget pending map on `session$userData$irid_widget_pending`, and a
-#' one-shot `session$onFlushed` handler drains every widget's map at flush
-#' end into a single `irid-attr target="widget"` carrying a
-#' `values: {attr -> value}` object.
-#'
-#' The stale-echo gate is keyed PER CHANNEL, and a batch can mix props from
-#' different channels (e.g. `xaxis_range` + `yaxis_range` from one box zoom),
-#' so the sequence travels per key: `value_meta: {attr -> {seq, channel}}`.
-#' A key contributed without a sequence (purely programmatic) gets no
-#' `value_meta` entry and the client applies it unconditionally; a batch with
-#' no gated keys carries no `value_meta` at all.
-#'
-#' Batching is intra-flush only: a prop updating in one flush and another in
-#' a later flush still produces two messages.
-#'
-#' @keywords internal
-#' @noRd
 #' Validate and coerce a reactive text child's return value
 #'
 #' A reactive text child renders as a single text node (`target = "text"`).
@@ -38,7 +13,11 @@
 #' @noRd
 coerce_text_child <- function(val) {
   if (is.null(val) || (is.atomic(val) && length(val) <= 1L)) {
-    return(as.character(val))
+    val <- as.character(val)
+    # NULL / NA / character(0) all mean "empty" -> "" (the wire's "clear the range"
+    # signal), so the text wire type is exactly `string` — never `[]` or `null`.
+    if (length(val) == 0L || is.na(val)) return("")
+    return(val)
   }
   what <- if (inherits(val, c("shiny.tag", "shiny.tag.list"))) {
     "an HTML tag - wrap reactive tags in When/Match/Each instead"
@@ -54,8 +33,32 @@ coerce_text_child <- function(val) {
   )
 }
 
-irid_queue_widget_attr <- function(session, id, attr, value,
-                                   sequence = NULL, channel = NULL) {
+#' Coalesce per-widget `irid-attr` updates within a Shiny flush
+#'
+#' A widget can expose several bound props whose binding observers fire in
+#' the same flush. Sending one `irid-attr` per binding races them on the
+#' wire — for atomic-render libraries (Plotly, Mapbox) each message triggers
+#' a full re-render, so two messages mean two redraws and a visible flash.
+#'
+#' Instead of sending immediately, each `(attr, value)` is accumulated into a
+#' per-widget pending map on `session$userData$irid_widget_pending`, and a
+#' one-shot `session$onFlushed` handler drains every widget's map at flush
+#' end into a single `irid-attr target="widget"` carrying a
+#' `values: {attr -> value}` object.
+#'
+#' The stale-echo gate is keyed PER CHANNEL, and a batch can mix props from
+#' different channels (e.g. `xaxis_range` + `yaxis_range` from one box zoom),
+#' so the gate travels per key: `valueGates: {attr -> {seq, channel}}`.
+#' A key contributed without a gate (purely programmatic) gets no
+#' `valueGates` entry and the client applies it unconditionally; a batch with
+#' no gated keys carries an empty `valueGates` (`{}`).
+#'
+#' Batching is intra-flush only: a prop updating in one flush and another in
+#' a later flush still produces two messages.
+#'
+#' @keywords internal
+#' @noRd
+irid_queue_widget_attr <- function(session, id, attr, value, gate = NULL) {
   pending <- session$userData$irid_widget_pending
   if (is.null(pending)) {
     pending <- new.env(parent = emptyenv())
@@ -70,38 +73,39 @@ irid_queue_widget_attr <- function(session, id, attr, value,
       session$userData$irid_widget_pending <- NULL
       for (wid in ids) {
         entry <- pending[[wid]]
-        msg <- list(id = wid, target = "widget", values = entry$values)
-        if (length(entry$value_meta) > 0L) msg$value_meta <- entry$value_meta
-        session$sendCustomMessage("irid-attr", msg)
+        session$sendCustomMessage("irid-attr",
+          msg_irid_attr_widget(wid, entry$values, entry$value_gates))
       }
     }, once = TRUE)
   }
   entry <- pending[[id]]
   if (is.null(entry)) {
-    entry <- list(values = list(), value_meta = list())
+    entry <- list(values = list(), value_gates = list())
     pending$.order <- c(pending$.order, id)
   }
   # Single-bracket assignment so a legitimate NULL value keeps its key in
   # the map rather than being dropped (`[[<-` with NULL removes the entry).
-  entry$values[attr] <- list(irid_jsonify_names(value))
-  if (!is.null(sequence)) {
-    entry$value_meta[[attr]] <- list(seq = sequence, channel = channel)
+  # The encoder (`json_map`) applies the named-vector -> object discipline at
+  # drain time, so the raw R value is stored here.
+  entry$values[attr] <- list(value)
+  if (!is.null(gate)) {
+    # Store the raw gate value object; the drain (`msg_irid_attr_widget`)
+    # renders the whole map to its wire shape via `as_protocol`.
+    entry$value_gates[[attr]] <- gate
   }
   pending[[id]] <- entry
   invisible()
 }
 
-# Shiny's custom-message encoder serializes named atomic vectors with
-# jsonlite's `keep_vec_names = TRUE`, which is deprecated (a future jsonlite will
-# encode them as arrays, not objects) and warns. Recursively convert named
-# atomic vectors to named lists so an object-shaped value like
-# `c("8" = "legendonly")` (e.g. plotly's `trace_visibility`) still serializes as
-# the `{ "8": "legendonly" }` object the client expects, without the warning.
-# Unnamed vectors and scalars pass through unchanged.
-irid_jsonify_names <- function(value) {
-  if (is.list(value)) return(lapply(value, irid_jsonify_names))
-  if (is.atomic(value) && !is.null(names(value))) return(as.list(value))
-  value
+# Optimistic-update echo gate value object: the classed `{seq, channel}` an
+# irid-managed binding stamps on its echo so the client can drop it if a newer
+# local edit has superseded it. NULL when there is no gating context (a
+# programmatic write — nothing to gate against); the message constructor renders
+# that absence as the wire's `null`/omitted gate. The `as_protocol` method lives
+# in the codec (R/encode.R), mirroring wire_timing/dom_opts.
+irid_echo_gate <- function(seq, channel) {
+  if (is.null(seq)) return(NULL)
+  structure(list(seq = seq, channel = channel), class = "irid_echo_gate")
 }
 
 # Pure reconciliation planner for `Each`. Decides *what* changes between two
@@ -191,23 +195,18 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
     env$item_mounts[[id]] <- entry
   }
 
-  msg <- list(id = cf_id)
-  if (length(removes) > 0L) msg$removes <- as.list(removes)
-  if (length(inserts) > 0L) msg$inserts <- inserts
-  if (!is.null(plan$order)) {
-    # `USE.NAMES = FALSE` keeps the result unnamed — `plan$order` is a
-    # character vector, so a default `vapply` would name the result by the
-    # id strings, and `as.list` of a named vector serializes to a JSON
-    # *object* (`{...}`) instead of an array, breaking `msg.order.forEach`
-    # in the client's irid-mutate handler.
-    msg$order <- as.list(vapply(
+  # `order` maps planner ids to their wrapper ids; the encoder forces each field
+  # to a JSON array (the array-typed-field discipline lives in `json_array`).
+  order_ids <- if (!is.null(plan$order)) {
+    vapply(
       plan$order,
       function(id) env$item_mounts[[id]]$wrapper_id,
-      character(1L),
-      USE.NAMES = FALSE
-    ))
-  }
-  session$sendCustomMessage("irid-mutate", msg)
+      character(1L)
+    )
+  } else character(0)
+  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
+    cf_id, removes = removes, inserts = inserts, order = order_ids
+  ))
 
   # Mount new entries after their DOM exists.
   for (id in plan$added) {
@@ -229,6 +228,39 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
 
   env$current_ids <- new_ids
   invisible()
+}
+
+# Single-slot keyed reconciliation for `When`/`Match`: one child slot keyed by
+# the active branch/case. The body is given its own child-anchor pair (a named
+# child range inside the container `cf_id`), so a flip is
+# `mutate {removes:[old], inserts:[new]}` and an empty branch `mutate {removes:[old]}`.
+#
+# `body_tag` is the already-evaluated tag tree, or NULL for an empty branch.
+# `old_child_id` is the previous body's wrapper id (NULL on first render). Returns
+# `list(child_id, mount)` — the caller stores both for the next flip and teardown.
+# The mount runs AFTER the DOM insert (mutate first).
+cf_render_child <- function(session, cf_id, old_child_id, body_tag,
+                            counter, depth) {
+  removes <- old_child_id %||% character(0)
+  if (is.null(body_tag)) {
+    if (length(removes) > 0L) {
+      session$sendCustomMessage("irid-mutate",
+        msg_irid_mutate(cf_id, removes = removes))
+    }
+    return(list(child_id = NULL, mount = NULL))
+  }
+  child_id <- counter()
+  wrapped <- tagList(
+    htmltools::HTML(paste0("<!--irid:s:", child_id, "-->")),
+    body_tag,
+    htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
+  )
+  processed <- process_tags(wrapped, counter = counter)
+  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
+    cf_id, removes = removes, inserts = list(as.character(processed$tag))
+  ))
+  mount <- irid_mount_processed(processed, session, depth = depth + 1L)
+  list(child_id = child_id, mount = mount)
 }
 
 # Deliver a widget's dependencies at mount time through Shiny's *native render
@@ -323,28 +355,24 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   for (wi in result$widget_inits) {
     props <- wi$static_props
     for (key in names(wi$prop_fns)) {
-      props[[key]] <- isolate(wi$prop_fns[[key]]())
+      # Single-bracket assignment so a NULL-initialized reactive prop keeps its
+      # key as explicit `null` (the encoder emits `"k":null`), giving the factory
+      # its full declared prop set. (`[[<-` with NULL would drop the key.)
+      props[key] <- list(isolate(wi$prop_fns[[key]]()))
     }
-    props <- irid_jsonify_names(props)
     deliver_widget_deps(session, wi$deps)
-    session$sendCustomMessage("irid-widget-init", list(
-      id = wi$id,
-      name = wi$name,
-      props = props
-    ))
+    session$sendCustomMessage("irid-widget-init",
+      msg_irid_widget_init(wi$id, wi$name, props))
   }
 
   # Set up event listeners
   if (length(result$events) > 0L) {
-    event_msgs <- lapply(result$events, function(ev) {
-      # Two-way widget props ride a distinct input namespace
-      # (`irid_prop_{id}_{key}`, written by the client's `setProp`); DOM and
-      # widget events use `irid_ev_{id}_{event}`.
-      input_id <- if (identical(ev$kind, "prop")) {
-        paste0("irid_prop_", ev$id, "_", ev$event)
-      } else {
-        paste0("irid_ev_", ev$id, "_", ev$event)
-      }
+    wire_msgs <- lapply(result$events, function(ev) {
+      # Every inbound channel — DOM events, widget events, and widget prop
+      # write-backs (client's `setProp`) — shares one input namespace,
+      # `irid_input_{id}_{event}`. A prop and event can't share a name (enforced in
+      # `IridWidget`), so `(id, event)` is unique.
+      input_id <- paste0("irid_input_", ev$id, "_", ev$event)
       handler <- ev$handler
 
       # The channel = the namespaced inputId the client sends on. It is the
@@ -353,26 +381,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # SAME channel.
       channel <- session$ns(input_id)
 
-      msg <- list(
-        id = ev$id,
-        event = ev$event,
-        inputId = channel,
-        # `kind` ("prop"/"event") lets the client index widget streams by the
-        # `{kind}:{id}:{event}` triple its `setProp`/`sendEvent` resolves
-        # against — robust to the module namespace the client can't see.
-        kind = ev$kind,
-        mode = ev$mode,
-        ms = ev$ms,
-        leading = ev$leading,
-        coalesce = ev$coalesce,
-        preventDefault = ev$prevent_default,
-        stopPropagation = ev$stop_propagation,
-        capture = ev$capture,
-        passive = ev$passive,
-        filter = ev$filter,
-        clientOnly = is.null(handler),
-        source = ev$source
-      )
+      # The encoder builds the discriminated wire shape (nested timing/domOpts,
+      # domOpts/clientOnly on dom rows; the widget arm adds nothing). `clientOnly`
+      # is a config-only dom wire — `dom_opts` with no server handler.
+      msg <- msg_irid_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
@@ -384,9 +396,17 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       obs <- observeEvent(session$input[[input_id]], {
         latency <- getOption("irid.debug.latency", 0)
         if (latency > 0) Sys.sleep(latency)
-        ev_data <- session$input[[input_id]]
-        source_id <- ev_data[["id"]]
+        # Inbound envelope (flat mirror of the client's `attachPayloadMeta`):
+        # `{ id, seq, data }`, foreign event fields under `data`, read directly.
+        payload <- session$input[[input_id]]
+        source_id <- payload$id
         write_targets <- ev$write_targets
+
+        # DOM-only: empty number inputs arrive with `valueAsNumber` null; map it
+        # to NA_real_. Widget event data is left verbatim (a widget's null stays
+        # null).
+        event_obj <- payload$data
+        if (identical(ev$source, "dom")) event_obj <- coerce_value_as_number(event_obj)
 
         # Thread the event sequence for optimistic-update tracking, keyed PER
         # CHANNEL. `irid_current_sequence[[source_id]][[attr]] = {seq, channel}`
@@ -399,14 +419,14 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # records nothing, so any binding it incidentally drives echoes ungated
         # (treated as programmatic). Gating is a property of irid-MANAGED
         # bindings (autobind `value`/`checked`, `reactiveProxy`, widget props).
-        seq <- ev_data[["__irid_seq"]]
+        seq <- payload$seq
         if (!is.null(seq) && !is.null(write_targets)) {
           cur <- session$userData$irid_current_sequence
           if (is.null(cur)) cur <- list()
           entry <- cur[[source_id]]
           if (is.null(entry)) entry <- list()
-          info <- list(seq = seq, channel = channel)
-          for (tgt in write_targets) entry[[tgt]] <- info
+          gate <- irid_echo_gate(seq, channel)
+          for (tgt in write_targets) entry[[tgt]] <- gate
           cur[[source_id]] <- entry
           session$userData$irid_current_sequence <- cur
           session$onFlushed(function() {
@@ -414,16 +434,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           }, once = TRUE)
         }
 
-        event_obj <- lapply(
-          ev_data[setdiff(names(ev_data), c("id", "nonce", "__irid_seq"))],
-          function(x) if (is.null(x)) NA else x
-        )
         if (nformals == 0L) {
           handler()
         } else if (nformals == 1L) {
           handler(event_obj)
         } else {
-          handler(event_obj, ev_data$id)
+          handler(event_obj, source_id)
         }
 
         # Force-send current binding values for the source element.
@@ -446,6 +462,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         source_bindings <- bindings_by_id[[source_id]]
         if (!is.null(seq) && length(source_bindings) > 0L &&
             !is.null(write_targets)) {
+          gate <- irid_echo_gate(seq, channel)
           for (sb in source_bindings) {
             if (!(sb$attr %in% write_targets)) next
             val <- isolate(sb$fn())
@@ -453,14 +470,13 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               # Same per-widget batch as the binding observers — the
               # force-send echo coalesces with them in this flush. Stamps
               # this event's channel so the client gates per channel.
-              irid_queue_widget_attr(session, sb$id, sb$attr, val, seq, channel)
+              irid_queue_widget_attr(session, sb$id, sb$attr, val, gate)
             } else {
-              msg <- switch(sb$target,
-                dom  = list(id = sb$id, target = "dom",  attr = sb$attr,
-                            value = val, sequence = seq, channel = channel),
-                text = list(id = sb$id, target = "text",
-                            value = val, sequence = seq, channel = channel)
-              )
+              msg <- if (sb$target == "text") {
+                msg_irid_attr_text(sb$id, coerce_text_child(val))
+              } else {
+                msg_irid_attr_dom(sb$id, sb$attr, val, gate)
+              }
               session$sendCustomMessage("irid-attr", msg)
             }
           }
@@ -470,7 +486,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
       msg
     })
-    session$sendCustomMessage("irid-events", event_msgs)
+    session$sendCustomMessage("irid-wire", wire_msgs)
   }
 
   # Set up reactive attribute bindings. Lower priority than control flows
@@ -485,26 +501,22 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
-      # Look up this binding's own channel: the entry keyed by (source, attr)
+      # Look up this binding's own gate: the entry keyed by (source, attr)
       # that an event in this flush recorded for the target `b$attr`. Absent
       # for a programmatic update, a cross-element write, or a binding driven
       # only by a hand-rolled handler — all of which echo ungated.
       cur <- session$userData$irid_current_sequence
-      info <- if (!is.null(cur) && !is.null(cur[[b$id]])) cur[[b$id]][[b$attr]] else NULL
-      seq <- if (!is.null(info)) info$seq else NULL
-      channel <- if (!is.null(info)) info$channel else NULL
+      gate <- if (!is.null(cur) && !is.null(cur[[b$id]])) cur[[b$id]][[b$attr]] else NULL
       if (b$target == "widget") {
         # Coalesced per-widget; drained as one `values` map at flush end.
-        irid_queue_widget_attr(session, b$id, b$attr, val, seq, channel)
+        irid_queue_widget_attr(session, b$id, b$attr, val, gate)
       } else {
-        if (b$target == "text") val <- coerce_text_child(val)
-        msg <- switch(b$target,
-          dom  = list(id = b$id, target = "dom",  attr = b$attr, value = val),
-          text = list(id = b$id, target = "text",                value = val)
-        )
-        if (!is.null(seq)) {
-          msg$sequence <- seq
-          msg$channel <- channel
+        msg <- if (b$target == "text") {
+          # Text never gates (it is never an event write_target), so `gate` is
+          # always NULL here — the encoder carries no gate for it.
+          msg_irid_attr_text(b$id, coerce_text_child(val))
+        } else {
+          msg_irid_attr_dom(b$id, b$attr, val, gate)
         }
         session$sendCustomMessage("irid-attr", msg)
       }
@@ -524,6 +536,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     if (cf$type == "when") {
       local({
         current_mount <- NULL
+        current_child <- NULL
         last_active <- NULL
         cf_id <- cf$id
         cf_condition <- cf$condition
@@ -540,34 +553,20 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
           branch_fn <- if (active) cf_yes else cf_otherwise
 
-          # Destroy previous branch
+          # Destroy previous branch's observers (the DOM child range is removed by
+          # the mutate below). Call the body fresh on each activation — the
+          # previous branch's closures were torn down here.
           if (!is.null(env$current_mount)) {
             env$current_mount$destroy()
             env$current_mount <- NULL
           }
 
-          if (!is.null(branch_fn)) {
-            # Call the body fresh on each activation — the previous
-            # branch's closures were torn down above.
-            branch <- branch_fn()
-            processed <- process_tags(branch, counter = counter)
-
-            # Swap first so elements exist in DOM
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = as.character(processed$tag)
-            ))
-
-            # Then mount observers/events
-            env$current_mount <- irid_mount_processed(
-              processed, session, depth = depth + 1L
-            )
-          } else {
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id,
-              html = ""
-            ))
-          }
+          body_tag <- if (!is.null(branch_fn)) branch_fn() else NULL
+          rendered <- cf_render_child(
+            session, cf_id, env$current_child, body_tag, counter, depth
+          )
+          env$current_child <- rendered$child_id
+          env$current_mount <- rendered$mount
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env
@@ -773,6 +772,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     } else if (cf$type == "match") {
       local({
         current_mount <- NULL
+        current_child <- NULL
         current_scope <- NULL
         last_active <- NULL
         cf_id <- cf$id
@@ -817,9 +817,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           }
 
           if (is.na(active_idx)) {
-            session$sendCustomMessage("irid-swap", list(
-              id = cf_id, html = ""
-            ))
+            # Empty case — remove the current child range, mount nothing.
+            rendered <- cf_render_child(
+              session, cf_id, env$current_child, NULL, counter, depth
+            )
+            env$current_child <- rendered$child_id
             return()
           }
 
@@ -848,14 +850,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           # the Each build_entry note) — scopes user reactives to the case.
           tag_tree <- scope$with_scope(if (n_body == 0L) body() else body(binding))
 
-          processed <- process_tags(tag_tree, counter = counter)
-          session$sendCustomMessage("irid-swap", list(
-            id = cf_id,
-            html = as.character(processed$tag)
-          ))
-          env$current_mount <- irid_mount_processed(
-            processed, session, depth = depth + 1L
+          rendered <- cf_render_child(
+            session, cf_id, env$current_child, tag_tree, counter, depth
           )
+          env$current_child <- rendered$child_id
+          env$current_mount <- rendered$mount
         })
         observers[[length(observers) + 1L]] <<- obs
         cf_envs[[length(cf_envs) + 1L]] <<- env

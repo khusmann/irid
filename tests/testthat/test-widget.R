@@ -18,10 +18,11 @@ binding_for <- function(processed, target, attr) {
   matches[[1]]
 }
 
-# The synthesized write-back / event row for a given (kind, event).
-event_row <- function(processed, kind, event) {
+# The synthesized write-back / event row for a given event name (unique per
+# widget — props and events can't share a name).
+event_row <- function(processed, event) {
   matches <- Filter(
-    function(e) identical(e$kind, kind) && e$event == event,
+    function(e) e$event == event,
     processed$events
   )
   expect_length(matches, 1L)
@@ -142,7 +143,7 @@ test_that("widget deps are NOT page-attached at render (they ride the sink)", {
   expect_equal(single_init(out)$deps, list(dep))
 })
 
-test_that("callable prop is two-way: binding + prop_fns + kind='prop' row", {
+test_that("callable prop is two-way: binding + prop_fns + write-back row", {
   rv <- shiny::reactiveVal("hi\n")
   w <- IridWidget("codemirror", props = list(content = rv))
   out <- process_tags(w)
@@ -154,7 +155,7 @@ test_that("callable prop is two-way: binding + prop_fns + kind='prop' row", {
   expect_named(init$prop_fns, "content")
   expect_length(init$static_props, 0L)
 
-  pe <- event_row(out, "prop", "content")        # client -> server
+  pe <- event_row(out, "content")        # client -> server
   expect_equal(pe$source, "widget")
   expect_equal(pe$write_targets, "content")
 })
@@ -162,7 +163,7 @@ test_that("callable prop is two-way: binding + prop_fns + kind='prop' row", {
 test_that("prop write-back writes the reactive via e$value", {
   rv <- shiny::reactiveVal("a")
   out <- process_tags(IridWidget("w", props = list(content = rv)))
-  pe <- event_row(out, "prop", "content")
+  pe <- event_row(out, "content")
   shiny::isolate(pe$handler(list(value = "typed")))
   expect_equal(shiny::isolate(rv()), "typed")
 })
@@ -171,7 +172,7 @@ test_that("read-only prop write-back is a no-op but still declares its target", 
   rv <- shiny::reactiveVal("seed")
   ro <- shiny::reactive(rv())
   out <- process_tags(IridWidget("w", props = list(content = ro)))
-  pe <- event_row(out, "prop", "content")
+  pe <- event_row(out, "content")
   expect_silent(shiny::isolate(pe$handler(list(value = "ignored"))))
   expect_equal(shiny::isolate(rv()), "seed")
   expect_equal(pe$write_targets, "content")       # snap-back via force-send
@@ -185,9 +186,9 @@ test_that("wire tunes a prop's write-back timing (no enable/disable)", {
   # still a binding + prop_fns (two-way unchanged)
   binding_for(out, "widget", "content")
   expect_named(single_init(out)$prop_fns, "content")
-  pe <- event_row(out, "prop", "content")
-  expect_equal(pe$mode, "debounce")
-  expect_equal(pe$ms, 200)
+  pe <- event_row(out, "content")
+  expect_equal(pe$timing$mode, "debounce")
+  expect_equal(pe$timing$ms, 200)
 })
 
 test_that("dom_opts on a widget prop errors (prop is not DOM-backed)", {
@@ -225,11 +226,11 @@ test_that("mixed-shape props dispatch per-key", {
 
 # --- Extraction shape: events ------------------------------------------------
 
-test_that("events become kind='event' rows with source='widget'", {
+test_that("events become rows with source='widget'", {
   h <- function(e) NULL
   w <- IridWidget("w", events = list(`cursor-changed` = h))
   out <- process_tags(w)
-  ev <- event_row(out, "event", "cursor-changed")
+  ev <- event_row(out, "cursor-changed")
   expect_equal(ev$source, "widget")
   expect_identical(ev$handler, h)
 })
@@ -237,7 +238,7 @@ test_that("events become kind='event' rows with source='widget'", {
 test_that("hand-rolled event handlers declare no write_targets", {
   w <- IridWidget("w", events = list(`cursor-changed` = function(e) NULL))
   out <- process_tags(w)
-  expect_null(event_row(out, "event", "cursor-changed")$write_targets)
+  expect_null(event_row(out, "cursor-changed")$write_targets)
 })
 
 test_that("widget event default timing is wire_immediate()", {
@@ -248,7 +249,7 @@ test_that("widget event default timing is wire_immediate()", {
     input            = h   # no input→debounce(200) special case for widgets
   ))
   out <- process_tags(w)
-  for (ev in out$events) expect_equal(ev$mode, "immediate", info = ev$event)
+  for (ev in out$events) expect_equal(ev$timing$mode, "immediate", info = ev$event)
 })
 
 test_that("wire timing lands on the emitted event row", {
@@ -258,10 +259,10 @@ test_that("wire timing lands on the emitted event row", {
     blur             = wire(h, wire_debounce(200))
   ))
   out <- process_tags(w)
-  cc <- event_row(out, "event", "cursor-changed")
-  bl <- event_row(out, "event", "blur")
-  expect_equal(cc$mode, "throttle"); expect_equal(cc$ms, 100)
-  expect_equal(bl$mode, "debounce"); expect_equal(bl$ms, 200)
+  cc <- event_row(out, "cursor-changed")
+  bl <- event_row(out, "blur")
+  expect_equal(cc$timing$mode, "throttle"); expect_equal(cc$timing$ms, 100)
+  expect_equal(bl$timing$mode, "debounce"); expect_equal(bl$timing$ms, 200)
 })
 
 # --- Container handling ------------------------------------------------------

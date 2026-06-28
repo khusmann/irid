@@ -1,6 +1,6 @@
 irid_send_config <- function(session) {
-  session$sendCustomMessage("irid-config", list(
-    staleTimeout = getOption("irid.stale_timeout", default = 200)
+  session$sendCustomMessage("irid-config", msg_irid_config(
+    getOption("irid.stale_timeout", default = 200)
   ))
 }
 
@@ -10,14 +10,14 @@ irid_send_config <- function(session) {
 #
 # Registered to fire after the NEXT flush rather than sent inline: a top-level
 # mount creates control-flow observers (When/Each/Match) that only mount their
-# bodies — and send those bodies' `irid-events` — during that flush. Deferring
+# bodies — and send those bodies' `irid-wire` — during that flush. Deferring
 # to `onFlushed` guarantees `irid-ready` is queued after every nested
-# `irid-events`, so by WebSocket ordering a client that has seen `irid-ready`
+# `irid-wire`, so by WebSocket ordering a client that has seen `irid-ready`
 # has every listener attached and every server observer registered. The e2e
 # harness waits on this before driving the first interaction (see helper-e2e.R).
-irid_send_ready <- function(session, id = NULL) {
+irid_send_ready <- function(session, output = NULL) {
   session$onFlushed(function() {
-    session$sendCustomMessage("irid-ready", list(id = id))
+    session$sendCustomMessage("irid-ready", msg_irid_ready(output))
   }, once = TRUE)
 }
 
@@ -91,7 +91,7 @@ renderIrid <- function(expr, env = parent.frame(), quoted = FALSE) {
     session$onFlushed(function() {
       irid_send_config(session)
       irid_mount_processed(result, session)
-      irid_send_ready(session, id = output_name)
+      irid_send_ready(session, output = output_name)
     }, once = TRUE)
 
     result$tag
