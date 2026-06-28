@@ -47,6 +47,13 @@ hist(
 )
 ```
 
+## Comments
+
+- Describe the code as it is, not its history. Don't explain absent features or
+  rejected alternatives ("we don't use X because...", "removed Y", etc.).
+- Rationale for the *current* design is fine — why it works this way, not why
+  it isn't something else.
+
 ## Build
 
 - Run `devtools::document()` after changing exports or roxygen comments
