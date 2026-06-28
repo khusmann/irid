@@ -36,7 +36,7 @@ srcts/             TypeScript source for the client — the single source vendor
                    esbuild, typechecked with tsc, unit-tested with vitest; see
                    TESTING.md.
   src/protocol/          Typed protocol (type-only): messages.ts (wire messages,
-                         both directions) + vocab.ts (value-types + id aliases) +
+                         both directions) + values.ts (value-types + id aliases) +
                          widget.ts (public widget-author API) + index.ts barrel
   src/core/*             core runtime (seq, payload, anchors, ratelimit, stale,
                          widgets, handlers, index) -> inst/js/irid.js

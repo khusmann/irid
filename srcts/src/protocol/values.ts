@@ -1,4 +1,4 @@
-// The irid protocol vocabulary — the identity aliases + value-types every wire
+// The irid protocol value-types — the identity aliases + value objects every wire
 // message is built from. Unprefixed (not `Irid*`) on purpose: these are reusable
 // building blocks, not messages (the `Irid*` message shapes live in `./messages`).
 //

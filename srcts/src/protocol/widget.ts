@@ -1,7 +1,7 @@
 // The public widget-author API + the `window.irid` / `document` globals. Separated
-// from the wire contract (messages.ts/vocab.ts) because the audience and stability
+// from the wire contract (messages.ts/values.ts) because the audience and stability
 // contract differ: this is what a third-party widget author writes against. It
-// references NOTHING from messages.ts or vocab.ts — its one would-be cross-reference
+// references NOTHING from messages.ts or values.ts — its one would-be cross-reference
 // (the `irid:ready` detail) uses plain `string` (see below), so they don't couple.
 //
 // TYPE-ONLY: declares types and one global augmentation, no runtime code.
@@ -61,7 +61,7 @@ declare global {
      * Fired on `document` each time an irid mount becomes interactive.
      * `detail.id` is the output name (`renderIrid`/`iridOutput`) or `null`
      * (top-level `iridApp`). Plain `string`, not the wire's `OutputName`: importing
-     * one alias across files isn't worth re-coupling widget.ts to vocab.ts.
+     * one alias across files isn't worth re-coupling widget.ts to values.ts.
      */
     "irid:ready": CustomEvent<{ id: string | null }>;
   }

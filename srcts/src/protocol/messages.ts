@@ -3,7 +3,7 @@
 // then the client -> server payload. The two directions are read jointly on a
 // round-trip (an outbound `gate` is gated against the `seq` the inbound payload
 // bumped on the same `channel`), so they belong together. The value-types they're
-// built from live in `./vocab`.
+// built from live in `./values`.
 //
 // TYPE-ONLY: declares types, no runtime code, so it is erased at build and both
 // bundles import it with zero duplication.
@@ -16,7 +16,7 @@ import type {
   EchoGate,
   DomOpts,
   Timing,
-} from "./vocab";
+} from "./values";
 
 // ---------------------------------------------------------------------------
 // Server -> client custom messages
