@@ -5,7 +5,7 @@
 // `irid_decode_payload`).
 
 import { nextSequence, sequences } from "./seq";
-import type { EventPayload } from "../protocol";
+import type { IridClientEvent } from "../protocol";
 
 /**
  * Wrap the event data in the irid envelope: a stable element `id`, a per-CHANNEL
@@ -16,7 +16,7 @@ export function attachPayloadMeta(
   data: Record<string, unknown>,
   id: string,
   channel: string,
-): EventPayload {
+): IridClientEvent {
   return { id, seq: nextSequence(sequences, channel), data };
 }
 
@@ -26,7 +26,7 @@ export function buildPayload(
   el: HTMLElement,
   id: string,
   channel: string,
-): EventPayload {
+): IridClientEvent {
   const data: Record<string, unknown> = {};
   // Extract all primitive-valued properties from the event object.
   for (const key in e) {

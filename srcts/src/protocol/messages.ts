@@ -119,7 +119,7 @@ export interface IridReady {
  * Every client->server payload: irid's transport envelope, with the event data
  * (DOM event fields, or a widget's sendEvent payload) under `data`.
  */
-export interface EventPayload {
+export interface IridClientEvent {
   /** Source element id (carried explicitly for Shiny-module namespacing). */
   id: ElementId;
   /** Per-channel monotonic sequence (the echo gate). */

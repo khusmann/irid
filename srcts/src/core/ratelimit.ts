@@ -10,14 +10,14 @@ import { onEventSent } from "./stale";
 import { attachPayloadMeta, buildPayload } from "./payload";
 import type {
   DomOpts,
-  EventPayload,
+  IridClientEvent,
   IridWireDom,
   IridWire,
 } from "../protocol";
 
 // An opaque buffered payload: the `{ id, seq, data }` envelope in the runtime, or
 // a bare object in unit tests that exercise the timing/queue logic directly.
-type Payload = EventPayload | Record<string, unknown> | null;
+type Payload = IridClientEvent | Record<string, unknown> | null;
 
 export interface ManagedStream {
   id: string;
