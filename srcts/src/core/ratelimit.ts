@@ -15,14 +15,15 @@ import type {
   IridWire,
 } from "../protocol";
 
-// An opaque buffered payload: the `{ id, seq, data }` envelope in the runtime, or
-// a bare object in unit tests that exercise the timing/queue logic directly.
-type Payload = IridClientEvent | Record<string, unknown> | null;
-
 export interface ManagedStream {
   id: string;
   inputId: string;
-  payload: Payload;
+  // The buffered payload: the `{ id, seq, data }` envelope awaiting send, or null
+  // for an empty slot (before anything is buffered, and after a flush). The
+  // timing/queue machinery treats it as opaque — it buffers, coalesces, and orders
+  // without reading the fields — but the slot keeps the full envelope type so the
+  // rest of the runtime keeps the `id`/`seq`/`data` guarantee.
+  payload: IridClientEvent | null;
   serverBusy: boolean;
   coalesce: boolean;
   leading?: boolean;
@@ -30,10 +31,10 @@ export interface ManagedStream {
   timerReady?: boolean;
   timerId?: ReturnType<typeof setTimeout> | null;
   // Ordering-queue slot.
-  qPayload: Payload;
+  qPayload: IridClientEvent | null;
   qReady: boolean;
   maybeSend: () => void;
-  dispatch: (payload: Payload) => void;
+  dispatch: (payload: IridClientEvent) => void;
   qFlush: () => void;
 }
 
@@ -44,7 +45,7 @@ export const widgetStreams: Record<string, ManagedStream> = {};
 const elementQueues: Record<string, ManagedStream[]> = {}; // elementId -> pending
 let idleListenerActive = false;
 
-function sendPayload(inputId: string, payload: Payload): void {
+function sendPayload(inputId: string, payload: IridClientEvent): void {
   Shiny.setInputValue!(inputId, payload, { priority: "event" });
   onEventSent();
 }
@@ -81,7 +82,7 @@ function queueJoin(s: ManagedStream): void {
 }
 
 // Mark `s` ready to send `payload` (may be null), then drain its element.
-function queueReady(s: ManagedStream, payload: Payload): void {
+function queueReady(s: ManagedStream, payload: IridClientEvent | null): void {
   s.qPayload = payload;
   s.qReady = true;
   queueJoin(s);
@@ -154,7 +155,7 @@ function shouldSkip(el: HTMLElement, eventName: string): boolean {
 export function attachListener(
   el: HTMLElement,
   msg: IridWireDom,
-  dispatch?: (payload: Payload) => void,
+  dispatch?: (payload: IridClientEvent) => void,
 ): void {
   const opts = msg.domOpts;
   const filter = compileFilter(opts);
