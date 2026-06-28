@@ -11,22 +11,51 @@
 # to a scalar, and empty/sentinel values encode by content (`NULL` dropped,
 # `character(0)` -> `[]`, `NA` -> `null`). The combinators below pin each.
 
-# Force a JSON array (unnamed list): `[]` when empty, `[x]` for a length-1 value
-# (which would otherwise unbox to a scalar under `auto_unbox = TRUE`). Names are
-# stripped so the list never serializes as an object.
-json_array <- function(x) {
+# Each `json_*` helper pins one declared protocol type to its wire shape, and the
+# contract is uniform across the family:
+#   - it ASSERTS the value already matches the declared type and errors on a
+#     mismatch — a wrong type is an encoder bug, never silently coerced;
+#   - it coerces ONLY to bridge an R serialization quirk under `auto_unbox`
+#     (length-1 unboxing, name-keyed scalars/objects, the `[]`-vs-`{}` list-NAMES
+#     rule), never a real type conversion;
+#   - `null_ok = TRUE` marks a nullable field (`T | null`): NULL passes through as
+#     the wire `null`. By default NULL is an error — a required field must not
+#     silently vanish. Empty is distinct from NULL: a length-0 array/map is a
+#     legal `[]`/`{}`, not a null.
+
+# A JSON array (unnamed list): `[]` when empty, `[x]` for a length-1 value (which
+# would otherwise unbox to a scalar). Names are stripped — they ride in as an
+# artifact of how the vector was built (e.g. `vapply`'s USE.NAMES), not protocol
+# data, so the array never serializes as an object.
+json_array <- function(x, null_ok = FALSE) {
+  if (is.null(x)) {
+    if (null_ok) return(NULL)
+    cli::cli_abort("A required JSON array field must not be NULL.")
+  }
   if (length(x) == 0L) return(list())
+  if (!is.atomic(x) && !is.list(x)) {
+    cli::cli_abort("A JSON array field must be an atomic vector or list.")
+  }
   as.list(unname(x))
 }
 
-# Force a JSON object (named list): `{}` when empty. jsonlite keys the `[]`-vs-`{}`
-# choice off list NAMES, so an empty *map* must be a named list. Members are
+# A JSON object (named list): `{}` when empty; a non-empty map must be fully named.
+# jsonlite keys the `[]`-vs-`{}` choice off list NAMES, so an unnamed map would
+# wrongly serialize as an array — the strict check rejects it. Member VALUES are
 # recursively converted from named atomic vectors to named lists, so an object-
 # shaped value like `c("8" = "legendonly")` (plotly's trace_visibility) serializes
-# as `{ "8": "legendonly" }` and not via jsonlite's deprecated keep_vec_names.
-# Unnamed vectors and scalars pass through.
-json_map <- function(x) {
+# as `{ "8": "legendonly" }` and not via jsonlite's deprecated keep_vec_names;
+# unnamed vectors and scalars pass through as arrays/scalars.
+json_map <- function(x, null_ok = FALSE) {
+  if (is.null(x)) {
+    if (null_ok) return(NULL)
+    cli::cli_abort("A required JSON map field must not be NULL.")
+  }
   if (length(x) == 0L) return(stats::setNames(list(), character(0)))
+  nms <- names(x)
+  if (is.null(nms) || any(!nzchar(nms))) {
+    cli::cli_abort("A JSON map field must be fully named.")
+  }
   jsonify <- function(v) {
     if (is.list(v)) return(lapply(v, jsonify))
     if (is.atomic(v) && !is.null(names(v))) return(as.list(v))
@@ -34,15 +63,6 @@ json_map <- function(x) {
   }
   jsonify(as.list(x))
 }
-
-# Each `json_*` ASSERTS its value already matches the declared protocol type and
-# coerces ONLY to bridge an R serialization quirk (length-1 unboxing, name-keyed
-# objects, empty/NA text) — never a real type conversion. A wrong type is an
-# encoder bug, so it errors rather than silently coercing.
-
-# `null_ok` marks a nullable protocol field (`T | null`): NULL passes through as
-# NULL (the wire `null`). Without it NULL is an error — a required field must not
-# silently vanish.
 
 # A JSON string: asserts a length-1, non-NA character; strips names. Strict — an
 # empty/NA value is an error here, NOT silently bridged to `""` (that is the text
