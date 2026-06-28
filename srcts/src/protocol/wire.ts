@@ -103,9 +103,9 @@ export interface IridAttrWidget {
    *  DATA — always present. */
   values: Record<string, unknown>;
   /** Sparse per-key gate ANNOTATION: an entry only for a key from a client write;
-   *  an absent key is programmatic. Omitted (not present-empty `{}`) when no key
-   *  is gated — matches the scalar `gate`. */
-  valueGates?: Record<string, EchoGate>;
+   *  an absent key is programmatic. Always present — empty `{}` when no key is
+   *  gated, which the per-key lookup treats identically to omission. */
+  valueGates: Record<string, EchoGate>;
 }
 
 /**

@@ -51,7 +51,7 @@ coerce_text_child <- function(val) {
 #' so the sequence travels per key: `valueGates: {attr -> {seq, channel}}`.
 #' A key contributed without a sequence (purely programmatic) gets no
 #' `valueGates` entry and the client applies it unconditionally; a batch with
-#' no gated keys carries no `valueGates` at all.
+#' no gated keys carries an empty `valueGates` (`{}`).
 #'
 #' Batching is intra-flush only: a prop updating in one flush and another in
 #' a later flush still produces two messages.

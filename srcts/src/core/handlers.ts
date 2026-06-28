@@ -51,20 +51,18 @@ export function registerHandlers(): void {
       const w = widgets[msg.id];
       if (!w) return;
       // `values` is a {attr -> value} map. The gate is PER KEY (a batch can carry
-      // props from different channels), via valueGates. Keys with no valueGates
-      // entry are programmatic and always apply.
-      let values = msg.values;
-      if (msg.valueGates) {
-        const kept: Record<string, unknown> = {};
-        let any = false;
-        for (const k in values) {
-          if (isStaleEcho(msg.valueGates[k], sequences)) continue;
-          kept[k] = values[k];
-          any = true;
-        }
-        if (!any) return; // every key gated out — nothing to apply
-        values = kept;
+      // props from different channels), via valueGates. A key with no valueGates
+      // entry (undefined gate) is programmatic and always applies, so an empty
+      // `{}` keeps every key — no presence guard needed.
+      const kept: Record<string, unknown> = {};
+      let any = false;
+      for (const k in msg.values) {
+        if (isStaleEcho(msg.valueGates[k], sequences)) continue;
+        kept[k] = msg.values[k];
+        any = true;
       }
+      if (!any) return; // every key gated out — nothing to apply
+      const values = kept;
       if (w.handle) {
         if (typeof w.handle.update === "function") w.handle.update(values);
       } else {

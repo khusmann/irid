@@ -202,12 +202,17 @@ msg_irid_attr_text <- function(id, value) {
   list(id = json_string(id), target = "text", value = json_string(value))
 }
 
-# Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
-# sparse per-key gate map, OMITTED entirely when no key is gated (all programmatic).
+# Coalesced widget batch. `values` is a map (always >= 1 key); `valueGates` is the
+# sparse per-key gate map, ALWAYS present — empty `{}` when no key is gated (all
+# programmatic). The client reads gates per key, so an absent key (undefined gate)
+# applies unconditionally, making `{}` indistinguishable from omission.
 msg_irid_attr_widget <- function(id, values, gates) {
-  msg <- list(id = json_string(id), target = "widget", values = json_map(values))
-  if (length(gates) > 0L) msg$valueGates <- json_map(gates)
-  msg
+  list(
+    id = json_string(id),
+    target = "widget",
+    values = json_map(values),
+    valueGates = json_map(gates)
+  )
 }
 
 # --- irid-wire message constructor -----------------------------------------

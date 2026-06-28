@@ -102,11 +102,14 @@ test_that("each key carries its own {seq, channel} in valueGates", {
   expect_false("c" %in% names(vm))
 })
 
-test_that("a purely programmatic batch carries no valueGates", {
+test_that("a purely programmatic batch carries an empty valueGates", {
   s <- new_batch_session()
   irid:::irid_queue_widget_attr(s, "w1", "a", 1)
   s$flushReact()
-  expect_false("valueGates" %in% names(attr_msgs(s)[[1]]$message))
+  msg <- attr_msgs(s)[[1]]$message
+  # valueGates is always present; empty `{}` when no key is gated.
+  expect_true("valueGates" %in% names(msg))
+  expect_length(msg$valueGates, 0L)
 })
 
 test_that("a later attr overwrites an earlier value for the same key", {
@@ -225,7 +228,7 @@ test_that("a binding stamps its own (source, attr) channel into valueGates", {
 
 test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   # A sibling channel recorded a DIFFERENT attr this flush; the content binding
-  # finds no entry for its own attr and sends no valueGates (programmatic).
+  # finds no entry for its own attr, so its key carries no gate (programmatic).
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()
@@ -239,7 +242,8 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   m$session$flushReact()
 
   last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_false("valueGates" %in% names(last))
+  # valueGates is present but has no entry for the ungated key.
+  expect_false("content" %in% names(last$valueGates))
 
   m$handle$destroy()
 })
