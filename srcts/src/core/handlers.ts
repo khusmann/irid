@@ -162,7 +162,7 @@ export function registerHandlers(): void {
 
   Shiny.addCustomMessageHandler("irid-wire", (msgs: IridWireEntry[]) => {
     msgs.forEach((msg) => {
-      // Key on the (namespaced) channel — unique per id/event/kind.
+      // Key on the (namespaced) channel — unique per id/event.
       const key = msg.channel;
       if (wireRegistered.has(key)) return;
       // DOM events need the element to exist for addEventListener; widget events
@@ -182,10 +182,11 @@ export function registerHandlers(): void {
       } else {
         setupImmediate(el, msg);
       }
-      // Index widget streams by the {kind}:{id}:{event} triple a factory resolves.
+      // Index widget streams by the {id}:{event} pair a factory resolves against
+      // (prop write-backs and events share this namespace; a widget can't reuse a
+      // name across the two, so the pair is unique).
       if (msg.source === "widget") {
-        widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] =
-          managed[msg.channel];
+        widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
       }
     });
   });

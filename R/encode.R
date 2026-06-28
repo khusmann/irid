@@ -219,9 +219,10 @@ msg_irid_attr_widget <- function(id, values, gates) {
 
 # One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
 # `channel` is the namespaced inputId. The wire shape is a discriminated union on
-# `source`: a dom event carries `domOpts` + `clientOnly`, a widget event carries
-# `kind` (each field omitted on the other arm). The nested value objects (`timing`,
-# `dom_opts`) ride the event row whole and are rendered via `as_protocol()`.
+# `source`: a dom event carries `domOpts` + `clientOnly`; the widget arm adds no
+# extra fields (the client indexes widget streams by the `{id}:{event}` pair its
+# setProp/sendEvent resolves against, both already present). The nested value
+# objects (`timing`, `dom_opts`) ride the event row whole, rendered via `as_protocol()`.
 msg_irid_wire <- function(ev, channel, client_only) {
   msg <- list(
     id = json_string(ev$id),
@@ -231,11 +232,7 @@ msg_irid_wire <- function(ev, channel, client_only) {
     timing = as_protocol(ev$timing),
     coalesce = json_bool(ev$coalesce)
   )
-  if (identical(ev$source, "widget")) {
-    # `kind` ("prop"/"event") lets the client index widget streams by the
-    # `{kind}:{id}:{event}` triple its setProp/sendEvent resolves against.
-    msg$kind <- json_string(ev$kind)
-  } else {
+  if (!identical(ev$source, "widget")) {
     msg$domOpts <- as_protocol(ev$dom_opts)
     msg$clientOnly <- json_bool(client_only)
   }

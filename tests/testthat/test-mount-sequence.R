@@ -38,9 +38,9 @@ test_that("two props written in one flush each carry their own channel+seq", {
   wid <- ctx$wid
 
   ctx$session$setInputs(
-    !!paste0("irid_prop_", wid, "_a") :=
+    !!paste0("irid_input_", wid, "_a") :=
       list(id = wid, seq = 5, data = list(value = "a1")),
-    !!paste0("irid_prop_", wid, "_b") :=
+    !!paste0("irid_input_", wid, "_b") :=
       list(id = wid, seq = 9, data = list(value = "b1"))
   )
   ctx$session$flushReact()
@@ -73,9 +73,9 @@ test_that("a sibling notification does not pollute a prop's echo sequence", {
   wid <- ctx$wid
 
   ctx$session$setInputs(
-    !!paste0("irid_prop_", wid, "_selected_ids") :=
+    !!paste0("irid_input_", wid, "_selected_ids") :=
       list(id = wid, seq = 3, data = list(value = list("p1"))),
-    !!paste0("irid_ev_", wid, "_relayout") :=
+    !!paste0("irid_input_", wid, "_relayout") :=
       list(id = wid, seq = 8, data = list())
   )
   ctx$session$flushReact()
@@ -101,7 +101,7 @@ test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
   wid <- ctx$wid
 
   ctx$session$setInputs(
-    !!paste0("irid_ev_", wid, "_keydown") :=
+    !!paste0("irid_input_", wid, "_keydown") :=
       list(id = wid, seq = 7, data = list(key = "a"))
   )
   ctx$session$flushReact()
@@ -125,7 +125,7 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
   wid <- ctx$wid
 
   ctx$session$setInputs(
-    !!paste0("irid_ev_", wid, "_input") :=
+    !!paste0("irid_input_", wid, "_input") :=
       list(id = wid, seq = 4, data = list(value = "y"))
   )
   ctx$session$flushReact()
@@ -144,11 +144,11 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
   ctx$handle$destroy()
 })
 
-test_that("widget event messages carry kind and a namespaced inputId", {
-  # The module fix: the client indexes widget streams by `{kind}:{id}:{event}`,
-  # so the server must label each widget channel with its kind, and the inputId
-  # must be the namespaced send target (MockShinySession namespaces as
-  # "mock-session-").
+test_that("widget wire rows share one namespaced inputId space (no kind)", {
+  # The client indexes widget streams by `{id}:{event}`, so a prop write-back and
+  # an event ride the same `irid_input_{id}_{event}` namespace (props and events
+  # can't share a name). The channel is the namespaced send target
+  # (MockShinySession namespaces as "mock-session-").
   v <- shiny::reactiveVal("v0")
   node <- IridWidget(
     name = "test",
@@ -162,15 +162,18 @@ test_that("widget event messages carry kind and a namespaced inputId", {
   ev_msg <- Filter(function(m) m$type == "irid-wire", s$msgs())
   expect_length(ev_msg, 1L)
   rows <- ev_msg[[1]]$message
-  bykind <- stats::setNames(
+  byname <- stats::setNames(
     rows, vapply(rows, function(r) r$event, character(1))
   )
 
-  expect_equal(bykind$v$kind, "prop")
-  expect_equal(bykind$ping$kind, "event")
-  # inputId is namespaced (the client's managed key / send target).
-  expect_true(grepl("^mock-session-irid_prop_.*_v$", bykind$v$channel))
-  expect_true(grepl("^mock-session-irid_ev_.*_ping$", bykind$ping$channel))
+  # Both are widget rows with no `kind` field.
+  expect_equal(byname$v$source, "widget")
+  expect_equal(byname$ping$source, "widget")
+  expect_false("kind" %in% names(byname$v))
+  expect_false("kind" %in% names(byname$ping))
+  # One namespaced inputId space for both the prop write-back and the event.
+  expect_true(grepl("^mock-session-irid_input_.*_v$", byname$v$channel))
+  expect_true(grepl("^mock-session-irid_input_.*_ping$", byname$ping$channel))
 
   handle$destroy()
 })

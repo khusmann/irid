@@ -351,10 +351,10 @@
     s.dispatch(p);
   }
   function sendWidgetEvent(id, event, payload) {
-    pushManaged(widgetStreams["event:" + id + ":" + event], id, payload || {});
+    pushManaged(widgetStreams[id + ":" + event], id, payload || {});
   }
   function setWidgetProp(id, key, value) {
-    pushManaged(widgetStreams["prop:" + id + ":" + key], id, { value });
+    pushManaged(widgetStreams[id + ":" + key], id, { value });
   }
 
   // src/core/widgets.ts
@@ -635,7 +635,7 @@
           setupImmediate(el, msg);
         }
         if (msg.source === "widget") {
-          widgetStreams[`${msg.kind}:${msg.id}:${msg.event}`] = managed[msg.channel];
+          widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
         }
       });
     });

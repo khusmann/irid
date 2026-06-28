@@ -123,19 +123,11 @@ export interface IridMutateMessage {
 }
 
 /**
- * For widget channels, which kind of stream: a two-way prop write-back
- * (`irid_prop_*`) or a notification (`irid_ev_*`). No `null` — absence is carried
- * by the field living on the widget arm only.
- */
-export type EventKind = "prop" | "event";
-
-/**
  * One `irid-wire` entry — the serialized per-slot `wire()` carrier for one
  * channel; the message is an array of these. A discriminated union on `source`: a
- * DOM event carries listener options, a widget event carries its stream `kind`.
- * This makes the illegal states unrepresentable — a throttle with no `ms` won't
- * type, DOM flags don't exist on the widget arm, and `kind` is required-without-
- * null on the widget arm and absent on the dom arm.
+ * DOM event carries listener options; the widget arm adds nothing. This makes the
+ * illegal states unrepresentable — a throttle with no `ms` won't type, and DOM
+ * flags don't exist on the widget arm.
  */
 export interface IridWireCore {
   id: ElementId;
@@ -159,10 +151,9 @@ export type IridDomWire = IridWireCore & {
   clientOnly: boolean;
 };
 
-/** Widget event: carries kind; no DOM flags (no listener is attached). */
+/** Widget event: no DOM flags (no listener is attached), no extra fields. */
 export type IridWidgetWire = IridWireCore & {
   source: "widget";
-  kind: EventKind;
 };
 
 export type IridWireEntry = IridDomWire | IridWidgetWire;

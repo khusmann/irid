@@ -38,8 +38,8 @@ export interface ManagedStream {
 }
 
 export const managed: Record<string, ManagedStream> = {}; // inputId -> stream
-// Widget client->server streams indexed by the `{kind}:{id}:{event}` triple a
-// factory's sendEvent/setProp resolves against (module-namespace-agnostic).
+// Widget client->server streams indexed by the `{id}:{event}` pair a factory's
+// sendEvent/setProp resolves against (module-namespace-agnostic).
 export const widgetStreams: Record<string, ManagedStream> = {};
 const elementQueues: Record<string, ManagedStream[]> = {}; // elementId -> pending
 let idleListenerActive = false;
@@ -387,10 +387,10 @@ export function sendWidgetEvent(
   event: string,
   payload?: Record<string, unknown>,
 ): void {
-  pushManaged(widgetStreams["event:" + id + ":" + event], id, payload || {});
+  pushManaged(widgetStreams[id + ":" + event], id, payload || {});
 }
 
 /** `setProp(key, value)` — the client->server half of a two-way prop. */
 export function setWidgetProp(id: string, key: string, value: unknown): void {
-  pushManaged(widgetStreams["prop:" + id + ":" + key], id, { value });
+  pushManaged(widgetStreams[id + ":" + key], id, { value });
 }

@@ -110,10 +110,10 @@ Walks the tag tree recursively and produces:
   coalesce, prevent_default, stop_propagation, capture, passive}`, one entry
   per `(id, event)`. `source = "dom"` for events attached to a DOM element
   via `addEventListener`; `source = "widget"` for widget events (pushed via
-  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). A
-  `kind` field distinguishes a `"prop"` write-back (input
-  `irid_prop_{id}_{key}`) from a regular `"event"` (input
-  `irid_ev_{id}_{event}`); DOM-event rows omit `kind`. A given DOM event is
+  `sendEvent()`) and two-way-prop write-backs (pushed via `setProp()`). All
+  inbound rows — DOM events, widget events, and prop write-backs — share one
+  input namespace, `irid_input_{id}_{event}`; a widget's prop and event names
+  can't collide (enforced in `IridWidget`), so `(id, event)` is unique. A given DOM event is
   claimed by **at most one** of {value-binding autobind, explicit `on*`} —
   there is no merge (see the one-channel rule below). `handler` is `NULL` for
   a config-only event (an `wire` with `dom_opts` but no subject) — the
@@ -190,7 +190,7 @@ Takes the output of `process_tags` and a Shiny `session`, then wires up:
 1. **Reactive bindings** — Each binding gets an `observe()` that sends
    `irid-attr` messages when the reactive value changes.
 2. **Event handlers** — Each event gets an `observeEvent()` on a namespaced
-   input ID (`irid_ev_{id}_{event}`). The handler is dispatched based on its
+   input ID (`irid_input_{id}_{event}`). The handler is dispatched based on its
    formal argument count (0, 1, or 2 args). Event registration is sent to the
    client as a `irid-wire` message.
 3. **Shiny outputs** — Each output's render call is assigned to
@@ -404,7 +404,7 @@ value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 // target = "dom" — DOM property/attribute write. `gate` ({seq, channel}) gates the
 // echo against the channel that produced it (OMITTED for programmatic writes).
 {id: "irid-3", target: "dom",  attr: "value", value: "hello",
- gate: {seq: 12, channel: "irid_ev_irid-3_input"}}
+ gate: {seq: 12, channel: "irid_input_irid-3_input"}}
 
 // target = "text" — text replacement in a comment-anchor range. `value` is always
 // a string ("" is the canonical "clear the range" signal); no gate (text is never
@@ -419,7 +419,7 @@ value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 // whole field is omitted when no key is gated).
 {id: "irid-7", target: "widget",
  values: {content: "...", cursor: {line: 1, ch: 1}},
- valueGates: {content: {seq: 12, channel: "irid_prop_irid-7_content"}}}
+ valueGates: {content: {seq: 12, channel: "irid_input_irid-7_content"}}}
 ```
 
 Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
@@ -476,9 +476,9 @@ initialize any new Shiny outputs.
 ### `irid-wire`
 
 The message is an array of entries, a discriminated union on `source`. A DOM
-event carries nested `domOpts` + `clientOnly`; a widget event carries `kind`
-(each absent on the other arm). `timing` is nested and discriminated on `mode`
-(`ms`/`leading` exist only where the variant gives them meaning):
+event carries nested `domOpts` + `clientOnly`; the widget arm adds no extra
+fields. `timing` is nested and discriminated on `mode` (`ms`/`leading` exist
+only where the variant gives them meaning):
 
 ```js
 [
@@ -486,7 +486,7 @@ event carries nested `domOpts` + `clientOnly`; a widget event carries `kind`
   {
     id: "irid-2",
     event: "input",
-    channel: "irid_ev_irid-2_input",
+    channel: "irid_input_irid-2_input",
     source: "dom",
     timing: { mode: "throttle", ms: 100, leading: true },
     coalesce: true,
@@ -498,11 +498,10 @@ event carries nested `domOpts` + `clientOnly`; a widget event carries `kind`
   {
     id: "irid-7",
     event: "content",
-    channel: "irid_prop_irid-7_content",
+    channel: "irid_input_irid-7_content",
     source: "widget",
     timing: { mode: "debounce", ms: 200 },
     coalesce: true,
-    kind: "prop",          // "prop" (write-back) | "event" (notification)
   },
 ];
 ```
@@ -518,7 +517,8 @@ event fields), and pushes the payload through the managed-state via
 handler) attaches a bare listener that applies the DOM flags and never
 sends — no managed state, no round-trip. If `source = "widget"`, the
 listener-attach step is skipped; the entry is also indexed in
-`widgetStreams` under `{kind}:{id}:{event}`, and the widget JS pushes payloads
+`widgetStreams` under `{id}:{event}` (props and events can't share a name, so
+the pair is unique), and the widget JS pushes payloads
 through `irid.sendWidgetEvent(id, event, payload)` / `setProp`, which resolve
 their stream through that index. The index (rather than rebuilding the channel
 on the client) is what makes widget channels work under Shiny modules, where
@@ -797,7 +797,7 @@ widget JS chooses what to fire via `sendEvent()`. Each value is a handler
 or an `wire` (to tune timing); `NULL` (or a `merge()` resolving to a
 subject-less wire) is dropped, so optional handlers forward declaratively.
 
-### Two-way props: `setProp` + `irid_prop_*`
+### Two-way props: `setProp` + `irid_input_*`
 
 irid hard-codes DOM autobind for `value`/`checked` because the DOM IDL
 gives every element a uniform (prop, event, event-field) triple. Widget
@@ -805,13 +805,14 @@ props get the same treatment by construction: R always sets up the
 inbound-accept + snap-back for a callable prop, and whether it's *actually*
 two-way is decided by whether the widget JS pushes through the prop channel.
 
-The new primitive is **`setProp` + a per-prop `irid_prop_{id}_{key}`
+The primitive is **`setProp` + a per-prop `irid_input_{id}_{key}`
 input** — the client → server partner of the existing server → client
 `irid-attr target="widget"` → `update` hook. `setProp("content", value)`
 pushes through the **same managed-state / sequence transport as
-`sendEvent`** (so optimistic-update gating and echo-sequencing apply), but
-to `irid_prop_{id}_{key}` instead of `irid_ev_{id}_{event}`. process_tags
-emits, per callable prop, a `kind = "prop"` event row whose synthesized
+`sendEvent`** (so optimistic-update gating and echo-sequencing apply), on the
+**same `irid_input_{id}_{event}` namespace** as events — a prop and event
+can't share a name (enforced in `IridWidget`), so there's no collision.
+process_tags emits, per callable prop, a write-back event row whose synthesized
 handler writes the bound reactive (gated by the internal `can_accept_write`
 predicate); mount wires an `observeEvent` on that input. A read-only
 reactive's write is dropped, and the force-send-on-no-op loop (scoped

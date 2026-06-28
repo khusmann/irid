@@ -55,7 +55,7 @@ make_autobind_handler <- function(fn, attr_name) {
 # Build the synthesized write-back handler for a two-way-capable widget
 # prop. `setProp(key, value)` on the client delivers the value under the
 # `value` payload field (uniform across props since each rides its own
-# `irid_prop_{id}_{key}` input). Writable subjects get `fn(e$value)`;
+# `irid_input_{id}_{key}` input). Writable subjects get `fn(e$value)`;
 # read-only subjects get a no-op whose force-send snaps the canonical value
 # back through the prop's `target = "widget"` binding.
 make_widget_writeback <- function(fn, key) {
@@ -264,8 +264,8 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       # Per-key prop dispatch. A callable (bare, or the subject of a
       # `wire` used to tune timing) becomes a **two-way-capable** prop:
       # a `target = "widget"` binding (server → client, one observer per
-      # key) PLUS a synthesized write-back event row (`kind = "prop"`,
-      # client → server via `setProp`). A non-callable rides in the init
+      # key) PLUS a synthesized write-back event row (client → server via
+      # `setProp`). A non-callable rides in the init
       # message as a constant. `static_props[key] <- list(val)`
       # (single-bracket) preserves NULL entries — `[[<-` would drop them via
       # R's NULL-removes-key quirk; Shiny's `null = "null"` JSON option then
@@ -296,7 +296,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
             id = id, event = key, handler = make_widget_writeback(subj, key),
             write_targets = key,
             timing = cfg$timing, coalesce = cfg$coalesce,
-            source = "widget", kind = "prop"
+            source = "widget"
           )
         } else {
           # A wire with a NULL subject (optional prop the caller omitted)
@@ -317,7 +317,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
           id = id, event = key, handler = handler,
           write_targets = attr(handler, "irid_write_targets"),
           timing = cfg$timing, coalesce = cfg$coalesce,
-          source = "widget", kind = "event"
+          source = "widget"
         )
       }
 

@@ -359,14 +359,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # Set up event listeners
   if (length(result$events) > 0L) {
     wire_msgs <- lapply(result$events, function(ev) {
-      # Two-way widget props ride a distinct input namespace
-      # (`irid_prop_{id}_{key}`, written by the client's `setProp`); DOM and
-      # widget events use `irid_ev_{id}_{event}`.
-      input_id <- if (identical(ev$kind, "prop")) {
-        paste0("irid_prop_", ev$id, "_", ev$event)
-      } else {
-        paste0("irid_ev_", ev$id, "_", ev$event)
-      }
+      # Every inbound channel — DOM events, widget events, and widget prop
+      # write-backs (client's `setProp`) — shares one input namespace,
+      # `irid_input_{id}_{event}`. A prop and event can't share a name (enforced in
+      # `IridWidget`), so `(id, event)` is unique.
+      input_id <- paste0("irid_input_", ev$id, "_", ev$event)
       handler <- ev$handler
 
       # The channel = the namespaced inputId the client sends on. It is the
@@ -376,8 +373,8 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       channel <- session$ns(input_id)
 
       # The encoder builds the discriminated wire shape (nested timing/domOpts,
-      # kind on widget rows, domOpts/clientOnly on dom rows). `clientOnly` is a
-      # config-only dom wire — `dom_opts` with no server handler.
+      # domOpts/clientOnly on dom rows; the widget arm adds nothing). `clientOnly`
+      # is a config-only dom wire — `dom_opts` with no server handler.
       msg <- msg_irid_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a

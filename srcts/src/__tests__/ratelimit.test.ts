@@ -41,7 +41,6 @@ function msg(over: Partial<IridWidgetWire>): IridWidgetWire {
     event: "input",
     channel: "in",
     source: "widget",
-    kind: "event",
     timing: { mode: "immediate" },
     coalesce: false,
     ...over,
