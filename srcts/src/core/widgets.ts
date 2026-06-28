@@ -10,7 +10,7 @@
 
 import { sendWidgetEvent, setWidgetProp } from "./ratelimit";
 import type {
-  IridWidgetInitMessage,
+  IridWidgetInit,
   SendEvent,
   SetProp,
   WidgetFactory,
@@ -145,7 +145,7 @@ export function defineWidget(name: string, factory: WidgetFactory): void {
 // script is delivered via insertUI at mount time, so window.irid exists when it
 // calls defineWidget. An init that still beats its factory parks under
 // pendingInits and drains on defineWidget.
-export function handleWidgetInit(msg: IridWidgetInitMessage): void {
+export function handleWidgetInit(msg: IridWidgetInit): void {
   if (widgets[msg.id]) return; // idempotent
   const factory = defined.get(msg.name);
   if (!factory) {

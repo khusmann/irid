@@ -21,12 +21,12 @@ import {
 } from "./ratelimit";
 import { setStaleTimeout } from "./stale";
 import type {
-  IridAttrMessage,
-  IridConfigMessage,
+  IridAttr,
+  IridConfig,
   IridWire,
-  IridMutateMessage,
-  IridReadyMessage,
-  IridWidgetInitMessage,
+  IridMutate,
+  IridReady,
+  IridWidgetInit,
 } from "../protocol";
 
 const PROP_ATTRS: Record<string, boolean> = {
@@ -39,12 +39,12 @@ const PROP_ATTRS: Record<string, boolean> = {
 const wireRegistered = new Set<string>(); // `${channel}` keys
 
 export function registerHandlers(): void {
-  Shiny.addCustomMessageHandler("irid-config", (msg: IridConfigMessage) => {
+  Shiny.addCustomMessageHandler("irid-config", (msg: IridConfig) => {
     // staleTimeout is materialized (always present); `null` disables the indicator.
     setStaleTimeout(msg.staleTimeout);
   });
 
-  Shiny.addCustomMessageHandler("irid-attr", (msg: IridAttrMessage) => {
+  Shiny.addCustomMessageHandler("irid-attr", (msg: IridAttr) => {
     if (msg.target === "widget") {
       // Route to the widget's update hook. Skip if no widget is registered for
       // this id (defense in depth; mount sends init before any attr).
@@ -115,7 +115,7 @@ export function registerHandlers(): void {
     }
   });
 
-  Shiny.addCustomMessageHandler("irid-mutate", (msg: IridMutateMessage) => {
+  Shiny.addCustomMessageHandler("irid-mutate", (msg: IridMutate) => {
     const a = lookupAnchors(msg.id);
     if (!a) return;
     const parent = a.start.parentNode!;
@@ -193,7 +193,7 @@ export function registerHandlers(): void {
 
   Shiny.addCustomMessageHandler(
     "irid-widget-init",
-    (msg: IridWidgetInitMessage) => {
+    (msg: IridWidgetInit) => {
       handleWidgetInit(msg);
     },
   );
@@ -204,7 +204,7 @@ export function registerHandlers(): void {
   // two ways: a public `irid:ready` DOM event app authors can hook (focus an
   // input, hide a splash, start a tour…), and the `window.__iridReady` flag as
   // the "missed the event" escape hatch. The e2e harness waits on the flag.
-  Shiny.addCustomMessageHandler("irid-ready", (msg: IridReadyMessage) => {
+  Shiny.addCustomMessageHandler("irid-ready", (msg: IridReady) => {
     window.__iridReady = true;
     // Wire `output` is already `name | null` — the public detail shares the shape.
     document.dispatchEvent(

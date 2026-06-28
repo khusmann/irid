@@ -63,14 +63,14 @@ export type Timing =
 // ---------------------------------------------------------------------------
 
 /** `irid-config` — runtime options pushed at session start. */
-export interface IridConfigMessage {
+export interface IridConfig {
   /** ms before the stale indicator shows; `null` disables it. Materialized config
    *  field: required, with `null` its off value (R always sends it, default 200). */
   staleTimeout: number | null;
 }
 
 /** `irid-attr` — a binding update; discriminated on `target`. */
-export type IridAttrMessage = IridAttrDom | IridAttrText | IridAttrWidget;
+export type IridAttr = IridAttrDom | IridAttrText | IridAttrWidget;
 
 /** DOM property/attribute write on `getElementById(id)`. */
 export interface IridAttrDom {
@@ -116,7 +116,7 @@ export interface IridAttrWidget {
  * a command-part this mutation doesn't do is an empty array, not an omitted
  * field. The handler iterates each, so `[]` is a no-op — a uniform shape.
  */
-export interface IridMutateMessage {
+export interface IridMutate {
   id: AnchorId;
   removes: AnchorId[];
   inserts: string[];
@@ -160,7 +160,7 @@ export type IridWireWidget = IridWireCore & {
 export type IridWire = IridWireDom | IridWireWidget;
 
 /** `irid-widget-init` — mount a widget instance into its container. */
-export interface IridWidgetInitMessage {
+export interface IridWidgetInit {
   id: ElementId;
   name: string;
   props: Record<string, unknown>;
@@ -173,7 +173,7 @@ export interface IridWidgetInitMessage {
  * present: this is the same `name | null` the public `irid:ready` detail exposes,
  * so the wire and the public event share one encoding.
  */
-export interface IridReadyMessage {
+export interface IridReady {
   output: OutputName | null;
 }
 
