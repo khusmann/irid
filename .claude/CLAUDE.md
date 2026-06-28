@@ -47,6 +47,16 @@ hist(
 )
 ```
 
+## Comments
+
+- Comments describe the code as it is now, not its development history. Don't
+  justify the absence of something or explain why a discarded alternative was
+  rejected (no "we don't use X because...", "removed Y", "previously this
+  was...", "no nonce/no __irid_* prefix"). A reader fresh to the code shouldn't
+  have to know what was considered and dropped.
+- Rationale for the *current* design is fine — explain why the code works the
+  way it does, not why it isn't some other way.
+
 ## Build
 
 - Run `devtools::document()` after changing exports or roxygen comments
