@@ -1,5 +1,5 @@
 irid_send_config <- function(session) {
-  session$sendCustomMessage("irid-config", irid_encode_config(
+  session$sendCustomMessage("irid-config", protocol_config(
     getOption("irid.stale_timeout", default = 200)
   ))
 }
@@ -17,7 +17,7 @@ irid_send_config <- function(session) {
 # harness waits on this before driving the first interaction (see helper-e2e.R).
 irid_send_ready <- function(session, output = NULL) {
   session$onFlushed(function() {
-    session$sendCustomMessage("irid-ready", irid_encode_ready(output))
+    session$sendCustomMessage("irid-ready", protocol_ready(output))
   }, once = TRUE)
 }
 

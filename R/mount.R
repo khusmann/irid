@@ -1,3 +1,38 @@
+#' Validate and coerce a reactive text child's return value
+#'
+#' A reactive text child renders as a single text node (`target = "text"`).
+#' The client coerces with `String(val)`, so a non-text return silently
+#' produces garbage — an HTML tag becomes `"[object Object]"`, a vector
+#' becomes a comma-joined blob. Catch it here with a clear error instead.
+#'
+#' Accepts `NULL` and length-1 atomics (coerced to character); rejects tags,
+#' lists, and multi-element vectors. Wrap reactive tags in a control-flow
+#' primitive (`When`/`Match`/`Each`) rather than returning them as text.
+#'
+#' @keywords internal
+#' @noRd
+coerce_text_child <- function(val) {
+  if (is.null(val) || (is.atomic(val) && length(val) <= 1L)) {
+    val <- as.character(val)
+    # NULL / NA / character(0) all mean "empty" -> "" (the wire's "clear the range"
+    # signal), so the text wire type is exactly `string` — never `[]` or `null`.
+    if (length(val) == 0L || is.na(val)) return("")
+    return(val)
+  }
+  what <- if (inherits(val, c("shiny.tag", "shiny.tag.list"))) {
+    "an HTML tag - wrap reactive tags in When/Match/Each instead"
+  } else if (length(val) > 1L) {
+    paste0("a length-", length(val), " ", class(val)[1], " vector")
+  } else {
+    paste0("a ", class(val)[1])
+  }
+  stop(
+    "A reactive text child must return a single text value (or NULL), not ",
+    what, ".",
+    call. = FALSE
+  )
+}
+
 #' Coalesce per-widget `irid-attr` updates within a Shiny flush
 #'
 #' A widget can expose several bound props whose binding observers fire in
@@ -23,37 +58,6 @@
 #'
 #' @keywords internal
 #' @noRd
-#' Validate and coerce a reactive text child's return value
-#'
-#' A reactive text child renders as a single text node (`target = "text"`).
-#' The client coerces with `String(val)`, so a non-text return silently
-#' produces garbage — an HTML tag becomes `"[object Object]"`, a vector
-#' becomes a comma-joined blob. Catch it here with a clear error instead.
-#'
-#' Accepts `NULL` and length-1 atomics (coerced to character); rejects tags,
-#' lists, and multi-element vectors. Wrap reactive tags in a control-flow
-#' primitive (`When`/`Match`/`Each`) rather than returning them as text.
-#'
-#' @keywords internal
-#' @noRd
-coerce_text_child <- function(val) {
-  if (is.null(val) || (is.atomic(val) && length(val) <= 1L)) {
-    return(as.character(val))
-  }
-  what <- if (inherits(val, c("shiny.tag", "shiny.tag.list"))) {
-    "an HTML tag - wrap reactive tags in When/Match/Each instead"
-  } else if (length(val) > 1L) {
-    paste0("a length-", length(val), " ", class(val)[1], " vector")
-  } else {
-    paste0("a ", class(val)[1])
-  }
-  stop(
-    "A reactive text child must return a single text value (or NULL), not ",
-    what, ".",
-    call. = FALSE
-  )
-}
-
 irid_queue_widget_attr <- function(session, id, attr, value,
                                    sequence = NULL, channel = NULL) {
   pending <- session$userData$irid_widget_pending
@@ -71,7 +75,7 @@ irid_queue_widget_attr <- function(session, id, attr, value,
       for (wid in ids) {
         entry <- pending[[wid]]
         session$sendCustomMessage("irid-attr",
-          irid_encode_attr_widget(wid, entry$values, entry$value_gates))
+          protocol_attr_widget(wid, entry$values, entry$value_gates))
       }
     }, once = TRUE)
   }
@@ -86,7 +90,7 @@ irid_queue_widget_attr <- function(session, id, attr, value,
   # drain time, so the raw R value is stored here.
   entry$values[attr] <- list(value)
   if (!is.null(sequence)) {
-    entry$value_gates[[attr]] <- irid_encode_echo_gate(sequence, channel)
+    entry$value_gates[[attr]] <- as_protocol(irid_echo_gate(sequence, channel))
   }
   pending[[id]] <- entry
   invisible()
@@ -188,7 +192,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
       character(1L)
     )
   } else NULL
-  session$sendCustomMessage("irid-mutate", irid_encode_mutate(
+  session$sendCustomMessage("irid-mutate", protocol_mutate(
     cf_id, removes = removes, inserts = inserts, order = order_ids
   ))
 
@@ -231,7 +235,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
   if (is.null(body_tag)) {
     if (!is.null(removes)) {
       session$sendCustomMessage("irid-mutate",
-        irid_encode_mutate(cf_id, removes = removes))
+        protocol_mutate(cf_id, removes = removes))
     }
     return(list(child_id = NULL, mount = NULL))
   }
@@ -242,7 +246,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
     htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
   )
   processed <- process_tags(wrapped, counter = counter)
-  session$sendCustomMessage("irid-mutate", irid_encode_mutate(
+  session$sendCustomMessage("irid-mutate", protocol_mutate(
     cf_id, removes = removes, inserts = list(as.character(processed$tag))
   ))
   mount <- irid_mount_processed(processed, session, depth = depth + 1L)
@@ -349,7 +353,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
     }
     deliver_widget_deps(session, wi$deps)
     session$sendCustomMessage("irid-widget-init",
-      irid_encode_widget_init(wi$id, wi$name, props))
+      protocol_widget_init(wi$id, wi$name, props))
   }
 
   # Set up event listeners
@@ -374,7 +378,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # The encoder builds the discriminated wire shape (nested timing/domOpts,
       # kind on widget rows, domOpts/clientOnly on dom rows). `clientOnly` is a
       # config-only dom wire — `dom_opts` with no server handler.
-      msg <- irid_encode_wire(ev, channel, client_only = is.null(handler))
+      msg <- protocol_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
@@ -455,9 +459,9 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               irid_queue_widget_attr(session, sb$id, sb$attr, val, seq, channel)
             } else {
               msg <- if (sb$target == "text") {
-                irid_encode_attr_text(sb$id, coerce_text_child(val))
+                protocol_attr_text(sb$id, coerce_text_child(val))
               } else {
-                irid_encode_attr_dom(sb$id, sb$attr, val, seq, channel)
+                protocol_attr_dom(sb$id, sb$attr, val, seq, channel)
               }
               session$sendCustomMessage("irid-attr", msg)
             }
@@ -498,9 +502,9 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         msg <- if (b$target == "text") {
           # Text never gates (it is never an event write_target), so seq/channel
           # are always NULL here — the encoder carries no gate for it.
-          irid_encode_attr_text(b$id, coerce_text_child(val))
+          protocol_attr_text(b$id, coerce_text_child(val))
         } else {
-          irid_encode_attr_dom(b$id, b$attr, val, seq, channel)
+          protocol_attr_dom(b$id, b$attr, val, seq, channel)
         }
         session$sendCustomMessage("irid-attr", msg)
       }

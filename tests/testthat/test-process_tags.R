@@ -229,8 +229,8 @@ test_that("bare onClick equals wire(handler) with default config", {
   h <- function() NULL
   bare <- process_tags(tags$button(onClick = h))
   wired <- process_tags(tags$button(onClick = wire(h)))
-  expect_equal(bare$events[[1]]$mode, "immediate")
-  expect_equal(wired$events[[1]]$mode, "immediate")
+  expect_equal(bare$events[[1]]$timing$mode, "immediate")
+  expect_equal(wired$events[[1]]$timing$mode, "immediate")
   expect_equal(bare$events[[1]]$event, "click")
   expect_equal(wired$events[[1]]$event, "click")
 })
@@ -239,9 +239,9 @@ test_that("wire timing sets the dispatch mode", {
   result <- process_tags(
     tags$button(onClick = wire(\() NULL, wire_throttle(100)))
   )
-  expect_equal(result$events[[1]]$mode, "throttle")
-  expect_equal(result$events[[1]]$ms, 100)
-  expect_true(result$events[[1]]$leading)
+  expect_equal(result$events[[1]]$timing$mode, "throttle")
+  expect_equal(result$events[[1]]$timing$ms, 100)
+  expect_true(result$events[[1]]$timing$leading)
 })
 
 test_that("wire with dom_opts but no timing keeps the per-event default", {
@@ -252,8 +252,8 @@ test_that("wire with dom_opts but no timing keeps the per-event default", {
       \() NULL, dom_opts = wire_dom_opts(prevent_default = TRUE)
     ))
   )
-  expect_equal(result$events[[1]]$mode, "immediate")
-  expect_true(result$events[[1]]$prevent_default)
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
+  expect_true(result$events[[1]]$dom_opts$prevent_default)
 })
 
 test_that("dom_opts flags land on the event row", {
@@ -264,10 +264,10 @@ test_that("dom_opts flags land on the event row", {
     )))
   )
   e <- result$events[[1]]
-  expect_true(e$prevent_default)
-  expect_true(e$stop_propagation)
-  expect_true(e$capture)
-  expect_true(e$passive)
+  expect_true(e$dom_opts$prevent_default)
+  expect_true(e$dom_opts$stop_propagation)
+  expect_true(e$dom_opts$capture)
+  expect_true(e$dom_opts$passive)
 })
 
 test_that("dom_opts filter rides through to the event row (NULL when absent)", {
@@ -276,10 +276,10 @@ test_that("dom_opts filter rides through to the event row (NULL when absent)", {
       \() NULL, dom_opts = wire_dom_opts(filter = "e.key === 'Enter'")
     ))
   )
-  expect_equal(filtered$events[[1]]$filter, "e.key === 'Enter'")
+  expect_equal(filtered$events[[1]]$dom_opts$filter, "e.key === 'Enter'")
 
   plain <- process_tags(tags$div(onClick = wire(\() NULL)))
-  expect_null(plain$events[[1]]$filter)
+  expect_null(plain$events[[1]]$dom_opts$filter)
 })
 
 test_that("coalesce derives from timing mode; carrier override wins", {
@@ -305,7 +305,7 @@ test_that("config-only wire (dom_opts, no handler) is client-only", {
   )
   expect_length(result$events, 1L)
   expect_null(result$events[[1]]$handler)
-  expect_true(result$events[[1]]$prevent_default)
+  expect_true(result$events[[1]]$dom_opts$prevent_default)
   expect_equal(result$events[[1]]$event, "submit")
 })
 
@@ -317,8 +317,8 @@ test_that("wire can tune a value binding's timing", {
   expect_length(result$bindings, 1L)
   expect_equal(result$bindings[[1]]$attr, "value")
   expect_length(result$events, 1L)
-  expect_equal(result$events[[1]]$mode, "debounce")
-  expect_equal(result$events[[1]]$ms, 500)
+  expect_equal(result$events[[1]]$timing$mode, "debounce")
+  expect_equal(result$events[[1]]$timing$ms, 500)
 })
 
 test_that("value = wire() with no subject errors", {
@@ -337,18 +337,18 @@ test_that("value = wire() with no subject errors", {
 
 test_that("explicit onInput defaults to debounce(200)", {
   result <- process_tags(tags$input(onInput = function(e) NULL))
-  expect_equal(result$events[[1]]$mode, "debounce")
-  expect_equal(result$events[[1]]$ms, 200)
+  expect_equal(result$events[[1]]$timing$mode, "debounce")
+  expect_equal(result$events[[1]]$timing$ms, 200)
 })
 
 test_that("explicit onChange defaults to immediate", {
   result <- process_tags(tags$input(onChange = function(e) NULL))
-  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
 })
 
 test_that("explicit onClick defaults to immediate", {
   result <- process_tags(tags$button(onClick = function() NULL))
-  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
 })
 
 test_that("high-frequency events default to throttle(100) + coalesce", {
@@ -363,8 +363,8 @@ test_that("high-frequency events default to throttle(100) + coalesce", {
     result <- process_tags(do.call(tags$div, args))
     ev <- result$events[[1]]
     expect_equal(ev$event, hi_events[[attr]])
-    expect_equal(ev$mode, "throttle", info = attr)
-    expect_equal(ev$ms, 100, info = attr)
+    expect_equal(ev$timing$mode, "throttle", info = attr)
+    expect_equal(ev$timing$ms, 100, info = attr)
     expect_true(ev$coalesce, info = attr)
   }
 })
@@ -373,7 +373,7 @@ test_that("explicit immediate wins over a high-frequency default", {
   result <- process_tags(
     tags$div(onMouseMove = wire(function(e) NULL, wire_immediate()))
   )
-  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
   expect_false(result$events[[1]]$coalesce)
 })
 
@@ -381,22 +381,22 @@ test_that("explicit coalesce = FALSE keeps the throttle default but ungates", {
   result <- process_tags(
     tags$div(onMouseMove = wire(function(e) NULL, coalesce = FALSE))
   )
-  expect_equal(result$events[[1]]$mode, "throttle")
-  expect_equal(result$events[[1]]$ms, 100)
+  expect_equal(result$events[[1]]$timing$mode, "throttle")
+  expect_equal(result$events[[1]]$timing$ms, 100)
   expect_false(result$events[[1]]$coalesce)
 })
 
 test_that("autobind value defaults to debounce(200) (input event)", {
   rv <- shiny::reactiveVal("")
   result <- process_tags(tags$input(value = rv))
-  expect_equal(result$events[[1]]$mode, "debounce")
-  expect_equal(result$events[[1]]$ms, 200)
+  expect_equal(result$events[[1]]$timing$mode, "debounce")
+  expect_equal(result$events[[1]]$timing$ms, 200)
 })
 
 test_that("autobind checked defaults to immediate (change event)", {
   rv <- shiny::reactiveVal(FALSE)
   result <- process_tags(tags$input(type = "checkbox", checked = rv))
-  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
 })
 
 test_that("wire timing overrides the per-event default", {
@@ -404,7 +404,7 @@ test_that("wire timing overrides the per-event default", {
   result <- process_tags(
     tags$input(value = wire(rv, wire_immediate()))
   )
-  expect_equal(result$events[[1]]$mode, "immediate")
+  expect_equal(result$events[[1]]$timing$mode, "immediate")
 })
 
 # --- Misuse: irid construct passed as a slot value ---------------------------
@@ -498,10 +498,10 @@ test_that("without dom_opts, every event entry has prevent_default = FALSE", {
     tags$input(onKeyDown = function(e) NULL, onClick = function(e) NULL)
   )
   for (e in result$events) {
-    expect_false(e$prevent_default)
-    expect_false(e$stop_propagation)
-    expect_false(e$capture)
-    expect_false(e$passive)
+    expect_false(e$dom_opts$prevent_default)
+    expect_false(e$dom_opts$stop_propagation)
+    expect_false(e$dom_opts$capture)
+    expect_false(e$dom_opts$passive)
   }
 })
 
@@ -515,8 +515,8 @@ test_that("dom_opts is per-slot, not broadcast across events", {
   )
   submit_e <- Filter(function(e) e$event == "submit", result$events)[[1]]
   click_e <- Filter(function(e) e$event == "click", result$events)[[1]]
-  expect_true(submit_e$prevent_default)
-  expect_false(click_e$prevent_default)
+  expect_true(submit_e$dom_opts$prevent_default)
+  expect_false(click_e$dom_opts$prevent_default)
 })
 
 # --- htmltools render hooks (GH #27) ------------------------------------------

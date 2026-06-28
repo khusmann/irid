@@ -109,15 +109,13 @@ derive_coalesce <- function(mode) !identical(mode, "immediate")
 # flags default FALSE when absent.
 resolve_wire_config <- function(wire, event_name, default_timing = NULL) {
   timing <- wire$timing %||% default_timing %||% default_for_event(event_name)
-  dom <- wire$dom_opts
+  # Carry the value objects whole — the encoder renders them via `as_protocol()`.
+  # `dom_opts` is always materialized (default all-FALSE / filter NULL) so its
+  # `as_protocol` yields the complete wire record even when the slot set no opts.
   list(
-    mode = timing$mode, ms = timing$ms, leading = timing$leading,
+    timing = timing,
     coalesce = wire$coalesce %||% derive_coalesce(timing$mode),
-    prevent_default  = if (is.null(dom)) FALSE else dom$prevent_default,
-    stop_propagation = if (is.null(dom)) FALSE else dom$stop_propagation,
-    capture          = if (is.null(dom)) FALSE else dom$capture,
-    passive          = if (is.null(dom)) FALSE else dom$passive,
-    filter           = if (is.null(dom)) NULL else dom$filter
+    dom_opts = wire$dom_opts %||% wire_dom_opts()
   )
 }
 
@@ -292,13 +290,12 @@ process_tags <- function(tag, counter = irid_id_counter()) {
           )
           cfg <- resolve_wire_config(w %||% wire(), key,
                                      default_timing = wire_immediate())
+          # Widget rows carry no `dom_opts` — the encoder omits domOpts on the
+          # widget arm (no DOM listener is attached).
           events[[length(events) + 1L]] <<- list(
             id = id, event = key, handler = make_widget_writeback(subj, key),
             write_targets = key,
-            mode = cfg$mode, ms = cfg$ms, leading = cfg$leading,
-            coalesce = cfg$coalesce,
-            prevent_default = FALSE, stop_propagation = FALSE,
-            capture = FALSE, passive = FALSE,
+            timing = cfg$timing, coalesce = cfg$coalesce,
             source = "widget", kind = "prop"
           )
         } else {
@@ -319,10 +316,7 @@ process_tags <- function(tag, counter = irid_id_counter()) {
         events[[length(events) + 1L]] <<- list(
           id = id, event = key, handler = handler,
           write_targets = attr(handler, "irid_write_targets"),
-          mode = cfg$mode, ms = cfg$ms, leading = cfg$leading,
-          coalesce = cfg$coalesce,
-          prevent_default = FALSE, stop_propagation = FALSE,
-          capture = FALSE, passive = FALSE,
+          timing = cfg$timing, coalesce = cfg$coalesce,
           source = "widget", kind = "event"
         )
       }
@@ -522,19 +516,15 @@ process_tags <- function(tag, counter = irid_id_counter()) {
     # duplicate explicit handlers.
     enforce_one_channel_per_event(pending_events)
 
-    # Resolve timing / coalesce / dom_opts per event entry from its wire.
+    # Resolve timing / coalesce / dom_opts per event entry from its wire. The
+    # value objects (`timing`, `dom_opts`) ride the row whole — the encoder renders
+    # them via `as_protocol()`.
     for (i in seq_along(pending_events)) {
       e <- pending_events[[i]]
       cfg <- resolve_wire_config(e$wire, e$event)
-      pending_events[[i]]$mode <- cfg$mode
-      pending_events[[i]]$ms <- cfg$ms
-      pending_events[[i]]$leading <- cfg$leading
+      pending_events[[i]]$timing <- cfg$timing
       pending_events[[i]]$coalesce <- cfg$coalesce
-      pending_events[[i]]$prevent_default <- cfg$prevent_default
-      pending_events[[i]]$stop_propagation <- cfg$stop_propagation
-      pending_events[[i]]$capture <- cfg$capture
-      pending_events[[i]]$passive <- cfg$passive
-      pending_events[[i]]$filter <- cfg$filter
+      pending_events[[i]]$dom_opts <- cfg$dom_opts
       pending_events[[i]]$wire <- NULL
     }
 

@@ -186,8 +186,8 @@ test_that("wire tunes a prop's write-back timing (no enable/disable)", {
   binding_for(out, "widget", "content")
   expect_named(single_init(out)$prop_fns, "content")
   pe <- event_row(out, "prop", "content")
-  expect_equal(pe$mode, "debounce")
-  expect_equal(pe$ms, 200)
+  expect_equal(pe$timing$mode, "debounce")
+  expect_equal(pe$timing$ms, 200)
 })
 
 test_that("dom_opts on a widget prop errors (prop is not DOM-backed)", {
@@ -248,7 +248,7 @@ test_that("widget event default timing is wire_immediate()", {
     input            = h   # no input→debounce(200) special case for widgets
   ))
   out <- process_tags(w)
-  for (ev in out$events) expect_equal(ev$mode, "immediate", info = ev$event)
+  for (ev in out$events) expect_equal(ev$timing$mode, "immediate", info = ev$event)
 })
 
 test_that("wire timing lands on the emitted event row", {
@@ -260,8 +260,8 @@ test_that("wire timing lands on the emitted event row", {
   out <- process_tags(w)
   cc <- event_row(out, "event", "cursor-changed")
   bl <- event_row(out, "event", "blur")
-  expect_equal(cc$mode, "throttle"); expect_equal(cc$ms, 100)
-  expect_equal(bl$mode, "debounce"); expect_equal(bl$ms, 200)
+  expect_equal(cc$timing$mode, "throttle"); expect_equal(cc$timing$ms, 100)
+  expect_equal(bl$timing$mode, "debounce"); expect_equal(bl$timing$ms, 200)
 })
 
 # --- Container handling ------------------------------------------------------

@@ -244,19 +244,21 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
   m$handle$destroy()
 })
 
-test_that("irid_jsonify_names converts named vectors to named lists (JSON objects)", {
-  # A named atomic vector would serialize via Shiny's keep_vec_names path and
-  # warn; a named list gives the same JSON object without the deprecation.
-  expect_identical(irid_jsonify_names(c("8" = "legendonly")), list(`8` = "legendonly"))
-  # Unnamed vectors stay vectors (JSON arrays); scalars pass through.
-  expect_identical(irid_jsonify_names(c(40, 200)), c(40, 200))
-  expect_identical(irid_jsonify_names("pan"), "pan")
-  expect_null(irid_jsonify_names(NULL))
-  # Recurses into lists, preserving keys.
+test_that("json_map converts named-vector members to named lists (JSON objects)", {
+  # A named atomic value would serialize via Shiny's keep_vec_names path and warn;
+  # json_map converts it to a named list — same JSON object, no deprecation.
   expect_identical(
-    irid_jsonify_names(list(a = c(x = 1), b = 1:3)),
-    list(a = list(x = 1), b = 1:3)
+    json_map(list(vis = c("8" = "legendonly"))),
+    list(vis = list(`8` = "legendonly"))
   )
+  # Unnamed vectors stay vectors (JSON arrays); scalars pass through; recursion
+  # preserves keys at depth.
+  expect_identical(
+    json_map(list(r = c(40, 200), m = "pan", nested = list(x = c(a = 1)))),
+    list(r = c(40, 200), m = "pan", nested = list(x = list(a = 1)))
+  )
+  # An empty map serializes as `{}` (a named empty list), not `[]`.
+  expect_identical(json_map(list()), stats::setNames(list(), character(0)))
 })
 
 test_that("a named-vector prop round-trips through mount as a JSON object", {
