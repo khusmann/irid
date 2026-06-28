@@ -23,7 +23,7 @@ import { setStaleTimeout } from "./stale";
 import type {
   IridAttrMessage,
   IridConfigMessage,
-  IridWireEntry,
+  IridWire,
   IridMutateMessage,
   IridReadyMessage,
   IridWidgetInitMessage,
@@ -160,7 +160,7 @@ export function registerHandlers(): void {
     }, 0);
   });
 
-  Shiny.addCustomMessageHandler("irid-wire", (msgs: IridWireEntry[]) => {
+  Shiny.addCustomMessageHandler("irid-wire", (msgs: IridWire[]) => {
     msgs.forEach((msg) => {
       // Key on the (namespaced) channel — unique per id/event.
       const key = msg.channel;

@@ -11,8 +11,8 @@ import { attachPayloadMeta, buildPayload } from "./payload";
 import type {
   DomOpts,
   EventPayload,
-  IridDomWire,
-  IridWireEntry,
+  IridWireDom,
+  IridWire,
 } from "../protocol";
 
 // An opaque buffered payload: the `{ id, seq, data }` envelope in the runtime, or
@@ -149,7 +149,7 @@ function shouldSkip(el: HTMLElement, eventName: string): boolean {
 
 function attachListener(
   el: HTMLElement,
-  msg: IridDomWire,
+  msg: IridWireDom,
   dispatch: (payload: Payload) => void,
 ): void {
   const opts = msg.domOpts;
@@ -171,7 +171,7 @@ function attachListener(
 // flags client-side and never round-trip.
 export function attachClientOnlyListener(
   el: HTMLElement,
-  msg: IridDomWire,
+  msg: IridWireDom,
 ): void {
   const opts = msg.domOpts;
   const filter = compileFilter(opts);
@@ -191,7 +191,7 @@ export function attachClientOnlyListener(
 
 export function setupThrottle(
   el: HTMLElement | null,
-  msg: IridWireEntry,
+  msg: IridWire,
   ms: number,
   leading: boolean,
 ): ManagedStream {
@@ -262,7 +262,7 @@ export function setupThrottle(
 
 export function setupDebounce(
   el: HTMLElement | null,
-  msg: IridWireEntry,
+  msg: IridWire,
   ms: number,
 ): ManagedStream {
   const s: ManagedStream = {
@@ -322,7 +322,7 @@ export function setupDebounce(
 
 export function setupImmediate(
   el: HTMLElement | null,
-  msg: IridWireEntry,
+  msg: IridWire,
 ): ManagedStream {
   // All immediate streams route through the element queue so a plain immediate
   // event can preemptively flush a sibling debounced stream before sending.

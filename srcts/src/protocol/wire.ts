@@ -21,10 +21,11 @@ export type OutputName = string; // a Shiny output id (renderIrid / iridOutput)
 export type Channel = string; // a Shiny input id; also the per-channel seq key
 
 // --- Optimistic-update echo gate -------------------------------------------
-// The single representation everywhere a gate travels. Carried as `gate?: EchoGate`
-// (omitted/undefined for a programmatic write), NOT `EchoGate | null` and NOT a
-// tagged union. A gate is a *relationship* (a client send <-> its echo), so its
-// absence is CONTEXTUAL — a programmatic write has no client channel, so no gate.
+// The single representation everywhere a gate travels: the scalar `gate: EchoGate
+// | null` on a dom attr (`null` = programmatic write), and the per-key
+// `valueGates: { key -> EchoGate }` on a widget batch (a key absent = programmatic).
+// A gate is a *relationship* (a client send <-> its echo); a programmatic write has
+// no client channel, so no gate. `isStaleEcho` treats null/absent as "apply".
 export interface EchoGate {
   seq: number;
   channel: Channel;
@@ -143,7 +144,7 @@ export interface IridWireCore {
 }
 
 /** DOM event: the listener options (incl. filter) + the config-only flag. */
-export type IridDomWire = IridWireCore & {
+export type IridWireDom = IridWireCore & {
   source: "dom";
   /** Carries the flags AND filter (= R's `wire_dom_opts`). */
   domOpts: DomOpts;
@@ -152,11 +153,11 @@ export type IridDomWire = IridWireCore & {
 };
 
 /** Widget event: no DOM flags (no listener is attached), no extra fields. */
-export type IridWidgetWire = IridWireCore & {
+export type IridWireWidget = IridWireCore & {
   source: "widget";
 };
 
-export type IridWireEntry = IridDomWire | IridWidgetWire;
+export type IridWire = IridWireDom | IridWireWidget;
 
 /** `irid-widget-init` — mount a widget instance into its container. */
 export interface IridWidgetInitMessage {
