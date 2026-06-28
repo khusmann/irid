@@ -78,15 +78,16 @@ json_string <- function(x, null_ok = FALSE) {
   unname(x)
 }
 
-# A JSON number. Asserts a length-1 numeric; strips names (a named scalar would
-# serialize as a one-key object — the only quirk to bridge here).
+# A JSON number. Asserts a concrete length-1 numeric (`NA`/`NaN` would serialize
+# as `null` — a required field must not silently vanish); strips names (a named
+# scalar would serialize as a one-key object — the other quirk to bridge here).
 json_number <- function(x, null_ok = FALSE) {
   if (is.null(x)) {
     if (null_ok) return(NULL)
     cli::cli_abort("A required JSON number field must not be NULL.")
   }
-  if (!is.numeric(x) || length(x) != 1L) {
-    cli::cli_abort("A JSON number field must be a length-1 numeric.")
+  if (!is.numeric(x) || length(x) != 1L || is.na(x)) {
+    cli::cli_abort("A JSON number field must be a length-1 non-NA numeric.")
   }
   unname(x)
 }
