@@ -6,7 +6,7 @@
 R/
   app.R           iridApp, iridOutput, renderIrid
   primitives.R    When, Each, Match/Case/Default, Output
-  event.R         wire carrier; wire_immediate/throttle/debounce timing
+  wire.R          wire carrier; wire_immediate/throttle/debounce timing
                   shapes; wire_dom_opts; merge.irid_wire
   encode.R        producer-side wire codec — msg_irid_* message constructors
                   (attr/wire/mutate/config/ready/widget-init), as_protocol value
