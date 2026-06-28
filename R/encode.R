@@ -1,4 +1,4 @@
-# Producer-side wire codec: the `msg_irid_*` message constructors + the
+# Producer-side protocol codec: the `msg_irid_*` message constructors + the
 # `coerce_value_as_number` inbound step, built on a handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
