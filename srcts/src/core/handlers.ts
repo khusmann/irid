@@ -12,7 +12,7 @@ import {
 } from "./anchors";
 import { handleWidgetInit, widgets } from "./widgets";
 import {
-  attachClientOnlyListener,
+  attachListener,
   managed,
   setupDebounce,
   setupImmediate,
@@ -171,8 +171,8 @@ export function registerHandlers(): void {
       if (msg.source !== "widget" && !el) return;
       wireRegistered.add(key);
       if (msg.source === "dom" && msg.clientOnly) {
-        // No server handler — just apply DOM flags, no managed state.
-        attachClientOnlyListener(el!, msg);
+        // No server handler — apply DOM flags only (no dispatch), no managed state.
+        attachListener(el!, msg);
         return;
       }
       if (msg.timing.mode === "throttle") {

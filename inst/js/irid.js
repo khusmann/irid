@@ -177,21 +177,7 @@
         if (filter && !filter(e)) return;
         if (opts.preventDefault) e.preventDefault();
         if (opts.stopPropagation) e.stopPropagation();
-        dispatch(buildPayload(e, el, msg.id, msg.channel));
-      },
-      { capture: opts.capture, passive: opts.passive }
-    );
-  }
-  function attachClientOnlyListener(el, msg) {
-    const opts = msg.domOpts;
-    const filter = compileFilter(opts);
-    el.addEventListener(
-      msg.event,
-      (e) => {
-        if (shouldSkip(el, msg.event)) return;
-        if (filter && !filter(e)) return;
-        if (opts.preventDefault) e.preventDefault();
-        if (opts.stopPropagation) e.stopPropagation();
+        dispatch == null ? void 0 : dispatch(buildPayload(e, el, msg.id, msg.channel));
       },
       { capture: opts.capture, passive: opts.passive }
     );
@@ -624,7 +610,7 @@
         if (msg.source !== "widget" && !el) return;
         wireRegistered.add(key);
         if (msg.source === "dom" && msg.clientOnly) {
-          attachClientOnlyListener(el, msg);
+          attachListener(el, msg);
           return;
         }
         if (msg.timing.mode === "throttle") {

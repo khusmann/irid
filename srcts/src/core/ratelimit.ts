@@ -147,10 +147,14 @@ function shouldSkip(el: HTMLElement, eventName: string): boolean {
   );
 }
 
-function attachListener(
+// Attach the DOM listener: apply the wire's `dom_opts` flags (preventDefault /
+// stopPropagation, under the capture/passive/filter options), then dispatch the
+// payload. Omitting `dispatch` is a config-only wire (dom_opts, no server handler):
+// the flags are applied client-side and the event never round-trips.
+export function attachListener(
   el: HTMLElement,
   msg: IridWireDom,
-  dispatch: (payload: Payload) => void,
+  dispatch?: (payload: Payload) => void,
 ): void {
   const opts = msg.domOpts;
   const filter = compileFilter(opts);
@@ -161,27 +165,7 @@ function attachListener(
       if (filter && !filter(e)) return;
       if (opts.preventDefault) e.preventDefault();
       if (opts.stopPropagation) e.stopPropagation();
-      dispatch(buildPayload(e, el, msg.id, msg.channel));
-    },
-    { capture: opts.capture, passive: opts.passive },
-  );
-}
-
-// A config-only event (wire with dom_opts but no handler): apply the DOM listener
-// flags client-side and never round-trip.
-export function attachClientOnlyListener(
-  el: HTMLElement,
-  msg: IridWireDom,
-): void {
-  const opts = msg.domOpts;
-  const filter = compileFilter(opts);
-  el.addEventListener(
-    msg.event,
-    (e) => {
-      if (shouldSkip(el, msg.event)) return;
-      if (filter && !filter(e)) return;
-      if (opts.preventDefault) e.preventDefault();
-      if (opts.stopPropagation) e.stopPropagation();
+      dispatch?.(buildPayload(e, el, msg.id, msg.channel));
     },
     { capture: opts.capture, passive: opts.passive },
   );
