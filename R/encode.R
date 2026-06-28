@@ -236,13 +236,14 @@ msg_irid_wire <- function(ev, channel, client_only) {
 # branch/case). removes/inserts/order are ALWAYS present: an absent command-part
 # is an empty array, not an omitted field — the client iterates each, so `[]` is
 # a no-op indistinguishable from omission, and a uniform shape beats a contextual
-# one. `json_array` forces each to a JSON array (an unnamed list).
-msg_irid_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
+# one. Callers speak in empty collections (never NULL), so `json_array` stays
+# strict (a NULL here is an encoder bug) and forces each to a JSON array.
+msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
   list(
     id = json_string(id),
-    removes = json_array(removes %||% list()),
-    inserts = json_array(inserts %||% list()),
-    order = json_array(order %||% list())
+    removes = json_array(removes),
+    inserts = json_array(inserts),
+    order = json_array(order)
   )
 }
 

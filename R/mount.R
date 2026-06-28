@@ -203,7 +203,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
       function(id) env$item_mounts[[id]]$wrapper_id,
       character(1L)
     )
-  } else NULL
+  } else character(0)
   session$sendCustomMessage("irid-mutate", msg_irid_mutate(
     cf_id, removes = removes, inserts = inserts, order = order_ids
   ))
@@ -241,9 +241,9 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
 # The mount runs AFTER the DOM insert (mutate first).
 cf_render_child <- function(session, cf_id, old_child_id, body_tag,
                             counter, depth) {
-  removes <- if (!is.null(old_child_id)) old_child_id else NULL
+  removes <- if (!is.null(old_child_id)) old_child_id else character(0)
   if (is.null(body_tag)) {
-    if (!is.null(removes)) {
+    if (length(removes) > 0L) {
       session$sendCustomMessage("irid-mutate",
         msg_irid_mutate(cf_id, removes = removes))
     }
