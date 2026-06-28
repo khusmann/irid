@@ -536,18 +536,15 @@
       if (msg.target === "widget") {
         const w = widgets[msg.id];
         if (!w) return;
-        let values = msg.values;
-        if (msg.valueGates) {
-          const kept = {};
-          let any = false;
-          for (const k in values) {
-            if (isStaleEcho(msg.valueGates[k], sequences)) continue;
-            kept[k] = values[k];
-            any = true;
-          }
-          if (!any) return;
-          values = kept;
+        const kept = {};
+        let any = false;
+        for (const k in msg.values) {
+          if (isStaleEcho(msg.valueGates[k], sequences)) continue;
+          kept[k] = msg.values[k];
+          any = true;
         }
+        if (!any) return;
+        const values = kept;
         if (w.handle) {
           if (typeof w.handle.update === "function") w.handle.update(values);
         } else {
@@ -649,10 +646,9 @@
       }
     );
     Shiny.addCustomMessageHandler("irid-ready", (msg) => {
-      var _a;
       window.__iridReady = true;
       document.dispatchEvent(
-        new CustomEvent("irid:ready", { detail: { id: (_a = msg == null ? void 0 : msg.output) != null ? _a : null } })
+        new CustomEvent("irid:ready", { detail: { id: msg.output } })
       );
     });
   }

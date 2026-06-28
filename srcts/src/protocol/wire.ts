@@ -77,10 +77,10 @@ export interface IridAttrDom {
   id: ElementId;
   attr: string;
   value: unknown;
-  /** CONTEXTUAL absence: omitted for a programmatic write (no client channel to
-   *  gate against). Only dom carries it (value/checked echoes on focused inputs);
-   *  text never does. */
-  gate?: EchoGate;
+  /** Always present: the echo gate, or `null` for a programmatic write (no client
+   *  channel to gate against). Only dom carries it (value/checked echoes on focused
+   *  inputs); text never does. `isStaleEcho` treats `null` as "apply". */
+  gate: EchoGate | null;
 }
 
 /** Text replacement inside a comment-anchor range. NO gate — a comment-anchor
@@ -177,12 +177,12 @@ export interface IridWidgetInitMessage {
 /**
  * `irid-ready` — a mount is fully wired (listeners attached, server observers
  * registered). `output` is the output name for a `renderIrid`/`iridOutput` mount,
- * and ABSENT for a top-level `iridApp` mount (no output name exists). Optional, not
- * `| null`: top-level is semantic absence, one canonical encoding. The client maps
- * absent -> null only when synthesizing the public `irid:ready` detail.
+ * and `null` for a top-level `iridApp` mount (no output name exists). Always
+ * present: this is the same `name | null` the public `irid:ready` detail exposes,
+ * so the wire and the public event share one encoding.
  */
 export interface IridReadyMessage {
-  output?: OutputName;
+  output: OutputName | null;
 }
 
 // ---------------------------------------------------------------------------

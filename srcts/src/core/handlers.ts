@@ -205,9 +205,9 @@ export function registerHandlers(): void {
   // the "missed the event" escape hatch. The e2e harness waits on the flag.
   Shiny.addCustomMessageHandler("irid-ready", (msg: IridReadyMessage) => {
     window.__iridReady = true;
-    // Wire `output` is optional/omitted; the public DOM detail uses null.
+    // Wire `output` is already `name | null` — the public detail shares the shape.
     document.dispatchEvent(
-      new CustomEvent("irid:ready", { detail: { id: msg?.output ?? null } }),
+      new CustomEvent("irid:ready", { detail: { id: msg.output } }),
     );
   });
 }

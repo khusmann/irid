@@ -8,8 +8,9 @@
 # absorbing the `as.list`/`USE.NAMES`/named-list tricks that used to be scattered
 # across every `sendCustomMessage` site. The non-determinism under `auto_unbox` is
 # narrow and enumerable: array-typed fields that are contingently length-1 unbox
-# to a scalar, and empty/sentinel values encode by content (`NULL` dropped,
-# `character(0)` -> `[]`, `NA` -> `null`). The combinators below pin each.
+# to a scalar, and empty/sentinel values encode by content (`NULL` -> `null` with
+# the key kept, `character(0)` -> `[]`, `NA` -> `null`). The combinators below pin
+# each.
 
 # Each `json_*` helper pins one declared protocol type to its wire shape, and the
 # contract is uniform across the family:
@@ -153,8 +154,8 @@ as_protocol.irid_echo_gate <- function(x) {
 }
 
 # Constructor for the echo gate value object: the classed `{seq, channel}`, or NULL
-# (the field is OMITTED) when there's no gating context — a programmatic write.
-# Contextual absence, not a `null` value.
+# when there's no gating context — a programmatic write. The R-side NULL is the
+# absence; the message constructor wires it as an explicit `null` gate field.
 irid_echo_gate <- function(seq, channel) {
   if (is.null(seq)) return(NULL)
   structure(list(seq = seq, channel = channel), class = "irid_echo_gate")
@@ -167,12 +168,11 @@ msg_irid_config <- function(stale_timeout) {
   list(staleTimeout = json_number(stale_timeout, null_ok = TRUE))
 }
 
-# irid-ready: `output` is present only for a renderIrid/iridOutput mount; it is
-# OMITTED for a top-level iridApp mount (no output name exists), never sent as null.
+# irid-ready: `output` is the renderIrid/iridOutput output name, or `null` for a
+# top-level iridApp mount (no output name exists). Always present — the client's
+# public `irid:ready` event already exposes it as `id: name | null`.
 msg_irid_ready <- function(output) {
-  msg <- list()
-  if (!is.null(output)) msg$output <- json_string(output)
-  msg
+  list(output = json_string(output, null_ok = TRUE))
 }
 
 # irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
@@ -185,14 +185,14 @@ msg_irid_widget_init <- function(id, name, props) {
 # --- irid-attr message constructors ----------------------------------------
 
 # DOM property/attribute write. `value` is arbitrary user data (left as-is); `gate`
-# is omitted for a programmatic write.
+# is the `{seq, channel}` echo gate, or `null` for a programmatic write (no echo to
+# gate). Always present.
 msg_irid_attr_dom <- function(id, attr, value, seq = NULL, channel = NULL) {
-  msg <- list(
-    id = json_string(id), target = "dom", attr = json_string(attr), value = value
-  )
   gate <- irid_echo_gate(seq, channel)
-  if (!is.null(gate)) msg$gate <- as_protocol(gate)
-  msg
+  list(
+    id = json_string(id), target = "dom", attr = json_string(attr), value = value,
+    gate = if (is.null(gate)) NULL else as_protocol(gate)
+  )
 }
 
 # Text replacement inside a comment-anchor range. No gate (text never gates).

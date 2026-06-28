@@ -107,11 +107,12 @@ test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
   ctx$session$flushReact()
 
   msgs <- ctx$new_attrs()
-  # The value binding echoed the new value, but with no gate.
+  # The value binding echoed the new value, with a null gate (programmatic).
   value_echo <- Filter(function(m) identical(m$message$attr, "value"), msgs)
   expect_length(value_echo, 1L)
   expect_equal(value_echo[[1]]$message$value, "typed")
-  expect_false("gate" %in% names(value_echo[[1]]$message))
+  expect_true("gate" %in% names(value_echo[[1]]$message))
+  expect_null(value_echo[[1]]$message$gate)
 
   ctx$handle$destroy()
 })
