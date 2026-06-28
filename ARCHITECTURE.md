@@ -8,10 +8,11 @@ R/
   primitives.R    When, Each, Match/Case/Default, Output
   event.R         wire carrier; wire_immediate/throttle/debounce timing
                   shapes; wire_dom_opts; merge.irid_wire
-  encode.R        producer-side wire codec — irid_encode_* message constructors
-                  (attr/wire/mutate/config/ready/widget-init) + irid_decode_payload;
-                  centralizes the jsonlite serialization discipline (json_array/
-                  json_map/json_string/json_gate)
+  encode.R        producer-side wire codec — msg_irid_* message constructors
+                  (attr/wire/mutate/config/ready/widget-init), as_protocol value
+                  tier, + coerce_value_as_number inbound step; centralizes the
+                  jsonlite serialization discipline (json_array/json_map/
+                  json_string/json_number/json_bool)
   process_tags.R  Tag tree walker — extracts reactive bindings, events, control flows, widgets
   mount.R         Mounts processed tags into a Shiny session (observers, lifecycle)
   store.R         reactiveStore — hierarchical reactive state container
@@ -689,9 +690,10 @@ Key design points:
   write DISJOINT keys (each channel owns its `write_targets`), so neither steals
   the other's entry — each echo carries its own channel's seq.
 
-- **The envelope is unwrapped** before the user handler runs: `irid_decode_payload`
-  splits the transport meta (`id`, `seq`) from the event `data`, and the handler
-  receives only `data`. The `seq` is internal-only — never in the user event object.
+- **The envelope is read** before the user handler runs: the inbound payload is a
+  flat `{ id, seq, data }`, and the observer reads those fields directly — the
+  handler receives only `data`. The `seq` is internal-only — never in the user
+  event object.
 
 - **Force-send on no-op.** After running the user's event handler, the event
   observer reads the source element's bindings whose attr is in `write_targets`

@@ -1,5 +1,5 @@
 # Producer-side wire codec: the `msg_irid_*` message constructors + the
-# `irid_decode_payload` inbound step, built on a handful of `json_*` shape helpers.
+# `coerce_value_as_number` inbound step, built on a handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
@@ -253,18 +253,14 @@ msg_irid_mutate <- function(id, removes = NULL, inserts = NULL, order = NULL) {
   msg
 }
 
-# --- Inbound: client -> server payload decode ------------------------------
-
-# The structural mirror of the client's `attachPayloadMeta`. Splits the transport
-# envelope (`id` + per-channel `seq`) from the foreign event data. Generic over
-# every inbound event (DOM and widget): it does NOT coerce values (turning
-# `list(40, 200)` into a numeric range, or a JSON `null` into anything else) and
-# keeps nulls verbatim — that is semantic and field-specific, so it stays per
-# source (DOM via `coerce_value_as_number` below, widgets via `coerce_plotly_value`).
-# A widget author's `null` therefore reaches the handler as `NULL`, untouched.
-irid_decode_payload <- function(payload) {
-  list(meta = payload[c("id", "seq")], event = payload$data)
-}
+# --- Inbound: client -> server payload coercion ----------------------------
+#
+# The inbound envelope is the flat mirror of the client's `attachPayloadMeta`:
+# `{ id, seq, data }`, with the foreign event fields under `data`. The observer
+# reads those three fields directly (no decode/reshape step) and keeps every
+# value verbatim — nulls included — EXCEPT for the one normalization below.
+# Value coercion is otherwise semantic and field-specific, so it stays per source
+# (widgets via `coerce_plotly_value`).
 
 # The one inbound normalization irid owns, applied to DOM events ONLY (gated on
 # `ev$source` at the observer). A number/range/date input reports

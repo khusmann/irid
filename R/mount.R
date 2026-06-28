@@ -390,14 +390,16 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       obs <- observeEvent(session$input[[input_id]], {
         latency <- getOption("irid.debug.latency", 0)
         if (latency > 0) Sys.sleep(latency)
-        decoded <- irid_decode_payload(session$input[[input_id]])
-        source_id <- decoded$meta$id
+        # Inbound envelope (flat mirror of the client's `attachPayloadMeta`):
+        # `{ id, seq, data }`, foreign event fields under `data`, read directly.
+        payload <- session$input[[input_id]]
+        source_id <- payload$id
         write_targets <- ev$write_targets
 
         # DOM-only: empty number inputs arrive with `valueAsNumber` null; map it
         # to NA_real_. Widget event data is left verbatim (a widget's null stays
         # null).
-        event_obj <- decoded$event
+        event_obj <- payload$data
         if (identical(ev$source, "dom")) event_obj <- coerce_value_as_number(event_obj)
 
         # Thread the event sequence for optimistic-update tracking, keyed PER
@@ -411,7 +413,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         # records nothing, so any binding it incidentally drives echoes ungated
         # (treated as programmatic). Gating is a property of irid-MANAGED
         # bindings (autobind `value`/`checked`, `reactiveProxy`, widget props).
-        seq <- decoded$meta$seq
+        seq <- payload$seq
         if (!is.null(seq) && !is.null(write_targets)) {
           cur <- session$userData$irid_current_sequence
           if (is.null(cur)) cur <- list()
