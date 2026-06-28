@@ -7,6 +7,11 @@
   lives in the test files under `tests/testthat/`
 - Examples live in `examples/*` and `vignettes/articles/examples.Rmd`
 
+## Terminology
+
+- **irid protocol** — the client↔server message contract (`srcts/src/protocol/`, the `msg_irid_*` constructors, the JSON shapes). Never "the wire format."
+- **wire** — reserved for the per-channel event-stream config: `wire()`/`wire_*()`, the `irid-wire` message, `R/wire.R`. How an event is *wired* to the server, not the serialization.
+
 ## Project status
 
 - Greenfield project — no backwards compatibility constraints

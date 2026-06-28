@@ -14,8 +14,8 @@
 coerce_text_child <- function(val) {
   if (is.null(val) || (is.atomic(val) && length(val) <= 1L)) {
     val <- as.character(val)
-    # NULL / NA / character(0) all mean "empty" -> "" (the wire's "clear the range"
-    # signal), so the text wire type is exactly `string` — never `[]` or `null`.
+    # NULL / NA / character(0) all mean "empty" -> "" (the protocol's "clear the range"
+    # signal), so the text protocol type is exactly `string` — never `[]` or `null`.
     if (length(val) == 0L || is.na(val)) return("")
     return(val)
   }
@@ -90,7 +90,7 @@ irid_queue_widget_attr <- function(session, id, attr, value, gate = NULL) {
   entry$values[attr] <- list(value)
   if (!is.null(gate)) {
     # Store the raw gate value object; the drain (`msg_irid_attr_widget`)
-    # renders the whole map to its wire shape via `as_protocol`.
+    # renders the whole map to its protocol shape via `as_protocol`.
     entry$value_gates[[attr]] <- gate
   }
   pending[[id]] <- entry
@@ -101,7 +101,7 @@ irid_queue_widget_attr <- function(session, id, attr, value, gate = NULL) {
 # irid-managed binding stamps on its echo so the client can drop it if a newer
 # local edit has superseded it. NULL when there is no gating context (a
 # programmatic write — nothing to gate against); the message constructor renders
-# that absence as the wire's `null`/omitted gate. The `as_protocol` method lives
+# that absence as the protocol `null`/omitted gate. The `as_protocol` method lives
 # in the codec (R/encode.R), mirroring wire_timing/dom_opts.
 irid_echo_gate <- function(seq, channel) {
   if (is.null(seq)) return(NULL)
@@ -381,7 +381,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # SAME channel.
       channel <- session$ns(input_id)
 
-      # The encoder builds the discriminated wire shape (nested timing/domOpts,
+      # The encoder builds the discriminated protocol shape (nested timing/domOpts,
       # domOpts/clientOnly on dom rows; the widget arm adds nothing). `clientOnly`
       # is a config-only dom wire — `dom_opts` with no server handler.
       msg <- msg_irid_wire(ev, channel, client_only = is.null(handler))
