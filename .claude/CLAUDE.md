@@ -47,6 +47,12 @@ hist(
 )
 ```
 
+## TypeScript types
+
+- Production types describe production states only. Don't widen a type
+  (`Record<string, unknown>`, `any`, optional fields, extra union arms) so test
+  inputs typecheck — build real values in the test instead.
+
 ## Comments
 
 - Describe the code as it is, not its history. Don't explain absent features or
