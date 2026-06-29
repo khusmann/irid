@@ -45,15 +45,18 @@ test_that("two props written in one flush each carry their own channel+seq", {
   )
   ctx$session$flushReact()
 
-  msgs <- ctx$new_attrs()
-  expect_length(msgs, 1L)                    # coalesced into one widget batch
-  vm <- msgs[[1]]$message$valueGates
-  expect_equal(vm$a$seq, 5)
-  expect_equal(vm$b$seq, 9)
+  # Each prop write is its own single-key widget attr op, gated per op.
+  widget_attrs <- Filter(
+    function(m) identical(m$message$target, "widget"), ctx$new_attrs()
+  )
+  a_gate <- Filter(function(m) identical(m$message$attr, "a"), widget_attrs)[[1]]$message$gate
+  b_gate <- Filter(function(m) identical(m$message$attr, "b"), widget_attrs)[[1]]$message$gate
+  expect_equal(a_gate$seq, 5)
+  expect_equal(b_gate$seq, 9)
   # Distinct channels — `a`'s is not `b`'s.
-  expect_true(grepl("_a$", vm$a$channel))
-  expect_true(grepl("_b$", vm$b$channel))
-  expect_false(identical(vm$a$channel, vm$b$channel))
+  expect_true(grepl("_a$", a_gate$channel))
+  expect_true(grepl("_b$", b_gate$channel))
+  expect_false(identical(a_gate$channel, b_gate$channel))
 
   ctx$handle$destroy()
 })
@@ -80,12 +83,14 @@ test_that("a sibling notification does not pollute a prop's echo sequence", {
   )
   ctx$session$flushReact()
 
-  msgs <- ctx$new_attrs()
-  expect_length(msgs, 1L)
-  vm <- msgs[[1]]$message$valueGates
+  widget_attrs <- Filter(
+    function(m) identical(m$message$target, "widget"), ctx$new_attrs()
+  )
+  sel <- Filter(function(m) identical(m$message$attr, "selected_ids"), widget_attrs)
+  expect_gte(length(sel), 1L)
   # The prop echo carries ITS seq (3), not the notification's later 8.
-  expect_equal(vm$selected_ids$seq, 3)
-  expect_true(grepl("_selected_ids$", vm$selected_ids$channel))
+  expect_equal(sel[[1]]$message$gate$seq, 3)
+  expect_true(grepl("_selected_ids$", sel[[1]]$message$gate$channel))
 
   ctx$handle$destroy()
 })
@@ -144,7 +149,7 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
   ctx$handle$destroy()
 })
 
-test_that("widget wire rows share one namespaced inputId space (no kind)", {
+test_that("widget wire ops share one namespaced inputId space", {
   # The client indexes widget streams by `{id}:{event}`, so a prop write-back and
   # an event ride the same `irid_input_{id}_{event}` namespace (props and events
   # can't share a name). The channel is the namespaced send target
@@ -158,20 +163,19 @@ test_that("widget wire rows share one namespaced inputId space (no kind)", {
   s <- new_fake_session()
   result <- process_tags(node)
   handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
-  s$flushReact() # drain the render batch (wire rides it now)
+  s$flushReact() # drain the render frame (wire ops ride it now)
 
+  # Each wire is its own op (one per channel), so the prop write-back and the
+  # event arrive as two separate irid-wire ops.
   ev_msg <- Filter(function(m) m$type == "irid-wire", s$msgs())
-  expect_length(ev_msg, 1L)
-  rows <- ev_msg[[1]]$message
+  expect_length(ev_msg, 2L)
+  rows <- lapply(ev_msg, function(m) m$message)
   byname <- stats::setNames(
     rows, vapply(rows, function(r) r$event, character(1))
   )
 
-  # Both are widget rows with no `kind` field.
   expect_equal(byname$v$source, "widget")
   expect_equal(byname$ping$source, "widget")
-  expect_false("kind" %in% names(byname$v))
-  expect_false("kind" %in% names(byname$ping))
   # One namespaced inputId space for both the prop write-back and the event.
   expect_true(grepl("^mock-session-irid_input_.*_v$", byname$v$channel))
   expect_true(grepl("^mock-session-irid_input_.*_ping$", byname$ping$channel))

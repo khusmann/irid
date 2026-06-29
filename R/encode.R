@@ -55,12 +55,19 @@ json_map <- function(x, null_ok = FALSE) {
   if (is.null(nms) || any(!nzchar(nms))) {
     cli::cli_abort("A JSON map field must be fully named.")
   }
-  jsonify <- function(v) {
-    if (is.list(v)) return(lapply(v, jsonify))
-    if (is.atomic(v) && !is.null(names(v))) return(as.list(v))
-    v
-  }
-  jsonify(as.list(x))
+  json_value(as.list(x))
+}
+
+# Recursively bridge the named-vector -> object quirk for an arbitrary value: a
+# named atomic vector serializes as a one-key-per-name object only as a named
+# *list* (jsonlite keys `[]`-vs-`{}` off list NAMES), so convert named atomics to
+# named lists at every depth. Unnamed vectors and scalars pass through unchanged.
+# Used by `json_map` (per member) and by `msg_irid_attr` (a widget prop value can
+# be a named atomic like plotly's `c("8" = "legendonly")`).
+json_value <- function(v) {
+  if (is.list(v)) return(lapply(v, json_value))
+  if (is.atomic(v) && !is.null(names(v))) return(as.list(v))
+  v
 }
 
 # A JSON string: asserts a length-1, non-NA character; strips names. Strict — an
@@ -167,43 +174,42 @@ msg_irid_ready <- function(output) {
   list(output = json_string(output, null_ok = TRUE))
 }
 
-# irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
+# widget-init op: `props` is a materialized map (empty -> `{}`); NULL-valued
 # props are kept as explicit `null` so the factory sees its full declared prop set.
 msg_irid_widget_init <- function(id, name, props) {
-  list(id = json_string(id), name = json_string(name), props = json_map(props))
+  list(
+    kind = "widget-init",
+    id = json_string(id), name = json_string(name), props = json_map(props)
+  )
 }
 
-# --- irid-attr message constructors ----------------------------------------
+# --- attr / text op constructors -------------------------------------------
 
-# DOM property/attribute write. `value` is arbitrary user data (left as-is); `gate`
-# is an `irid_echo_gate` value object, or NULL for a programmatic write (no echo to
-# gate, rendered as the wire's `null`). Always present.
-msg_irid_attr_dom <- function(id, attr, value, gate = NULL) {
+# A bound value pushed to its sink, discriminated on `target`:
+#   "dom"    — a DOM property/attribute write on `getElementById(id)`.
+#   "widget" — a single-key prop write; the client accumulates every `target =
+#              "widget"` op for one id across the render and calls `update()` once.
+# Both share the shape `{ id, attr, value, gate }`. `value` is arbitrary user data,
+# passed through `json_value` to bridge the named-vector -> object quirk (a widget
+# prop can be a named atomic like plotly's `c("8" = "legendonly")`; a scalar DOM
+# value passes through untouched). `gate` is an `irid_echo_gate` value object, or
+# NULL for a programmatic write (rendered as the wire's `null`). Always present.
+msg_irid_attr <- function(target, id, attr, value, gate = NULL) {
   list(
-    id = json_string(id), target = "dom", attr = json_string(attr), value = value,
+    kind = "attr",
+    target = json_string(target),
+    id = json_string(id),
+    attr = json_string(attr),
+    value = json_value(value),
     gate = if (is.null(gate)) NULL else as_protocol(gate)
   )
 }
 
-# Text replacement inside a comment-anchor range. No gate (text never gates).
-# `value` arrives already normalized to a string by `coerce_text_child` (empty/NA
-# -> ""), so `json_string` just asserts it.
-msg_irid_attr_text <- function(id, value) {
-  list(id = json_string(id), target = "text", value = json_string(value))
-}
-
-# Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
-# sparse per-key map of `irid_echo_gate` value objects, rendered to wire shape
-# here. `valueGates` is ALWAYS present — empty `{}` when no key is gated (all
-# programmatic). The client reads gates per key, so an absent key (undefined gate)
-# applies unconditionally, making `{}` indistinguishable from omission.
-msg_irid_attr_widget <- function(id, values, gates) {
-  list(
-    id = json_string(id),
-    target = "widget",
-    values = json_map(values),
-    valueGates = json_map(lapply(gates, as_protocol))
-  )
+# Text replacement inside a comment-anchor range — its own op kind (no attr, no
+# gate). `value` arrives already normalized to a string by `coerce_text_child`
+# (empty/NA -> ""), so `json_string` just asserts it.
+msg_irid_text <- function(id, value) {
+  list(kind = "text", id = json_string(id), value = json_string(value))
 }
 
 # --- irid-wire message constructor -----------------------------------------
@@ -216,6 +222,7 @@ msg_irid_attr_widget <- function(id, values, gates) {
 # objects (`timing`, `dom_opts`) ride the event row whole, rendered via `as_protocol()`.
 msg_irid_wire <- function(ev, channel, client_only) {
   msg <- list(
+    kind = "wire",
     id = json_string(ev$id),
     event = json_string(ev$event),
     channel = json_string(channel),
@@ -241,6 +248,7 @@ msg_irid_wire <- function(ev, channel, client_only) {
 # strict (a NULL here is an encoder bug) and forces each to a JSON array.
 msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
   list(
+    kind = "mutate",
     id = json_string(id),
     removes = json_array(removes),
     inserts = json_array(inserts),
@@ -248,18 +256,16 @@ msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list
   )
 }
 
-# --- irid-batch message constructor ----------------------------------------
+# --- irid-render message constructor ---------------------------------------
 
-# Ordered envelope coalescing one Shiny flush's render messages (irid-mutate,
-# irid-attr dom/text, irid-wire, irid-widget-init) into a single frame the client
-# replays in order. `ops` is a list of `list(type, message)` in EMISSION order
-# (apply order); each `message` is the already-constructed `msg_irid_*` payload,
-# passed through unchanged — its wire shape was pinned at construction. The
-# drain only sends a non-empty batch, so `ops` is always >= 1 here.
-msg_irid_batch <- function(ops) {
-  list(ops = json_array(lapply(ops, function(op) {
-    list(type = json_string(op$type), message = op$message)
-  })))
+# One flush's render: an ordered op list applied by the client in one synchronous
+# pass (one paint). `ops` is the list of already-constructed `msg_irid_*` op
+# payloads in EMISSION order (apply order) — a child's `mutate` precedes the
+# `wire`/`widget-init`/`attr` that need its element, each op self-discriminated by
+# its `kind`. Each op's wire shape was pinned at construction, so the payloads pass
+# through unchanged. The drain only sends a non-empty render, so `ops` is >= 1.
+msg_irid_render <- function(ops) {
+  list(ops = json_array(ops))
 }
 
 # --- Inbound: client -> server payload coercion ----------------------------

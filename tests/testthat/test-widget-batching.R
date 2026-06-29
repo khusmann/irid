@@ -1,240 +1,150 @@
-# Tests for per-widget intra-flush batching of `irid-attr` updates.
+# Widget prop writes in the unified render protocol.
 #
-# Two layers:
-#   1. Direct unit tests of the `irid_queue_widget_attr` accumulator —
-#      precise control over keys, values, sequence, and multi-widget drain.
-#   2. Integration through `irid_mount_processed` — single vs. multi prop in
-#      one flush, and props changing across separate flushes.
-#
-# `MockShinySession$flushReact()` flushes the reactive graph AND fires
-# `onFlushed` callbacks registered during the flush — the same semantics the
-# drain relies on in real Shiny.
+# Each widget prop write is a single-key `attr` op (target = "widget") emitted in
+# the flush's render frame — the same `irid_send` path as a DOM attr, no separate
+# server coalescing. The per-widget MERGE (collect every target="widget" op for
+# one id across the render, call update() once → one redraw) now lives in the
+# CLIENT (handlers.ts `applyRender`); the e2e suite exercises the single-redraw
+# behaviour. These tests assert the server emits the right per-op shapes, in the
+# right order, in the right frame.
 
-# --- Helpers -----------------------------------------------------------------
-
-new_batch_session <- function() {
-  s <- shiny::MockShinySession$new()
-  store <- new.env(parent = emptyenv())
-  store$msgs <- list()
-  s$sendCustomMessage <- function(type, message) {
-    store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
-    invisible()
-  }
-  # Flatten the render batch (irid-mutate/-wire/-widget-init) so the widget-init
-  # assertions see it directly; widget-attr keeps its own standalone drain.
-  s$msgs <- function() flatten_irid_batch(store$msgs)
-  s
+# Just the widget-target attr ops, in send order.
+widget_attrs <- function(session) {
+  Filter(
+    function(m) m$type == "irid-attr" && identical(m$message$target, "widget"),
+    session$msgs()
+  )
 }
 
-# Just the `irid-attr` messages, in send order.
-attr_msgs <- function(session) {
-  Filter(function(m) m$type == "irid-attr", session$msgs())
+# All irid-render frames in send order (for asserting one-frame vs. separate).
+renders <- function(session) {
+  Filter(function(m) m$type == "irid-render", session$raw_msgs())
 }
 
 mount_widget <- function(props) {
-  session <- new_batch_session()
+  session <- new_fake_session()
   result <- process_tags(IridWidget(name = "test", props = props))
   handle <- shiny::isolate(irid:::irid_mount_processed(result, session))
   list(session = session, handle = handle, result = result)
 }
 
-# --- Accumulator unit tests --------------------------------------------------
+# --- per-op shape ------------------------------------------------------------
 
-test_that("multiple attrs for one widget coalesce into one values map", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "content", "abc")
-  irid:::irid_queue_widget_attr(s, "w1", "cursor", list(line = 2, ch = 4))
-
-  # Nothing on the wire until the flush drains the pending map.
-  expect_length(attr_msgs(s), 0L)
-
-  s$flushReact()
-  ms <- attr_msgs(s)
-  expect_length(ms, 1L)
-  msg <- ms[[1]]$message
-  expect_equal(msg$id, "w1")
-  expect_equal(msg$target, "widget")
-  expect_equal(names(msg$values), c("content", "cursor"))
-  expect_equal(msg$values$content, "abc")
-  expect_equal(msg$values$cursor, list(line = 2, ch = 4))
-  expect_null(msg$sequence)
-})
-
-test_that("separate widgets drain to separate messages", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1)
-  irid:::irid_queue_widget_attr(s, "w2", "b", 2)
-  s$flushReact()
-
-  ms <- attr_msgs(s)
-  expect_length(ms, 2L)
-  ids <- vapply(ms, function(m) m$message$id, character(1))
-  expect_setequal(ids, c("w1", "w2"))
-  # Each widget's batch holds only its own key.
-  for (m in ms) expect_length(m$message$values, 1L)
-})
-
-test_that("widgets drain in first-seen order, not alphabetical", {
-  # Regression: `ls()` would sort "w-10" before "w-2"; the drain must keep
-  # the order the widgets were first queued in (≈ observer fire order).
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w-2", "a", 1)
-  irid:::irid_queue_widget_attr(s, "w-10", "b", 2)
-  irid:::irid_queue_widget_attr(s, "w-2", "c", 3)  # re-touch, no reorder
-  s$flushReact()
-
-  ids <- vapply(attr_msgs(s), function(m) m$message$id, character(1))
-  expect_equal(ids, c("w-2", "w-10"))
-})
-
-test_that("each key carries its own {seq, channel} in valueGates", {
-  # The gate is per channel, so the sequence travels per key (not one batch-
-  # level max): a box zoom can contribute xaxis_range + yaxis_range from two
-  # different channels in one batch.
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1, irid:::irid_echo_gate(3, "ch_a"))
-  irid:::irid_queue_widget_attr(s, "w1", "b", 2, irid:::irid_echo_gate(7, "ch_b"))
-  irid:::irid_queue_widget_attr(s, "w1", "c", 3, irid:::irid_echo_gate(NULL, NULL))
-  s$flushReact()
-
-  vm <- attr_msgs(s)[[1]]$message$valueGates
-  expect_equal(vm$a, list(seq = 3, channel = "ch_a"))
-  expect_equal(vm$b, list(seq = 7, channel = "ch_b"))
-  # A programmatic key (no sequence) gets no valueGates entry — applied always.
-  expect_false("c" %in% names(vm))
-})
-
-test_that("a purely programmatic batch carries an empty valueGates", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1)
-  s$flushReact()
-  msg <- attr_msgs(s)[[1]]$message
-  # valueGates is always present; empty `{}` when no key is gated.
-  expect_true("valueGates" %in% names(msg))
-  expect_length(msg$valueGates, 0L)
-})
-
-test_that("a later attr overwrites an earlier value for the same key", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "content", "old")
-  irid:::irid_queue_widget_attr(s, "w1", "content", "new")
-  s$flushReact()
-
-  msg <- attr_msgs(s)[[1]]$message
-  expect_length(msg$values, 1L)
-  expect_equal(msg$values$content, "new")
-})
-
-test_that("a NULL value keeps its key in the values map", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "content", NULL)
-  s$flushReact()
-
-  msg <- attr_msgs(s)[[1]]$message
-  expect_true("content" %in% names(msg$values))
-  expect_null(msg$values$content)
-})
-
-test_that("the pending map is cleared after draining — no duplicate sends", {
-  s <- new_batch_session()
-  irid:::irid_queue_widget_attr(s, "w1", "a", 1)
-  s$flushReact()
-  expect_length(attr_msgs(s), 1L)
-
-  # A second flush with nothing queued sends nothing more.
-  s$flushReact()
-  expect_length(attr_msgs(s), 1L)
-
-  # A fresh queue after the drain registers a new drain and sends again.
-  irid:::irid_queue_widget_attr(s, "w1", "b", 2)
-  s$flushReact()
-  ms <- attr_msgs(s)
-  expect_length(ms, 2L)
-  expect_equal(names(ms[[2]]$message$values), "b")
-})
-
-# --- Integration through mount -----------------------------------------------
-
-test_that("a single bound prop drains one one-key values batch", {
+test_that("a single bound prop emits one single-key widget attr op", {
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()
 
-  ms <- attr_msgs(m$session)
+  ms <- widget_attrs(m$session)
   expect_length(ms, 1L)
   expect_equal(ms[[1]]$message$target, "widget")
-  expect_equal(names(ms[[1]]$message$values), "content")
-  expect_equal(ms[[1]]$message$values$content, "hi")
+  expect_equal(ms[[1]]$message$attr, "content")
+  expect_equal(ms[[1]]$message$value, "hi")
 
   m$handle$destroy()
 })
 
-test_that("two props changing in one flush drain as one multi-key batch", {
+test_that("two props changing in one flush emit two ops in one render frame", {
   content <- shiny::reactiveVal("hi")
   cursor  <- shiny::reactiveVal(list(line = 1, ch = 0))
   m <- mount_widget(list(content = content, cursor = cursor))
 
-  # Initial mount fires both binding observers in the same flush.
+  # Initial mount fires both binding observers in the same flush -> one frame.
   m$session$flushReact()
-  ms <- attr_msgs(m$session)
-  expect_length(ms, 1L)
-  expect_setequal(names(ms[[1]]$message$values), c("content", "cursor"))
-  expect_equal(ms[[1]]$message$values$content, "hi")
-  expect_equal(ms[[1]]$message$values$cursor, list(line = 1, ch = 0))
+  expect_length(renders(m$session), 1L)
+
+  ms <- widget_attrs(m$session)
+  by_attr <- stats::setNames(ms, vapply(ms, function(x) x$message$attr, character(1)))
+  expect_setequal(names(by_attr), c("content", "cursor"))
+  expect_equal(by_attr$content$message$value, "hi")
+  expect_equal(by_attr$cursor$message$value, list(line = 1, ch = 0))
 
   m$handle$destroy()
 })
 
-test_that("props changing in separate flushes drain as separate messages", {
+test_that("props changing in separate flushes emit ops in separate frames", {
   content <- shiny::reactiveVal("hi")
   cursor  <- shiny::reactiveVal(list(line = 1, ch = 0))
   m <- mount_widget(list(content = content, cursor = cursor))
 
-  m$session$flushReact()            # initial combined batch
-  base <- length(attr_msgs(m$session))
+  m$session$flushReact()            # initial combined frame
+  expect_length(renders(m$session), 1L)
 
   shiny::isolate(content("yo"))
   m$session$flushReact()
   shiny::isolate(cursor(list(line = 3, ch = 2)))
   m$session$flushReact()
 
-  new <- attr_msgs(m$session)[(base + 1L):length(attr_msgs(m$session))]
-  expect_length(new, 2L)
-  expect_equal(names(new[[1]]$message$values), "content")
-  expect_equal(new[[1]]$message$values$content, "yo")
-  expect_equal(names(new[[2]]$message$values), "cursor")
-  expect_equal(new[[2]]$message$values$cursor, list(line = 3, ch = 2))
+  # Three frames total: initial, content, cursor.
+  expect_length(renders(m$session), 3L)
+  ms <- widget_attrs(m$session)
+  last_two <- ms[(length(ms) - 1L):length(ms)]
+  expect_equal(last_two[[1]]$message$attr, "content")
+  expect_equal(last_two[[1]]$message$value, "yo")
+  expect_equal(last_two[[2]]$message$attr, "cursor")
+  expect_equal(last_two[[2]]$message$value, list(line = 3, ch = 2))
 
   m$handle$destroy()
 })
 
-test_that("a binding stamps its own (source, attr) channel into valueGates", {
+test_that("a later write for the same key appears after the earlier one", {
+  # Two flushes write the same prop; each is its own op, in order — the client
+  # is what folds same-key writes (last wins per render).
+  content <- shiny::reactiveVal("old")
+  m <- mount_widget(list(content = content))
+  m$session$flushReact()
+  shiny::isolate(content("new"))
+  m$session$flushReact()
+
+  vals <- vapply(widget_attrs(m$session), function(x) x$message$value, character(1))
+  expect_equal(vals, c("old", "new"))
+
+  m$handle$destroy()
+})
+
+test_that("a NULL prop value rides as an explicit null op value", {
+  content <- shiny::reactiveVal(NULL)
+  m <- mount_widget(list(content = content))
+  m$session$flushReact()
+
+  op <- widget_attrs(m$session)[[1]]$message
+  expect_equal(op$attr, "content")
+  expect_true("value" %in% names(op))
+  expect_null(op$value)
+
+  m$handle$destroy()
+})
+
+# --- per-op gate -------------------------------------------------------------
+
+test_that("a widget attr op carries its own {seq, channel} gate", {
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
-  m$session$flushReact()            # initial (programmatic) batch
-  base <- length(attr_msgs(m$session))
+  m$session$flushReact()            # initial (programmatic) frame
+  base <- length(widget_attrs(m$session))
 
   wid <- m$result$bindings[[1]]$id
   shiny::isolate(content("yo"))
-  # New per-channel shape: keyed by source id, then write-target attr.
+  # Per-channel shape: keyed by source id, then write-target attr.
   m$session$userData$irid_current_sequence <- list()
   m$session$userData$irid_current_sequence[[wid]] <-
     list(content = irid:::irid_echo_gate(42, "ch_content"))
   m$session$flushReact()
 
-  last <- attr_msgs(m$session)[[base + 1L]]$message
-  expect_equal(last$valueGates$content, list(seq = 42, channel = "ch_content"))
+  last <- widget_attrs(m$session)[[base + 1L]]$message
+  expect_equal(last$attr, "content")
+  expect_equal(last$gate, list(seq = 42, channel = "ch_content"))
 
   m$handle$destroy()
 })
 
-test_that("a binding whose attr has no current-sequence entry echoes ungated", {
+test_that("a widget attr op with no current-sequence entry echoes ungated", {
   # A sibling channel recorded a DIFFERENT attr this flush; the content binding
-  # finds no entry for its own attr, so its key carries no gate (programmatic).
+  # finds no entry for its own attr, so its op carries a null gate (programmatic).
   content <- shiny::reactiveVal("hi")
   m <- mount_widget(list(content = content))
   m$session$flushReact()
-  base <- length(attr_msgs(m$session))
+  base <- length(widget_attrs(m$session))
 
   wid <- m$result$bindings[[1]]$id
   shiny::isolate(content("yo"))
@@ -243,12 +153,14 @@ test_that("a binding whose attr has no current-sequence entry echoes ungated", {
     list(other_attr = irid:::irid_echo_gate(9, "ch_other"))
   m$session$flushReact()
 
-  last <- attr_msgs(m$session)[[base + 1L]]$message
-  # valueGates is present but has no entry for the ungated key.
-  expect_false("content" %in% names(last$valueGates))
+  last <- widget_attrs(m$session)[[base + 1L]]$message
+  expect_true("gate" %in% names(last))
+  expect_null(last$gate)
 
   m$handle$destroy()
 })
+
+# --- named-vector encoding ---------------------------------------------------
 
 test_that("json_map converts named-vector members to named lists (JSON objects)", {
   # A named atomic value would serialize via Shiny's keep_vec_names path and warn;
@@ -268,25 +180,25 @@ test_that("json_map converts named-vector members to named lists (JSON objects)"
 })
 
 test_that("a named-vector prop round-trips through mount as a JSON object", {
-  # Integration guard for the global jsonify hook (it lives in mount.R, not in
-  # PlotlyOutput): a generic widget whose prop value is a named atomic vector
-  # must reach the wire as a named *list* — so Shiny encodes it as a `{ }`
-  # object — on BOTH the init and the per-flush attr paths.
+  # Integration guard for the global jsonify hook (`json_value`, used by both the
+  # init `json_map` and the per-op `msg_irid_attr`): a generic widget whose prop
+  # value is a named atomic vector must reach the wire as a named *list* — so Shiny
+  # encodes it as a `{ }` object — on BOTH the init and the per-op attr paths.
 
   # (a) init path: a constant named-vector prop ships as a named list.
   init <- mount_widget(list(vis = c(`8` = "legendonly", `6` = "true")))
-  init$session$flushReact() # drain the render batch carrying the widget-init
+  init$session$flushReact() # drain the render frame carrying the widget-init
   init_msg <- Filter(function(m) m$type == "irid-widget-init", init$session$msgs())
   expect_length(init_msg, 1L)
   expect_identical(init_msg[[1]]$message$props$vis,
                    list(`8` = "legendonly", `6` = "true"))
   init$handle$destroy()
 
-  # (b) attr path: a bound prop updating to a named vector drains as a list.
+  # (b) attr path: a bound prop updating to a named vector rides as a list.
   vis <- shiny::reactiveVal(c(`8` = "legendonly"))
   m <- mount_widget(list(vis = vis))
   m$session$flushReact()
-  expect_identical(attr_msgs(m$session)[[1]]$message$values$vis,
+  expect_identical(widget_attrs(m$session)[[1]]$message$value,
                    list(`8` = "legendonly"))
   m$handle$destroy()
 })

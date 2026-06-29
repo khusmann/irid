@@ -49,26 +49,20 @@ test_that("a reactive text child becomes a target='text' binding + anchor pair",
   expect_match(html, paste0("<!--irid:e:", b$id, "-->"))
 })
 
-test_that("mounting a reactive text child sends a target='text' irid-attr", {
+test_that("mounting a reactive text child sends an irid-text op", {
   txt <- shiny::reactiveVal("hi")
   s <- new_fake_session()
   res <- process_tags(shiny::tags$span(function() txt()))
   handle <- shiny::isolate(irid:::irid_mount_processed(res, s))
   s$flushReact()
 
-  text_msgs <- Filter(
-    function(m) m$type == "irid-attr" && identical(m$message$target, "text"),
-    s$msgs()
-  )
+  text_msgs <- Filter(function(m) m$type == "irid-text", s$msgs())
   expect_gte(length(text_msgs), 1L)
   expect_equal(text_msgs[[length(text_msgs)]]$message$value, "hi")
 
   txt("bye")
   s$flushReact()
-  last <- Filter(
-    function(m) m$type == "irid-attr" && identical(m$message$target, "text"),
-    s$msgs()
-  )
+  last <- Filter(function(m) m$type == "irid-text", s$msgs())
   expect_equal(last[[length(last)]]$message$value, "bye")
 
   handle$destroy()

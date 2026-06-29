@@ -187,12 +187,12 @@ wiring is deferred to mount.
 
 Takes the output of `process_tags` and a Shiny `session`, then wires up:
 
-1. **Reactive bindings** — Each binding gets an `observe()` that sends
-   `irid-attr` messages when the reactive value changes.
+1. **Reactive bindings** — Each binding gets an `observe()` that emits an
+   `attr`/`text` op when the reactive value changes.
 2. **Event handlers** — Each event gets an `observeEvent()` on a namespaced
    input ID (`irid_input_{id}_{event}`). The handler is dispatched based on its
-   formal argument count (0, 1, or 2 args). Event registration is sent to the
-   client as a `irid-wire` message.
+   formal argument count (0, 1, or 2 args). Event registration is emitted to the
+   client as a `wire` op.
 3. **Shiny outputs** — Each output's render call is assigned to
    `session$output[[id]]`.
 4. **Control-flow nodes** — Each node gets an `observe()` that manages its
@@ -266,7 +266,7 @@ remount — the active mini-store's internal observer auto-propagates value
 changes to its leaves so only the bindings whose field actually changed
 re-fire.
 
-**Each** manages per-item mount handles and uses `irid-mutate` for granular DOM
+**Each** manages per-item mount handles and uses the `mutate` op for granular DOM
 mutations. Each item is bracketed by its own pair of comment anchors so the
 client can insert, remove, and reorder individual children. The callback
 receives a per-item callable plus an optional position accessor:
@@ -288,7 +288,7 @@ per-item callable in `Match` to dispatch on shape inside the callback.
 When a slot's value transitions between shapes (scalar↔record, or a
 record's keys change), the outer reconciler treats it as a remove +
 rebuild of just that entry — a fresh scope, accessor, and DOM range —
-emitted as a single `irid-mutate` with `order` so the client repositions
+emitted as a single `mutate` op with `order` so the client repositions
 the rebuilt range.
 
 The reconciliation strategy is selected by `by`:
@@ -302,7 +302,7 @@ The reconciliation strategy is selected by `by`:
   removes by their `by(item)` key. Kept items have their existing
   mini-store / accessor reused (no remount, no new scope) and self-update
   via the propagating observer; new items are mounted; removed items are
-  destroyed; reordered items have their DOM nodes moved via `irid-mutate`'s
+  destroyed; reordered items have their DOM nodes moved via the `mutate` op's
   `order` mechanism. A kept key whose value's shape changed is rebuilt.
 
 The callback is arity-polymorphic — `\() body`, `\(item) body`, or
@@ -389,94 +389,105 @@ anchor references are preserved across moves.
 
 ## Client-Side Protocol
 
-`irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-mutate`, `irid-wire`, `irid-widget-init`, `irid-ready`, and
-`irid-batch`.
+`irid.js` registers exactly three Shiny custom message handlers: `irid-config`
+(runtime options, applied on receipt — emitted at each mount entry point but
+carrying no ordering dependency), `irid-render` (every DOM/widget update of one
+flush), and `irid-ready` (the post-render barrier).
 
 All server→client messages are built by the producer-side wire codec
 (`R/encode.R`, the `msg_irid_*` constructors), which materializes each
 field's wire shape from its declared protocol type rather than from the runtime
 value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 
-### `irid-batch`
+### `irid-render`
 
-The render-phase messages of one Shiny flush ride a single `irid-batch` frame:
+Every DOM/widget update of one Shiny flush rides a single `irid-render` frame:
+an ordered **op list**, each op self-discriminated by its `kind`, applied in one
+synchronous pass.
 
 ```js
 {ops: [
-  {type: "irid-mutate",      message: {id: "irid-1", inserts: [...], ...}},
-  {type: "irid-wire",        message: [{id: "irid-4", event: "click", ...}]},
-  {type: "irid-attr",        message: {id: "irid-5", target: "text", value: "hi"}}
-]}  // replayed in order through the same apply* fns as the standalone messages
+  {kind: "mutate",      id: "irid-1", inserts: [...], removes: [], order: []},
+  {kind: "wire",        id: "irid-4", event: "click", source: "dom", ...},
+  {kind: "text",        id: "irid-5", value: "hi"},
+  {kind: "attr",        id: "irid-7", target: "widget", attr: "content", value: "...", gate: null}
+]}
 ```
 
 Shiny frames each `sendCustomMessage` as its own WebSocket frame, and the client
 processes one frame per task — so a nested control-flow render (an `Each` whose
-item body is a `When`, each emitting its own `irid-mutate`) would arrive as many
-frames and paint **chunk-by-chunk**. Coalescing them into one frame the client
-applies in a single synchronous pass yields **one paint**.
+item body is a `When`, each emitting its own `mutate`) would arrive as many
+frames and paint **chunk-by-chunk**. Coalescing every op into one frame the
+client applies in a single synchronous pass yields **one paint**.
 
-On the server, `irid_send` (R/mount.R) buffers each render message in **emission
-order** on `session$userData$irid_render_batch` and a one-shot `session$onFlushed`
-drains them into the `irid-batch`. Emission order *is* apply order: a child's
-`irid-mutate` precedes the `irid-wire` / `irid-widget-init` / `irid-attr` that
-need its element to exist, so replaying in order preserves the dependency that
-held when these were separate frames. This mirrors the per-widget `irid-attr`
-drain (`irid_queue_widget_attr`).
+On the server, `irid_send` (R/mount.R) buffers each op in **emission order** on
+`session$userData$irid_render_batch`, and a one-shot `session$onFlushed` drains
+them into the `irid-render` frame (`msg_irid_render`). Emission order *is* apply
+order: a child's `mutate` precedes the `wire` / `widget-init` / `attr` that need
+its element to exist, so applying in order preserves that dependency. Every op
+rides this one path — including widget prop writes (`attr` with `target =
+"widget"`), the same `irid_send` as a DOM attr, no separate drain.
 
-Coalesced: `irid-mutate`, `irid-attr` (dom/text), `irid-wire`,
-`irid-widget-init`. Left out: `irid-config` (sent before the mount), `irid-ready`
-(its own post-batch `onFlushed` — see below), and `irid-attr target="widget"`
-(its own per-widget drain, a semantic merge rather than just framing).
+**Client apply algorithm** (`applyRender`): walk the ops in order, dispatching
+each to its `apply*` function — `mutate`/`wire`/`widget-init`/`text` inline, and
+`attr` with `target = "dom"` inline (gate-checked). An `attr` with `target =
+"widget"` is **accumulated** per id into a `{attr -> value}` map (gate-checked per
+op); after the whole pass, each widget's merged map is delivered to its `update()`
+hook **once** (one redraw), and a single `Shiny.bindAll` runs (deferred via
+`setTimeout(0)`) to initialize any Shiny outputs the mutates introduced. Deferring
+the widget delivery to the end also means the widget's `widget-init` op (earlier in
+the list) has already run, so the handle exists.
 
-### `irid-attr`
+The op kinds, in turn:
+
+### `attr` op
 
 ```js
 // target = "dom" — DOM property/attribute write. `gate` ({seq, channel}) gates the
-// echo against the channel that produced it (OMITTED for programmatic writes).
-{id: "irid-3", target: "dom",  attr: "value", value: "hello",
+// echo against the channel that produced it (`null` for programmatic writes).
+{kind: "attr", target: "dom", id: "irid-3", attr: "value", value: "hello",
  gate: {seq: 12, channel: "irid_input_irid-3_input"}}
 
-// target = "text" — text replacement in a comment-anchor range. `value` is always
-// a string ("" is the canonical "clear the range" signal); no gate (text is never
-// a write target).
-{id: "irid-5", target: "text", value: "Count: 42"}
-
-// target = "widget" — route a coalesced batch to a widget's update() hook.
-// `values` is always a {attr -> value} map (one or more keys), built by
-// coalescing every widget binding that fired in the same server flush.
-// `valueGates` carries the per-key {seq, channel} for the stale-echo gate (only
-// for keys that came from a client write; programmatic keys are omitted, and the
-// whole field is omitted when no key is gated).
-{id: "irid-7", target: "widget",
- values: {content: "...", cursor: {line: 1, ch: 1}},
- valueGates: {content: {seq: 12, channel: "irid_input_irid-7_content"}}}
+// target = "widget" — a SINGLE-key prop write. The client accumulates every
+// target="widget" op for one id across the render, then calls update() once with
+// the merged {attr -> value} map. `gate` is per op (`null` = programmatic).
+{kind: "attr", target: "widget", id: "irid-7", attr: "content", value: "...",
+ gate: {seq: 12, channel: "irid_input_irid-7_content"}}
 ```
 
-Dispatches on `msg.target`. For `"dom"`: sets a DOM property or
-attribute on `getElementById(msg.id)`. Special-cased properties:
-`value`, `disabled`, `checked`, `innerHTML` are set as JS properties
-(not HTML attributes); `textContent` is set via the `.textContent`
-property; other attributes use `setAttribute()`; `false` / `null`
-values call `removeAttribute()`. Skips the update if the element
-has focus and `msg.attr === "value"` (optimistic update — see below).
-For `"text"`: looks up the comment-anchor pair `msg.id`, removes
-everything between the start and end anchors (running
-`Shiny.unbindAll` on each removed element), and inserts a single
-text node when `value` is non-`""`. For `"widget"`: looks up the
-widget registered at `msg.id` and calls `handle.update(msg.values)`
-with the coalesced `{attr -> value}` map; the widget's update hook
-owns the "compare against current state, skip on match" logic — irid
-stays generic because what counts as "current state" is
-library-specific. The per-key stale-echo gate (via `valueGates`) drops any
-stale key from the batch before the hook runs, so the hook never sees an
-out-of-order value and doesn't need a sequence argument. See [Widgets](#widgets)
-for the per-flush batching that builds `values`.
+A bound value pushed to its sink, discriminated on `target` (where it GOES); both
+targets share the shape `{ id, attr, value, gate }`. For `"dom"`: sets a DOM
+property or attribute on `getElementById(id)`. Special-cased properties: `value`,
+`disabled`, `checked`, `innerHTML` are set as JS properties (not HTML attributes);
+`textContent` is set via the `.textContent` property; other attributes use
+`setAttribute()`; `false` / `null` values call `removeAttribute()`. Skips the
+update if the element has focus and `attr === "value"` (optimistic update — see
+below). For `"widget"`: the op is gate-checked, then its `(attr, value)` is folded
+into the per-id accumulator; after the pass, `handle.update(values)` runs once with
+the merged map. The widget's update hook owns the "compare against current state,
+skip on match" logic — irid stays generic because what counts as "current state" is
+library-specific. The per-op stale-echo gate drops any stale write before
+accumulation, so the hook never sees an out-of-order value. See [Widgets](#widgets)
+for the client-side per-flush merge.
 
-### `irid-mutate`
+### `text` op
+
+```js
+{kind: "text", id: "irid-5", value: "Count: 42"}  // "" = clear the range
+```
+
+Text replacement in a comment-anchor range — its own kind (no `attr`, no `gate`:
+a range is display-only, so a text echo is always programmatic). `value` is always
+a string (`""` is the canonical "clear the range" signal). Looks up the
+comment-anchor pair `id`, removes everything between the start and end anchors
+(running `Shiny.unbindAll` on each removed element), and inserts a single text node
+when `value` is non-`""`.
+
+### `mutate` op
 
 ```js
 {
+  kind: "mutate",
   id: "irid-5",
   removes: ["irid-7", "irid-9"],
   inserts: ["<div id='irid-12' ...>...</div>"],
@@ -484,10 +495,10 @@ for the per-flush batching that builds `values`.
 }
 ```
 
-The **sole structural message** — granular range mutations between the
-container's anchors. It drives both `Each` (N keyed/positional children) and
-`When`/`Match` (one child range, keyed by the active branch/case): a branch flip
-is `{removes: [old], inserts: [new]}`, an empty branch a bare `{removes: [old]}`.
+The **sole structural op** — granular range mutations between the container's
+anchors. It drives both `Each` (N keyed/positional children) and `When`/`Match`
+(one child range, keyed by the active branch/case): a branch flip is
+`{removes: [old], inserts: [new]}`, an empty branch a bare `{removes: [old]}`.
 `removes`/`inserts`/`order` are always present; an empty array is a no-op.
 
 1. **Removes** — For each child ID, looks up its anchor pair and moves the
@@ -499,53 +510,54 @@ is `{removes: [old], inserts: [new]}`, an empty branch a bare `{removes: [old]}`
    into a fragment and reinserting it before the container's end anchor in
    the desired order. Moves preserve element identity and anchor references.
 
-After all mutations, `Shiny.bindAll` is deferred via `setTimeout(0)` to
-initialize any new Shiny outputs.
+`Shiny.bindAll` is not run per-mutate; `applyRender` runs it once after the whole
+op pass (deferred via `setTimeout(0)`) to initialize any new Shiny outputs.
 
-### `irid-wire`
+### `wire` op
 
-The message is an array of entries, a discriminated union on `source`. A DOM
-event carries nested `domOpts` + `clientOnly`; the widget arm adds no extra
-fields. `timing` is nested and discriminated on `mode` (`ms`/`leading` exist
-only where the variant gives them meaning):
+A `wire` op attaches one client→server channel's listener (one op per channel),
+discriminated on `source` (where the event comes FROM — the mirror of `attr`'s
+`target`). A DOM event carries nested `domOpts` + `clientOnly`; the widget arm
+adds no extra fields. `timing` is nested and discriminated on `mode` (`ms`/
+`leading` exist only where the variant gives them meaning):
 
 ```js
-[
-  // DOM event
-  {
-    id: "irid-2",
-    event: "input",
-    channel: "irid_input_irid-2_input",
-    source: "dom",
-    timing: { mode: "throttle", ms: 100, leading: true },
-    coalesce: true,
-    domOpts: { preventDefault: false, stopPropagation: false,
-               capture: false, passive: false, filter: null },
-    clientOnly: false,
-  },
-  // widget event
-  {
-    id: "irid-7",
-    event: "content",
-    channel: "irid_input_irid-7_content",
-    source: "widget",
-    timing: { mode: "debounce", ms: 200 },
-    coalesce: true,
-  },
-];
+// DOM event
+{
+  kind: "wire",
+  id: "irid-2",
+  event: "input",
+  channel: "irid_input_irid-2_input",
+  source: "dom",
+  timing: { mode: "throttle", ms: 100, leading: true },
+  coalesce: true,
+  domOpts: { preventDefault: false, stopPropagation: false,
+             capture: false, passive: false, filter: null },
+  clientOnly: false,
+}
+// widget event
+{
+  kind: "wire",
+  id: "irid-7",
+  event: "content",
+  channel: "irid_input_irid-7_content",
+  source: "widget",
+  timing: { mode: "debounce", ms: 200 },
+  coalesce: true,
+}
 ```
 
-For each entry, initializes a managed-state record under `channel`
+For each op, initializes a managed-state record under `channel`
 (throttle/debounce/coalesce/sequence gating). If `source = "dom"`, also
 attaches a DOM event listener on the element — the listener applies the
 `domOpts.preventDefault` / `stopPropagation` flags (and registers with the
 `capture` / `passive` options), reads the element's `value` (and other
 event fields), and pushes the payload through the managed-state via
 `Shiny.setInputValue(channel, payload, {priority: "event"})`. A
-`clientOnly` entry (a config-only `wire` with `dom_opts` but no
+`clientOnly` op (a config-only `wire` with `dom_opts` but no
 handler) attaches a bare listener that applies the DOM flags and never
 sends — no managed state, no round-trip. If `source = "widget"`, the
-listener-attach step is skipped; the entry is also indexed in
+listener-attach step is skipped; the op is also indexed in
 `widgetStreams` under `{id}:{event}` (props and events can't share a name, so
 the pair is unique), and the widget JS pushes payloads
 through `irid.sendWidgetEvent(id, event, payload)` / `setProp`, which resolve
@@ -594,21 +606,22 @@ later handler observes the earlier handler's reactive writes (verified against
 Shiny 1.7.4; re-confirm on bump). The queue is per-element, not global, so
 unrelated inputs never block each other.
 
-### `irid-widget-init`
+### `widget-init` op
 
 ```js
 {
+  kind:  "widget-init",
   id:    "irid-7",
   name:  "codemirror",
   props: { content: "...", language: "r", theme: "dracula" }
 }
 ```
 
-Sent after the swap/mutate that introduces the widget's container into
-the DOM. The message carries **no deps** — a widget's `<script>` / `<link>`
-assets are delivered by `insertUI` at mount time (see [Lifecycle and
-dependencies](#lifecycle-and-dependencies)), not this side channel. The
-client:
+Ordered after the `mutate` that introduces the widget's container into the DOM
+(emission order = apply order). The op carries **no deps** — a widget's
+`<script>` / `<link>` assets are delivered by `insertUI` at mount time (see
+[Lifecycle and dependencies](#lifecycle-and-dependencies)), not this side
+channel. The client:
 
 1. Looks up the factory registered under `msg.name`. If none is
    registered yet (the insert hasn't delivered the factory script yet),
@@ -617,7 +630,7 @@ client:
    *factory-not-registered* race; the *library-global-not-loaded* race is
    the factory's own concern — see below.)
 2. Once the factory is available, `mountWidget` reserves the id
-   synchronously (so a duplicate init is idempotent and an `irid-attr`
+   synchronously (so a duplicate init is idempotent and a widget `attr`
    arriving mid-construction buffers rather than dropping), then calls
    `factory(el, props, sendEvent, setProp)`. A factory returns its
    `{update, destroy}` handle directly **or a Promise of it** (an async
@@ -637,8 +650,8 @@ client:
 
 Signals that a mount is fully wired. The server (`irid_send_ready` in `R/app.R`)
 sends it from the mount's `onFlushed`, i.e. **after** the flush in which every
-control-flow body (`When`/`Each`/`Match`) has mounted and emitted its `irid-wire`
-into the flush's `irid-batch`. The batch's own `onFlushed` is armed at the
+control-flow body (`When`/`Each`/`Match`) has mounted and emitted its `wire` op
+into the flush's `irid-render`. The render's own `onFlushed` is armed at the
 depth-0 mount (ahead of `irid_send_ready`), so it drains *first*: by WebSocket
 ordering the client has applied the whole render — every listener attached — and
 every server observer is registered before `irid-ready` lands.
@@ -677,7 +690,7 @@ The R event observer records, for each binding attr the event declares it writes
 echo — stored on `session$userData$irid_current_sequence` keyed by
 `[[source_id]][[attr]]`, cleared via `session$onFlushed`. Binding observers stamp
 a `gate: {seq, channel}`; the echo gate compares the echo's `gate.seq` against
-`sequences[gate.channel]`. On the client, `irid-attr` for `value` on a focused
+`sequences[gate.channel]`. On the client, an `attr` op for `value` on a focused
 element decides:
 
 - **Stale echo** (`gate.seq` < the channel's latest sent) → skip.
@@ -689,9 +702,10 @@ element decides:
 
 Keying by channel (not by element) is what lets a widget multiplex many
 props/events through one element without a sibling channel's send gating another
-channel's echo. A widget batch carries the gate per key (`valueGates:
-{key -> {seq, channel}}`) since one batch can coalesce props from different
-channels (e.g. `xaxis_range` + `yaxis_range` from a box zoom).
+channel's echo. Each widget prop write is its own `attr` op carrying its own
+`gate`, so props from different channels in one render (e.g. `xaxis_range` +
+`yaxis_range` from a box zoom) each gate against their own channel — the client
+merges them only after the per-op gate check.
 
 Key design points:
 
@@ -726,7 +740,7 @@ Key design points:
 
 - **Force-send on no-op.** After running the user's event handler, the event
   observer reads the source element's bindings whose attr is in `write_targets`
-  with `isolate()` and sends `irid-attr` messages stamped with this event's
+  with `isolate()` and emits `attr`/`text` ops stamped with this event's
   sequence and channel. This covers the case where the handler sets a
   `reactiveVal` to the same value it already holds (a no-op that doesn't
   invalidate the binding observer). Without the force-send, the client would
@@ -791,7 +805,7 @@ controlled inputs.
 process-tags citizen for arbitrary JavaScript libraries (CodeMirror,
 Plotly, Leaflet, ...). It expresses one R-side component on top of an
 init/update/destroy contract on the JS side, and reuses every existing
-irid channel — `irid-attr` for one-way prop updates, `irid-wire` for
+irid channel — the `attr` op for one-way prop updates, the `wire` op for
 event payloads, the optimistic-update sequence counter, the `wire`
 timing config, the stale indicator, the comment-anchor lifecycle. No
 widget-specific code lives in the transport.
@@ -812,7 +826,7 @@ IridWidget(
 props are **two-way-capable by default**, exactly like DOM `value` /
 `checked`. A callable value (`reactiveVal`, store leaf, `reactiveProxy`,
 ...) gets *both* directions wired: a server → client binding (one observer
-firing `irid-attr target="widget"` → the factory's `update` hook on change)
+firing an `attr` op (`target="widget"`) → the factory's `update` hook on change)
 **and** a synthesized client → server write-back, accepted when the widget
 JS calls `setProp(key, value)`. A non-callable value rides in the init
 message and is never re-sent (init-only library options need no separate
@@ -836,7 +850,7 @@ two-way is decided by whether the widget JS pushes through the prop channel.
 
 The primitive is **`setProp` + a per-prop `irid_input_{id}_{key}`
 input** — the client → server partner of the existing server → client
-`irid-attr target="widget"` → `update` hook. `setProp("content", value)`
+`attr` op (`target="widget"`) → `update` hook. `setProp("content", value)`
 pushes through the **same managed-state / sequence transport as
 `sendEvent`** (so optimistic-update gating and echo-sequencing apply), on the
 **same `irid_input_{id}_{event}` namespace** as events — a prop and event
@@ -845,8 +859,8 @@ process_tags emits, per callable prop, a write-back event row whose synthesized
 handler writes the bound reactive (gated by the internal `can_accept_write`
 predicate); mount wires an `observeEvent` on that input. A read-only
 reactive's write is dropped, and the force-send-on-no-op loop (scoped
-per-binding via `write_targets = key`) echoes the canonical value back as a
-`target="widget"` `irid-attr`, snapping the library state. A bound prop is
+per-binding via `write_targets = key`) echoes the canonical value back as
+an `attr` op (`target="widget"`), snapping the library state. A bound prop is
 not *also* handled — to react to its change, observe the reactive or pass a
 `reactiveProxy`.
 
@@ -886,7 +900,7 @@ irid.defineWidget("codemirror", function (el, props, sendEvent, setProp) {
 Contract notes:
 - `props` arrives as a single merged object; callable-vs-constant on
   the R side is invisible here — the distinction shows up only in
-  whether subsequent `irid-attr target="widget"` messages arrive.
+  whether subsequent `attr` ops (`target="widget"`) arrive.
 - `update(values)` receives a `{attr -> value}` map, never a single
   `(key, value)` pair — even a one-prop change arrives as a one-entry
   map. Multiple props that changed in the same server flush arrive
@@ -955,7 +969,7 @@ surface to the contract alone.
 The widget's R-side observers (per callable prop: one server→client
 binding plus one client→server write-back; one per event) are owned by
 the enclosing mount; `destroy()` on the mount tears them down. Client-side, `detachRange` (used by
-`irid-mutate`) walks the removed fragment for `[data-irid-widget]`
+the `mutate` op) walks the removed fragment for `[data-irid-widget]`
 elements and calls each widget's `destroy()` before `Shiny.unbindAll`.
 No `irid-widget-destroy` message — the teardown is purely client-driven
 so it still happens if the server crashes between observer teardown
@@ -974,7 +988,7 @@ delivered through Shiny's native render pipeline via one
 (`deliver_widget_deps` in [mount.R](R/mount.R)), deduped by dependency name
 on `session$userData`. Shiny's `processDeps` resolves and serves
 `package`/file-backed deps as part of the insert (no manual registration);
-the `irid-widget-init` message carries no deps.
+the `widget-init` op carries no deps.
 
 This is the only delivery path shinylive serves: shinylive serves mid-session
 resource paths **only** on the native pipeline (initial UI, `renderUI`,
@@ -1038,38 +1052,34 @@ overwriting the user's typed characters with the server's pre-typing
 value. Per-binding scoping eliminates this entire class of cross-binding
 clobber.
 
-### Per-flush update batching
+### Per-flush update merge
 
 Multiple bound props on one widget updating in the same Shiny flush are
-coalesced into a **single** `irid-attr target="widget"` message carrying a
-`values: {attr -> value}` map, delivered as one `update(values)` call.
-Without this, each binding observer would send its own `irid-attr`; the
-messages race on the wire and, for atomic-render libraries (Plotly,
-Mapbox) where every message triggers a full redraw, two messages mean
-two redraws and a visible flash.
+delivered as **one** `update(values)` call carrying a `{attr -> value}` map.
+Without this, each prop would reach `update()` separately and, for
+atomic-render libraries (Plotly, Mapbox) where every call triggers a full
+redraw, two props mean two redraws and a visible flash.
 
-Server side, `irid_queue_widget_attr` ([mount.R](R/mount.R)) appends each
-`(attr, value)` to a per-widget pending map on
-`session$userData$irid_widget_pending` instead of sending immediately; a
-one-shot `session$onFlushed` handler drains every widget's map at flush
-end. Both widget send sites route through it — the binding observers and
-the event force-send-on-no-op echo — so they coalesce together within a
-flush. DOM and text targets are unaffected (no analogous race; each DOM
-attribute write is its own concern). The batch sequence is the highest
-contributed by any binding in the flush (or absent for a purely
-programmatic update); the universal stale-echo gate compares it exactly
-as before.
+The merge is **client-side**. The server emits each prop write as its own
+single-key `attr` op (`target = "widget"`) into the flush's `irid-render` —
+the same `irid_send` path as a DOM attr, no special server coalescing. Both
+widget write sites take it (the binding observers and the event
+force-send-on-no-op echo). Applying the render, the client **accumulates**
+every `target = "widget"` op per id (gate-checked per op) and calls each
+widget's `update()` **once** at the end of the pass with the merged map (see
+[`irid-render`](#irid-render)). DOM and text ops are applied inline (no
+analogous race; each is its own concern).
 
-Batching is **intra-flush only**: a prop updating in one flush and
-another in a later flush still produce two messages (delaying delivery
-would fight Shiny's reactive model). For libraries with incremental
-update primitives (CodeMirror's separate `view.dispatch()` calls) the
-distinction is invisible; the win is for atomic-render libraries, where a
-coordinated same-flush multi-write now redraws once. Non-goals: cross-flush
-batching (would fight Shiny's flush model), DOM/text-target batching (no
-analogous race — each attribute write is its own concern), and generic
-feedback-loop prevention (wrappers break loops with their library's idioms;
-the stale-echo gate only handles transient sequencing).
+The merge is **intra-render only**: a prop updating in one flush and another
+in a later flush ride two `irid-render` frames and produce two `update()`
+calls (delaying delivery would fight Shiny's reactive model). For libraries
+with incremental update primitives (CodeMirror's separate `view.dispatch()`
+calls) the distinction is invisible; the win is for atomic-render libraries,
+where a coordinated same-flush multi-write now redraws once. Non-goals:
+cross-flush merging (would fight Shiny's flush model), DOM/text merging (no
+analogous race — each write is its own concern), and generic feedback-loop
+prevention (wrappers break loops with their library's idioms; the stale-echo
+gate only handles transient sequencing).
 
 ### PlotlyOutput
 

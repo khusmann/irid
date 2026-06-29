@@ -1,4 +1,4 @@
-// The irid wire messages: server -> client custom messages, then the client ->
+// The irid protocol messages: server -> client custom messages, then the client ->
 // server payload. Both directions live together — they're read jointly on a
 // round-trip (an outbound `gate` is checked against the `seq` the inbound payload
 // bumped on the same `channel`). Type-only (erased at build).
@@ -16,50 +16,42 @@ import type {
 // ---------------------------------------------------------------------------
 // Server -> client custom messages
 // ---------------------------------------------------------------------------
+//
+// Three messages: `irid-config` (runtime options, applied on receipt),
+// `irid-render` (every DOM/widget update of one flush), `irid-ready` (post-render
+// barrier). `irid-render` carries an ordered op list applied in one synchronous
+// pass.
 
-/** `irid-config` — runtime options pushed at session start. */
+/**
+ * `irid-config` — runtime options, applied on receipt (the handler just sets the
+ * current value). Carries no ordering dependency, so it may arrive at any time;
+ * in practice it's emitted at each mount entry point (an `iridApp` server at
+ * session start, a `renderIrid` on each render flush — so mid-session for outputs
+ * that render or re-render later).
+ */
 export interface IridConfig {
   /** ms before the stale indicator shows; `null` disables it. */
   staleTimeout: number | null;
 }
 
-/** `irid-attr` — a binding update; discriminated on `target`. */
-export type IridAttr = IridAttrDom | IridAttrText | IridAttrWidget;
-
-/** DOM property/attribute write on `getElementById(id)`. */
-export interface IridAttrDom {
-  target: "dom";
-  id: ElementId;
-  attr: string;
-  value: unknown;
-  /** The echo gate, or `null` for a programmatic write. */
-  gate: EchoGate | null;
+/**
+ * `irid-render` — one flush's render: an ordered op list applied in one
+ * synchronous pass (one paint). Emission order is apply order — a child's
+ * `mutate` precedes the `wire`/`widget-init`/`attr` that need its element.
+ */
+export interface IridRender {
+  ops: Op[];
 }
 
-/** Text replacement inside a comment-anchor range. No gate — a range is
- *  display-only, so a text echo is always programmatic. */
-export interface IridAttrText {
-  target: "text";
-  id: AnchorId;
-  /** Empty/NA normalized to `""` (the clear signal). */
-  value: string;
-}
-
-/** Coalesced batch routed to a widget's `update()` hook. */
-export interface IridAttrWidget {
-  target: "widget";
-  id: ElementId;
-  /** `{ attr -> value }`, keys coalesced in one server flush. */
-  values: Record<string, unknown>;
-  /** Sparse per-key gate; an absent key is programmatic. */
-  valueGates: Record<string, EchoGate>;
-}
+export type Op = OpMutate | OpWire | OpWidgetInit | OpAttr | OpText;
 
 /**
- * `irid-mutate` — structural comment-anchor range mutations, driving `Each` and
- * `When`/`Match`. Each part is always present; an unused part is `[]` (a no-op).
+ * Structural comment-anchor range mutation, driving `Each` and `When`/`Match`.
+ * Each part is always present; an unused part is `[]` (a no-op). The three arrays
+ * are the ordered phases of ONE reconciliation.
  */
-export interface IridMutate {
+export interface OpMutate {
+  kind: "mutate";
   id: AnchorId;
   removes: AnchorId[];
   inserts: string[];
@@ -67,11 +59,12 @@ export interface IridMutate {
 }
 
 /**
- * One `irid-wire` entry — the per-channel `wire()` carrier; the message is an
- * array of these. Discriminated on `source`: a DOM event carries listener
- * options, the widget arm adds nothing.
+ * Attach one client->server channel's listener (one op per channel).
+ * Discriminated on `source` — where the event comes FROM (the mirror of
+ * `OpAttr.target`): a DOM listener or a widget.
  */
-export interface IridWireCore {
+export interface OpWireCore {
+  kind: "wire";
   id: ElementId;
   /** The DOM/widget event name. */
   event: string;
@@ -82,7 +75,7 @@ export interface IridWireCore {
 }
 
 /** DOM event: listener options + the config-only flag. */
-export interface IridWireDom extends IridWireCore {
+export interface OpWireDom extends OpWireCore {
   source: "dom";
   domOpts: DomOpts;
   /** Config-only wire: attach flags, never round-trips. */
@@ -90,41 +83,57 @@ export interface IridWireDom extends IridWireCore {
 }
 
 /** Widget event: no listener attached, no extra fields. */
-export interface IridWireWidget extends IridWireCore {
+export interface OpWireWidget extends OpWireCore {
   source: "widget";
 }
 
-export type IridWire = IridWireDom | IridWireWidget;
+export type OpWire = OpWireDom | OpWireWidget;
 
-/** `irid-widget-init` — mount a widget instance into its container. */
-export interface IridWidgetInit {
+/** Mount a widget instance into its container. */
+export interface OpWidgetInit {
+  kind: "widget-init";
   id: ElementId;
   name: string;
+  /** Merged initial props (`{}` when none); NULL-valued keys kept as `null`. */
   props: Record<string, unknown>;
 }
 
 /**
- * `irid-ready` — a mount is fully wired. `output` is the output name for a
- * `renderIrid`/`iridOutput` mount, `null` for a top-level `iridApp` mount.
+ * A bound value pushed to its sink, discriminated on `target` — where it GOES.
+ *   "dom"    — property/attribute write on `getElementById(id)`, applied inline.
+ *   "widget" — a single-key prop write; the client collects all `target="widget"`
+ *              ops per id and calls `update()` once at the end with the merged map
+ *              (one redraw).
  */
-export interface IridReady {
-  output: OutputName | null;
+export interface OpAttr {
+  kind: "attr";
+  target: "dom" | "widget";
+  id: ElementId;
+  attr: string;
+  value: unknown;
+  /** The echo gate, or `null` for a programmatic write. */
+  gate: EchoGate | null;
 }
 
 /**
- * `irid-batch` — an ordered envelope coalescing the render-phase messages of one
- * server flush into a single frame the client applies in one synchronous pass
- * (one paint). Each op is replayed through the same per-type apply logic as its
- * standalone message; `type` discriminates which. Emission order is apply order,
- * preserving the mutate-before-wire/init/attr dependency.
+ * Text replace inside a comment-anchor range — its own kind (no `attr`, no
+ * `gate`). `value` is always a string; `""` is the canonical "clear the range"
+ * signal.
  */
-export interface IridBatchOp {
-  type: "irid-mutate" | "irid-attr" | "irid-wire" | "irid-widget-init";
-  message: IridMutate | IridAttr | IridWire[] | IridWidgetInit;
+export interface OpText {
+  kind: "text";
+  id: AnchorId;
+  value: string;
 }
 
-export interface IridBatch {
-  ops: IridBatchOp[];
+/**
+ * `irid-ready` — a mount is fully wired (post-render barrier). Sent after
+ * `irid-render` drains, so a client that has seen it has the whole render
+ * applied. `output` is the output name for a `renderIrid`/`iridOutput` mount,
+ * `null` for a top-level `iridApp` mount.
+ */
+export interface IridReady {
+  output: OutputName | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -62,7 +62,7 @@ test_that("a config-only wire registers a client listener but no observer", {
   ))
   ev_msgs <- Filter(function(x) x$type == "irid-wire", m$session$msgs())
   expect_length(ev_msgs, 1L)
-  row <- ev_msgs[[1]]$message[[1]]
+  row <- ev_msgs[[1]]$message
   expect_true(row$clientOnly)
   m$handle$destroy()
 })
