@@ -260,10 +260,12 @@ Single `Shiny.bindAll` after the pass (replacing the per-mutate deferral).
 6. **Docs**: fold into `ARCHITECTURE.md` (replace the `irid-batch` section with
    the unified `irid-render` protocol); delete this doc.
 
-## Open choices
+## Settled choices
 
-- **Message name**: `irid-render` (used here) vs. keeping `irid-batch`. "batch"
-  reads oddly once it is *the* render message (it is a batch even with one op);
-  "render" names what it is. Bikeshed — settle before implementing.
-- **`wire` granularity**: one op per channel (flattened, used here) vs. one op
-  carrying a mount's `rows: []`. Per-channel keeps every op a single atomic unit.
+- **Message name**: `irid-render`. "batch" reads oddly once it is *the* render
+  message (it is a batch even with one op); "render" names what it is.
+- **`wire` granularity**: one op per channel (the schema above). The old `rows[]`
+  grouping was itself a frame-saving micro-batch — the same problem `irid-render`
+  now solves globally — so it is vestigial. The client registers each channel
+  independently and idempotently and never uses the grouping, so flattening keeps
+  every op a single atomic unit with no information lost.
