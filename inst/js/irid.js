@@ -514,129 +514,151 @@
     innerHTML: true
   };
   var wireRegistered = /* @__PURE__ */ new Set();
-  function registerHandlers() {
-    Shiny.addCustomMessageHandler("irid-config", (msg) => {
-      setStaleTimeout(msg.staleTimeout);
-    });
-    Shiny.addCustomMessageHandler("irid-attr", (msg) => {
-      if (msg.target === "widget") {
-        const w = widgets[msg.id];
-        if (!w) return;
-        const kept = {};
-        let any = false;
-        for (const k in msg.values) {
-          if (isStaleEcho(msg.valueGates[k], sequences)) continue;
-          kept[k] = msg.values[k];
-          any = true;
-        }
-        if (!any) return;
-        const values = kept;
-        if (w.handle) {
-          if (typeof w.handle.update === "function") w.handle.update(values);
-        } else {
-          w.pending = Object.assign(w.pending || {}, values);
-        }
-        return;
+  function applyConfig(msg) {
+    setStaleTimeout(msg.staleTimeout);
+  }
+  function applyAttr(msg) {
+    if (msg.target === "widget") {
+      const w = widgets[msg.id];
+      if (!w) return;
+      const kept = {};
+      let any = false;
+      for (const k in msg.values) {
+        if (isStaleEcho(msg.valueGates[k], sequences)) continue;
+        kept[k] = msg.values[k];
+        any = true;
       }
-      if (msg.target === "text") {
-        const a = lookupAnchors(msg.id);
-        if (!a) return;
-        const parent = a.start.parentNode;
-        let n = a.start.nextSibling;
-        while (n && n !== a.end) {
-          const next = n.nextSibling;
-          if (n.nodeType === 1) Shiny.unbindAll(n);
-          parent.removeChild(n);
-          n = next;
-        }
-        if (msg.value !== "") {
-          parent.insertBefore(document.createTextNode(msg.value), a.end);
-        }
-        return;
-      }
-      if (isStaleEcho(msg.gate, sequences)) return;
-      const el = document.getElementById(msg.id);
-      if (!el) return;
-      if (msg.attr === "value" && document.activeElement === el && el.value === msg.value) {
-        return;
-      }
-      if (PROP_ATTRS[msg.attr]) {
-        el[msg.attr] = msg.value;
-      } else if (msg.value === false || msg.value === null) {
-        el.removeAttribute(msg.attr);
-      } else if (msg.attr === "textContent") {
-        el.textContent = msg.value;
+      if (!any) return;
+      const values = kept;
+      if (w.handle) {
+        if (typeof w.handle.update === "function") w.handle.update(values);
       } else {
-        el.setAttribute(msg.attr, msg.value);
+        w.pending = Object.assign(w.pending || {}, values);
       }
-    });
-    Shiny.addCustomMessageHandler("irid-mutate", (msg) => {
+      return;
+    }
+    if (msg.target === "text") {
       const a = lookupAnchors(msg.id);
       if (!a) return;
       const parent = a.start.parentNode;
-      msg.removes.forEach((childId) => {
-        const child = anchors.get(childId);
-        if (!child) return;
-        const detached = detachRange(child.start, child.end);
-        unregisterAnchorsIn(detached);
-      });
-      msg.inserts.forEach((html) => {
-        const fragment = parseFragment(html, parent);
-        indexAnchors(fragment);
-        parent.insertBefore(fragment, a.end);
-      });
-      msg.order.forEach((childId) => {
-        const child = anchors.get(childId);
-        if (!child) return;
-        const frag = document.createDocumentFragment();
-        let node = child.start;
-        while (node && node !== child.end) {
-          const next = node.nextSibling;
-          frag.appendChild(node);
-          node = next;
-        }
-        frag.appendChild(child.end);
-        parent.insertBefore(frag, a.end);
-      });
-      setTimeout(() => {
-        Shiny.bindAll(parent);
-      }, 0);
-    });
-    Shiny.addCustomMessageHandler("irid-wire", (msgs) => {
-      msgs.forEach((msg) => {
-        const key = msg.channel;
-        if (wireRegistered.has(key)) return;
-        const el = document.getElementById(msg.id);
-        if (msg.source !== "widget" && !el) return;
-        wireRegistered.add(key);
-        if (msg.source === "dom" && msg.clientOnly) {
-          attachListener(el, msg);
-          return;
-        }
-        if (msg.timing.mode === "throttle") {
-          setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
-        } else if (msg.timing.mode === "debounce") {
-          setupDebounce(el, msg, msg.timing.ms);
-        } else {
-          setupImmediate(el, msg);
-        }
-        if (msg.source === "widget") {
-          widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
-        }
-      });
-    });
-    Shiny.addCustomMessageHandler(
-      "irid-widget-init",
-      (msg) => {
-        handleWidgetInit(msg);
+      let n = a.start.nextSibling;
+      while (n && n !== a.end) {
+        const next = n.nextSibling;
+        if (n.nodeType === 1) Shiny.unbindAll(n);
+        parent.removeChild(n);
+        n = next;
       }
-    );
-    Shiny.addCustomMessageHandler("irid-ready", (msg) => {
-      window.__iridReady = true;
-      document.dispatchEvent(
-        new CustomEvent("irid:ready", { detail: { id: msg.output } })
-      );
+      if (msg.value !== "") {
+        parent.insertBefore(document.createTextNode(msg.value), a.end);
+      }
+      return;
+    }
+    if (isStaleEcho(msg.gate, sequences)) return;
+    const el = document.getElementById(msg.id);
+    if (!el) return;
+    if (msg.attr === "value" && document.activeElement === el && el.value === msg.value) {
+      return;
+    }
+    if (PROP_ATTRS[msg.attr]) {
+      el[msg.attr] = msg.value;
+    } else if (msg.value === false || msg.value === null) {
+      el.removeAttribute(msg.attr);
+    } else if (msg.attr === "textContent") {
+      el.textContent = msg.value;
+    } else {
+      el.setAttribute(msg.attr, msg.value);
+    }
+  }
+  function applyMutate(msg) {
+    const a = lookupAnchors(msg.id);
+    if (!a) return;
+    const parent = a.start.parentNode;
+    msg.removes.forEach((childId) => {
+      const child = anchors.get(childId);
+      if (!child) return;
+      const detached = detachRange(child.start, child.end);
+      unregisterAnchorsIn(detached);
     });
+    msg.inserts.forEach((html) => {
+      const fragment = parseFragment(html, parent);
+      indexAnchors(fragment);
+      parent.insertBefore(fragment, a.end);
+    });
+    msg.order.forEach((childId) => {
+      const child = anchors.get(childId);
+      if (!child) return;
+      const frag = document.createDocumentFragment();
+      let node = child.start;
+      while (node && node !== child.end) {
+        const next = node.nextSibling;
+        frag.appendChild(node);
+        node = next;
+      }
+      frag.appendChild(child.end);
+      parent.insertBefore(frag, a.end);
+    });
+    setTimeout(() => {
+      Shiny.bindAll(parent);
+    }, 0);
+  }
+  function applyWire(msgs) {
+    msgs.forEach((msg) => {
+      const key = msg.channel;
+      if (wireRegistered.has(key)) return;
+      const el = document.getElementById(msg.id);
+      if (msg.source !== "widget" && !el) return;
+      wireRegistered.add(key);
+      if (msg.source === "dom" && msg.clientOnly) {
+        attachListener(el, msg);
+        return;
+      }
+      if (msg.timing.mode === "throttle") {
+        setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
+      } else if (msg.timing.mode === "debounce") {
+        setupDebounce(el, msg, msg.timing.ms);
+      } else {
+        setupImmediate(el, msg);
+      }
+      if (msg.source === "widget") {
+        widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
+      }
+    });
+  }
+  function applyWidgetInit(msg) {
+    handleWidgetInit(msg);
+  }
+  function applyReady(msg) {
+    window.__iridReady = true;
+    document.dispatchEvent(
+      new CustomEvent("irid:ready", { detail: { id: msg.output } })
+    );
+  }
+  function applyBatch(msg) {
+    msg.ops.forEach((op) => {
+      switch (op.type) {
+        case "irid-mutate":
+          applyMutate(op.message);
+          break;
+        case "irid-attr":
+          applyAttr(op.message);
+          break;
+        case "irid-wire":
+          applyWire(op.message);
+          break;
+        case "irid-widget-init":
+          applyWidgetInit(op.message);
+          break;
+      }
+    });
+  }
+  function registerHandlers() {
+    Shiny.addCustomMessageHandler("irid-config", applyConfig);
+    Shiny.addCustomMessageHandler("irid-attr", applyAttr);
+    Shiny.addCustomMessageHandler("irid-mutate", applyMutate);
+    Shiny.addCustomMessageHandler("irid-wire", applyWire);
+    Shiny.addCustomMessageHandler("irid-widget-init", applyWidgetInit);
+    Shiny.addCustomMessageHandler("irid-ready", applyReady);
+    Shiny.addCustomMessageHandler("irid-batch", applyBatch);
   }
 
   // src/core/index.ts

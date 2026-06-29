@@ -111,6 +111,22 @@ export interface IridReady {
   output: OutputName | null;
 }
 
+/**
+ * `irid-batch` — an ordered envelope coalescing the render-phase messages of one
+ * server flush into a single frame the client applies in one synchronous pass
+ * (one paint). Each op is replayed through the same per-type apply logic as its
+ * standalone message; `type` discriminates which. Emission order is apply order,
+ * preserving the mutate-before-wire/init/attr dependency.
+ */
+export interface IridBatchOp {
+  type: "irid-mutate" | "irid-attr" | "irid-wire" | "irid-widget-init";
+  message: IridMutate | IridAttr | IridWire[] | IridWidgetInit;
+}
+
+export interface IridBatch {
+  ops: IridBatchOp[];
+}
+
 // ---------------------------------------------------------------------------
 // Client -> server payloads
 // ---------------------------------------------------------------------------

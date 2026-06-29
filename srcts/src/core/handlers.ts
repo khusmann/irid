@@ -1,5 +1,10 @@
 // The Shiny custom-message handlers that drive the client: irid-config,
-// irid-attr, irid-mutate, irid-wire, irid-widget-init, irid-ready.
+// irid-attr, irid-mutate, irid-wire, irid-widget-init, irid-ready, irid-batch.
+//
+// The render-phase handlers (mutate, attr, wire, widget-init) are factored into
+// `apply*` functions so the per-type logic is shared between the standalone
+// custom-message handler and `applyBatch`, which replays an `irid-batch`
+// envelope's ops in order (one synchronous pass, one paint).
 
 import { isStaleEcho, sequences } from "./seq";
 import {
@@ -22,6 +27,7 @@ import {
 import { setStaleTimeout } from "./stale";
 import type {
   IridAttr,
+  IridBatch,
   IridConfig,
   IridWire,
   IridMutate,
@@ -38,177 +44,207 @@ const PROP_ATTRS: Record<string, boolean> = {
 
 const wireRegistered = new Set<string>(); // `${channel}` keys
 
-export function registerHandlers(): void {
-  Shiny.addCustomMessageHandler("irid-config", (msg: IridConfig) => {
-    // staleTimeout is materialized (always present); `null` disables the indicator.
-    setStaleTimeout(msg.staleTimeout);
-  });
+function applyConfig(msg: IridConfig): void {
+  // staleTimeout is materialized (always present); `null` disables the indicator.
+  setStaleTimeout(msg.staleTimeout);
+}
 
-  Shiny.addCustomMessageHandler("irid-attr", (msg: IridAttr) => {
-    if (msg.target === "widget") {
-      // Route to the widget's update hook. Skip if no widget is registered for
-      // this id (defense in depth; mount sends init before any attr).
-      const w = widgets[msg.id];
-      if (!w) return;
-      // `values` is a {attr -> value} map. The gate is PER KEY (a batch can carry
-      // props from different channels), via valueGates. A key with no valueGates
-      // entry (undefined gate) is programmatic and always applies, so an empty
-      // `{}` keeps every key — no presence guard needed.
-      const kept: Record<string, unknown> = {};
-      let any = false;
-      for (const k in msg.values) {
-        if (isStaleEcho(msg.valueGates[k], sequences)) continue;
-        kept[k] = msg.values[k];
-        any = true;
-      }
-      if (!any) return; // every key gated out — nothing to apply
-      const values = kept;
-      if (w.handle) {
-        if (typeof w.handle.update === "function") w.handle.update(values);
-      } else {
-        // Async construction still in flight — buffer, coalescing by key.
-        w.pending = Object.assign(w.pending || {}, values);
-      }
-      return;
+function applyAttr(msg: IridAttr): void {
+  if (msg.target === "widget") {
+    // Route to the widget's update hook. Skip if no widget is registered for
+    // this id (defense in depth; mount sends init before any attr).
+    const w = widgets[msg.id];
+    if (!w) return;
+    // `values` is a {attr -> value} map. The gate is PER KEY (a batch can carry
+    // props from different channels), via valueGates. A key with no valueGates
+    // entry (undefined gate) is programmatic and always applies, so an empty
+    // `{}` keeps every key — no presence guard needed.
+    const kept: Record<string, unknown> = {};
+    let any = false;
+    for (const k in msg.values) {
+      if (isStaleEcho(msg.valueGates[k], sequences)) continue;
+      kept[k] = msg.values[k];
+      any = true;
     }
-
-    if (msg.target === "text") {
-      // No gate — a text echo is always programmatic and applies unconditionally.
-      const a = lookupAnchors(msg.id);
-      if (!a) return;
-      const parent = a.start.parentNode!;
-      let n: Node | null = a.start.nextSibling;
-      while (n && n !== a.end) {
-        const next: Node | null = n.nextSibling;
-        if (n.nodeType === 1) Shiny.unbindAll!(n as Element);
-        parent.removeChild(n);
-        n = next;
-      }
-      // `value` is a string; "" is the canonical "clear the range" signal.
-      if (msg.value !== "") {
-        parent.insertBefore(document.createTextNode(msg.value), a.end);
-      }
-      return;
-    }
-
-    // target === 'dom' — single-channel stale-echo gate.
-    if (isStaleEcho(msg.gate, sequences)) return;
-    const el = document.getElementById(msg.id) as HTMLInputElement | null;
-    if (!el) return;
-    // Cursor-preservation no-op skip — setting el.value to its current string
-    // would reset the cursor on a focused input, so short-circuit identical writes.
-    if (
-      msg.attr === "value" &&
-      document.activeElement === el &&
-      el.value === msg.value
-    ) {
-      return;
-    }
-    if (PROP_ATTRS[msg.attr]) {
-      (el as unknown as Record<string, unknown>)[msg.attr] = msg.value;
-    } else if (msg.value === false || msg.value === null) {
-      el.removeAttribute(msg.attr);
-    } else if (msg.attr === "textContent") {
-      el.textContent = msg.value as string;
+    if (!any) return; // every key gated out — nothing to apply
+    const values = kept;
+    if (w.handle) {
+      if (typeof w.handle.update === "function") w.handle.update(values);
     } else {
-      el.setAttribute(msg.attr, msg.value as string);
+      // Async construction still in flight — buffer, coalescing by key.
+      w.pending = Object.assign(w.pending || {}, values);
     }
-  });
+    return;
+  }
 
-  Shiny.addCustomMessageHandler("irid-mutate", (msg: IridMutate) => {
+  if (msg.target === "text") {
+    // No gate — a text echo is always programmatic and applies unconditionally.
     const a = lookupAnchors(msg.id);
     if (!a) return;
     const parent = a.start.parentNode!;
+    let n: Node | null = a.start.nextSibling;
+    while (n && n !== a.end) {
+      const next: Node | null = n.nextSibling;
+      if (n.nodeType === 1) Shiny.unbindAll!(n as Element);
+      parent.removeChild(n);
+      n = next;
+    }
+    // `value` is a string; "" is the canonical "clear the range" signal.
+    if (msg.value !== "") {
+      parent.insertBefore(document.createTextNode(msg.value), a.end);
+    }
+    return;
+  }
 
-    // Each command-part is always present (possibly empty) — forEach over `[]`
-    // is a no-op, so no presence guards are needed.
+  // target === 'dom' — single-channel stale-echo gate.
+  if (isStaleEcho(msg.gate, sequences)) return;
+  const el = document.getElementById(msg.id) as HTMLInputElement | null;
+  if (!el) return;
+  // Cursor-preservation no-op skip — setting el.value to its current string
+  // would reset the cursor on a focused input, so short-circuit identical writes.
+  if (
+    msg.attr === "value" &&
+    document.activeElement === el &&
+    el.value === msg.value
+  ) {
+    return;
+  }
+  if (PROP_ATTRS[msg.attr]) {
+    (el as unknown as Record<string, unknown>)[msg.attr] = msg.value;
+  } else if (msg.value === false || msg.value === null) {
+    el.removeAttribute(msg.attr);
+  } else if (msg.attr === "textContent") {
+    el.textContent = msg.value as string;
+  } else {
+    el.setAttribute(msg.attr, msg.value as string);
+  }
+}
 
-    // 1. Remove children — each child is itself an anchored range.
-    msg.removes.forEach((childId) => {
-      const child = anchors.get(childId);
-      if (!child) return;
-      const detached = detachRange(child.start, child.end);
-      unregisterAnchorsIn(detached);
-    });
+function applyMutate(msg: IridMutate): void {
+  const a = lookupAnchors(msg.id);
+  if (!a) return;
+  const parent = a.start.parentNode!;
 
-    // 2. Insert new children (parsed in the container's parent context).
-    msg.inserts.forEach((html) => {
-      const fragment = parseFragment(html, parent);
-      indexAnchors(fragment);
-      parent.insertBefore(fragment, a.end);
-    });
+  // Each command-part is always present (possibly empty) — forEach over `[]`
+  // is a no-op, so no presence guards are needed.
 
-    // 3. Reorder children — lift each child's range into a fragment and reinsert
-    // before the container's end anchor (preserves element identity + anchors).
-    msg.order.forEach((childId) => {
-      const child = anchors.get(childId);
-      if (!child) return;
-      const frag = document.createDocumentFragment();
-      let node: Node | null = child.start;
-      while (node && node !== child.end) {
-        const next: Node | null = node.nextSibling;
-        frag.appendChild(node);
-        node = next;
-      }
-      frag.appendChild(child.end);
-      parent.insertBefore(frag, a.end);
-    });
-
-    // Defer bindAll so Shiny finishes processing all messages in the flush.
-    setTimeout(() => {
-      Shiny.bindAll!(parent as Element);
-    }, 0);
+  // 1. Remove children — each child is itself an anchored range.
+  msg.removes.forEach((childId) => {
+    const child = anchors.get(childId);
+    if (!child) return;
+    const detached = detachRange(child.start, child.end);
+    unregisterAnchorsIn(detached);
   });
 
-  Shiny.addCustomMessageHandler("irid-wire", (msgs: IridWire[]) => {
-    msgs.forEach((msg) => {
-      // Key on the (namespaced) channel — unique per id/event.
-      const key = msg.channel;
-      if (wireRegistered.has(key)) return;
-      // DOM events need the element to exist for addEventListener; widget events
-      // bypass that step.
-      const el = document.getElementById(msg.id);
-      if (msg.source !== "widget" && !el) return;
-      wireRegistered.add(key);
-      if (msg.source === "dom" && msg.clientOnly) {
-        // No server handler — apply DOM flags only (no dispatch), no managed state.
-        attachListener(el!, msg);
-        return;
-      }
-      if (msg.timing.mode === "throttle") {
-        setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
-      } else if (msg.timing.mode === "debounce") {
-        setupDebounce(el, msg, msg.timing.ms);
-      } else {
-        setupImmediate(el, msg);
-      }
-      // Index widget streams by the {id}:{event} pair a factory resolves against
-      // (prop write-backs and events share this namespace; a widget can't reuse a
-      // name across the two, so the pair is unique).
-      if (msg.source === "widget") {
-        widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
-      }
-    });
+  // 2. Insert new children (parsed in the container's parent context).
+  msg.inserts.forEach((html) => {
+    const fragment = parseFragment(html, parent);
+    indexAnchors(fragment);
+    parent.insertBefore(fragment, a.end);
   });
 
-  Shiny.addCustomMessageHandler(
-    "irid-widget-init",
-    (msg: IridWidgetInit) => {
-      handleWidgetInit(msg);
-    },
+  // 3. Reorder children — lift each child's range into a fragment and reinsert
+  // before the container's end anchor (preserves element identity + anchors).
+  msg.order.forEach((childId) => {
+    const child = anchors.get(childId);
+    if (!child) return;
+    const frag = document.createDocumentFragment();
+    let node: Node | null = child.start;
+    while (node && node !== child.end) {
+      const next: Node | null = node.nextSibling;
+      frag.appendChild(node);
+      node = next;
+    }
+    frag.appendChild(child.end);
+    parent.insertBefore(frag, a.end);
+  });
+
+  // Defer bindAll so Shiny finishes processing all messages in the flush.
+  setTimeout(() => {
+    Shiny.bindAll!(parent as Element);
+  }, 0);
+}
+
+function applyWire(msgs: IridWire[]): void {
+  msgs.forEach((msg) => {
+    // Key on the (namespaced) channel — unique per id/event.
+    const key = msg.channel;
+    if (wireRegistered.has(key)) return;
+    // DOM events need the element to exist for addEventListener; widget events
+    // bypass that step.
+    const el = document.getElementById(msg.id);
+    if (msg.source !== "widget" && !el) return;
+    wireRegistered.add(key);
+    if (msg.source === "dom" && msg.clientOnly) {
+      // No server handler — apply DOM flags only (no dispatch), no managed state.
+      attachListener(el!, msg);
+      return;
+    }
+    if (msg.timing.mode === "throttle") {
+      setupThrottle(el, msg, msg.timing.ms, msg.timing.leading);
+    } else if (msg.timing.mode === "debounce") {
+      setupDebounce(el, msg, msg.timing.ms);
+    } else {
+      setupImmediate(el, msg);
+    }
+    // Index widget streams by the {id}:{event} pair a factory resolves against
+    // (prop write-backs and events share this namespace; a widget can't reuse a
+    // name across the two, so the pair is unique).
+    if (msg.source === "widget") {
+      widgetStreams[`${msg.id}:${msg.event}`] = managed[msg.channel];
+    }
+  });
+}
+
+function applyWidgetInit(msg: IridWidgetInit): void {
+  handleWidgetInit(msg);
+}
+
+function applyReady(msg: IridReady): void {
+  window.__iridReady = true;
+  // Wire `output` is already `name | null` — the public detail shares the shape.
+  document.dispatchEvent(
+    new CustomEvent("irid:ready", { detail: { id: msg.output } }),
   );
+}
 
-  // Readiness lifecycle. Sent by the server after a mount's `irid-wire` (so its
+// Replay a flush's coalesced render messages in emission order. Each op runs
+// through the same `apply*` the standalone handler uses; the inserts land in one
+// synchronous pass (one paint), and the per-mutate bindAll deferrals fire after.
+function applyBatch(msg: IridBatch): void {
+  msg.ops.forEach((op) => {
+    switch (op.type) {
+      case "irid-mutate":
+        applyMutate(op.message as IridMutate);
+        break;
+      case "irid-attr":
+        applyAttr(op.message as IridAttr);
+        break;
+      case "irid-wire":
+        applyWire(op.message as IridWire[]);
+        break;
+      case "irid-widget-init":
+        applyWidgetInit(op.message as IridWidgetInit);
+        break;
+    }
+  });
+}
+
+export function registerHandlers(): void {
+  Shiny.addCustomMessageHandler("irid-config", applyConfig);
+  Shiny.addCustomMessageHandler("irid-attr", applyAttr);
+  Shiny.addCustomMessageHandler("irid-mutate", applyMutate);
+  Shiny.addCustomMessageHandler("irid-wire", applyWire);
+  Shiny.addCustomMessageHandler("irid-widget-init", applyWidgetInit);
+
+  // Readiness lifecycle. Sent by the server after a mount's render batch (so its
   // listeners are attached) and after its server observers exist; WebSocket
   // ordering means that when this lands, the mount is fully wired. We surface it
   // two ways: a public `irid:ready` DOM event app authors can hook (focus an
   // input, hide a splash, start a tour…), and the `window.__iridReady` flag as
   // the "missed the event" escape hatch. The e2e harness waits on the flag.
-  Shiny.addCustomMessageHandler("irid-ready", (msg: IridReady) => {
-    window.__iridReady = true;
-    // Wire `output` is already `name | null` — the public detail shares the shape.
-    document.dispatchEvent(
-      new CustomEvent("irid:ready", { detail: { id: msg.output } }),
-    );
-  });
+  Shiny.addCustomMessageHandler("irid-ready", applyReady);
+
+  // Coalesced render batch — one frame, applied in one synchronous pass.
+  Shiny.addCustomMessageHandler("irid-batch", applyBatch);
 }
