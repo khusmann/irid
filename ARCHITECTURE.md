@@ -390,13 +390,44 @@ anchor references are preserved across moves.
 ## Client-Side Protocol
 
 `irid.js` registers Shiny custom message handlers for `irid-config`,
-`irid-attr`, `irid-mutate`, `irid-wire`, `irid-widget-init`, and
-`irid-ready`.
+`irid-attr`, `irid-mutate`, `irid-wire`, `irid-widget-init`, `irid-ready`, and
+`irid-batch`.
 
 All server→client messages are built by the producer-side wire codec
 (`R/encode.R`, the `msg_irid_*` constructors), which materializes each
 field's wire shape from its declared protocol type rather than from the runtime
 value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
+
+### `irid-batch`
+
+The render-phase messages of one Shiny flush ride a single `irid-batch` frame:
+
+```js
+{ops: [
+  {type: "irid-mutate",      message: {id: "irid-1", inserts: [...], ...}},
+  {type: "irid-wire",        message: [{id: "irid-4", event: "click", ...}]},
+  {type: "irid-attr",        message: {id: "irid-5", target: "text", value: "hi"}}
+]}  // replayed in order through the same apply* fns as the standalone messages
+```
+
+Shiny frames each `sendCustomMessage` as its own WebSocket frame, and the client
+processes one frame per task — so a nested control-flow render (an `Each` whose
+item body is a `When`, each emitting its own `irid-mutate`) would arrive as many
+frames and paint **chunk-by-chunk**. Coalescing them into one frame the client
+applies in a single synchronous pass yields **one paint**.
+
+On the server, `irid_send` (R/mount.R) buffers each render message in **emission
+order** on `session$userData$irid_render_batch` and a one-shot `session$onFlushed`
+drains them into the `irid-batch`. Emission order *is* apply order: a child's
+`irid-mutate` precedes the `irid-wire` / `irid-widget-init` / `irid-attr` that
+need its element to exist, so replaying in order preserves the dependency that
+held when these were separate frames. This mirrors the per-widget `irid-attr`
+drain (`irid_queue_widget_attr`).
+
+Coalesced: `irid-mutate`, `irid-attr` (dom/text), `irid-wire`,
+`irid-widget-init`. Left out: `irid-config` (sent before the mount), `irid-ready`
+(its own post-batch `onFlushed` — see below), and `irid-attr target="widget"`
+(its own per-widget drain, a semantic merge rather than just framing).
 
 ### `irid-attr`
 
@@ -606,11 +637,11 @@ client:
 
 Signals that a mount is fully wired. The server (`irid_send_ready` in `R/app.R`)
 sends it from the mount's `onFlushed`, i.e. **after** the flush in which every
-control-flow body (`When`/`Each`/`Match`) has mounted and sent its own
-`irid-wire`. Because WebSocket messages are ordered and an event's
-`observeEvent` is registered *before* its `irid-wire` within
-`irid_mount_processed`, a client that has seen `irid-ready` has every listener
-attached *and* every server observer registered.
+control-flow body (`When`/`Each`/`Match`) has mounted and emitted its `irid-wire`
+into the flush's `irid-batch`. The batch's own `onFlushed` is armed at the
+depth-0 mount (ahead of `irid_send_ready`), so it drains *first*: by WebSocket
+ordering the client has applied the whole render — every listener attached — and
+every server observer is registered before `irid-ready` lands.
 
 The handler surfaces it two ways:
 
