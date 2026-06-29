@@ -248,6 +248,20 @@ msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list
   )
 }
 
+# --- irid-batch message constructor ----------------------------------------
+
+# Ordered envelope coalescing one Shiny flush's render messages (irid-mutate,
+# irid-attr dom/text, irid-wire, irid-widget-init) into a single frame the client
+# replays in order. `ops` is a list of `list(type, message)` in EMISSION order
+# (apply order); each `message` is the already-constructed `msg_irid_*` payload,
+# passed through unchanged — its wire shape was pinned at construction. The
+# drain only sends a non-empty batch, so `ops` is always >= 1 here.
+msg_irid_batch <- function(ops) {
+  list(ops = json_array(lapply(ops, function(op) {
+    list(type = json_string(op$type), message = op$message)
+  })))
+}
+
 # --- Inbound: client -> server payload coercion ----------------------------
 #
 # The inbound envelope is the flat mirror of the client's `attachPayloadMeta`:

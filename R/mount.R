@@ -97,6 +97,48 @@ irid_queue_widget_attr <- function(session, id, attr, value, gate = NULL) {
   invisible()
 }
 
+# Per-session render-message coalescing. The render-phase custom messages of one
+# Shiny flush — `irid-mutate`, `irid-attr` (dom/text), `irid-wire`,
+# `irid-widget-init` — are buffered in EMISSION order and drained at flush end
+# into a single `irid-batch` frame the client applies in one synchronous pass
+# (one paint). Shiny frames each `sendCustomMessage` separately, so without this
+# the client paints once per message and a nested control-flow render (an `Each`
+# of per-item `When`) builds up visibly chunk-by-chunk. Mirrors the per-widget
+# `irid-attr` drain above.
+#
+# Emission order is the client's apply order: a child's mutate precedes the
+# wire / widget-init / attr that need its element to exist, so buffering in order
+# preserves the dependency the client relied on when these were separate frames.
+# The widget-batch `irid-attr` (target = "widget") keeps its own drain (it
+# coalesces per widget, a semantic merge, not just framing) and is left out here.
+irid_arm_render_batch <- function(session) {
+  if (!is.null(session$userData$irid_render_batch)) return(invisible())
+  batch <- new.env(parent = emptyenv())
+  batch$ops <- list()
+  session$userData$irid_render_batch <- batch
+  # Armed at the depth-0 mount, ahead of `irid_send_ready`, so this drain's
+  # `onFlushed` registers before ready's — the batch (the whole render) reaches
+  # the client before `irid:ready` fires.
+  session$onFlushed(function() {
+    ops <- batch$ops
+    session$userData$irid_render_batch <- NULL
+    if (length(ops) > 0L) {
+      session$sendCustomMessage("irid-batch", msg_irid_batch(ops))
+    }
+  }, once = TRUE)
+  invisible()
+}
+
+# Buffer one render-phase message into the current flush's batch (arming it if
+# this is the flush's first). `type` is the custom-message type the client
+# replays it as.
+irid_send <- function(session, type, message) {
+  irid_arm_render_batch(session)
+  batch <- session$userData$irid_render_batch
+  batch$ops[[length(batch$ops) + 1L]] <- list(type = type, message = message)
+  invisible()
+}
+
 # Optimistic-update echo gate value object: the classed `{seq, channel}` an
 # irid-managed binding stamps on its echo so the client can drop it if a newer
 # local edit has superseded it. NULL when there is no gating context (a
@@ -204,7 +246,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
       character(1L)
     )
   } else character(0)
-  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
+  irid_send(session, "irid-mutate", msg_irid_mutate(
     cf_id, removes = removes, inserts = inserts, order = order_ids
   ))
 
@@ -244,7 +286,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
   removes <- old_child_id %||% character(0)
   if (is.null(body_tag)) {
     if (length(removes) > 0L) {
-      session$sendCustomMessage("irid-mutate",
+      irid_send(session, "irid-mutate",
         msg_irid_mutate(cf_id, removes = removes))
     }
     return(list(child_id = NULL, mount = NULL))
@@ -256,7 +298,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
     htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
   )
   processed <- process_tags(wrapped, counter = counter)
-  session$sendCustomMessage("irid-mutate", msg_irid_mutate(
+  irid_send(session, "irid-mutate", msg_irid_mutate(
     cf_id, removes = removes, inserts = list(as.character(processed$tag))
   ))
   mount <- irid_mount_processed(processed, session, depth = depth + 1L)
@@ -332,6 +374,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   observers <- list()
   binding_priority <- -100L + depth
 
+  # Arm the render batch at the top-level mount so its flush-end drain registers
+  # before `irid_send_ready`'s — guaranteeing the whole render reaches the client
+  # ahead of `irid:ready`. Nested mounts share the same flush's batch (already
+  # armed); subsequent-flush updates arm lazily via the first `irid_send`.
+  if (depth == 0L) irid_arm_render_batch(session)
+
   # Index bindings by element ID so event handlers can force-send
   # the authoritative value even when the reactive is a no-op.
   bindings_by_id <- list()
@@ -361,7 +409,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       props[key] <- list(isolate(wi$prop_fns[[key]]()))
     }
     deliver_widget_deps(session, wi$deps)
-    session$sendCustomMessage("irid-widget-init",
+    irid_send(session, "irid-widget-init",
       msg_irid_widget_init(wi$id, wi$name, props))
   }
 
@@ -477,7 +525,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               } else {
                 msg_irid_attr_dom(sb$id, sb$attr, val, gate)
               }
-              session$sendCustomMessage("irid-attr", msg)
+              irid_send(session, "irid-attr", msg)
             }
           }
         }
@@ -486,7 +534,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
       msg
     })
-    session$sendCustomMessage("irid-wire", wire_msgs)
+    irid_send(session, "irid-wire", wire_msgs)
   }
 
   # Set up reactive attribute bindings. Lower priority than control flows
@@ -518,7 +566,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
         } else {
           msg_irid_attr_dom(b$id, b$attr, val, gate)
         }
-        session$sendCustomMessage("irid-attr", msg)
+        irid_send(session, "irid-attr", msg)
       }
     }, priority = binding_priority)
     observers[[length(observers) + 1L]] <<- obs
