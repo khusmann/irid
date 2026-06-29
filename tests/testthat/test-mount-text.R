@@ -54,7 +54,7 @@ test_that("mounting a reactive text child sends a target='text' irid-attr", {
   s <- new_fake_session()
   res <- process_tags(shiny::tags$span(function() txt()))
   handle <- shiny::isolate(irid:::irid_mount_processed(res, s))
-  shiny:::flushReact()
+  s$flushReact()
 
   text_msgs <- Filter(
     function(m) m$type == "irid-attr" && identical(m$message$target, "text"),
@@ -64,7 +64,7 @@ test_that("mounting a reactive text child sends a target='text' irid-attr", {
   expect_equal(text_msgs[[length(text_msgs)]]$message$value, "hi")
 
   txt("bye")
-  shiny:::flushReact()
+  s$flushReact()
   last <- Filter(
     function(m) m$type == "irid-attr" && identical(m$message$target, "text"),
     s$msgs()

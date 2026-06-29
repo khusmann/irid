@@ -158,6 +158,7 @@ test_that("widget wire rows share one namespaced inputId space (no kind)", {
   s <- new_fake_session()
   result <- process_tags(node)
   handle <- shiny::isolate(irid:::irid_mount_processed(result, s))
+  s$flushReact() # drain the render batch (wire rides it now)
 
   ev_msg <- Filter(function(m) m$type == "irid-wire", s$msgs())
   expect_length(ev_msg, 1L)

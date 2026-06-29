@@ -121,12 +121,14 @@ test_that("an Each over many items delivers a shared dep once", {
 })
 
 test_that("the irid-widget-init message no longer carries deps", {
-  s <- recording_session()
-  irid_mount_processed(process_tags(IridWidget("demo")), s)
+  # new_fake_session (deferred onFlushed) so the render batch carrying the
+  # widget-init drains on flush, the way real Shiny sequences it.
+  s <- new_fake_session()
+  shiny::isolate(irid_mount_processed(process_tags(IridWidget("demo")), s))
+  s$flushReact()
 
-  msgs <- lapply(s$rec$messages, function(m) m[[1]])
-  init <- Filter(function(m) m$type == "irid-widget-init", msgs)
+  init <- Filter(function(m) m$type == "irid-widget-init", s$msgs())
   expect_length(init, 1L)
-  expect_false("deps" %in% names(init[[1]]$msg))
-  expect_named(init[[1]]$msg, c("id", "name", "props"))
+  expect_false("deps" %in% names(init[[1]]$message))
+  expect_named(init[[1]]$message, c("id", "name", "props"))
 })

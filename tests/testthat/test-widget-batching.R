@@ -20,7 +20,9 @@ new_batch_session <- function() {
     store$msgs[[length(store$msgs) + 1L]] <<- list(type = type, message = message)
     invisible()
   }
-  s$msgs <- function() store$msgs
+  # Flatten the render batch (irid-mutate/-wire/-widget-init) so the widget-init
+  # assertions see it directly; widget-attr keeps its own standalone drain.
+  s$msgs <- function() flatten_irid_batch(store$msgs)
   s
 }
 
@@ -273,6 +275,7 @@ test_that("a named-vector prop round-trips through mount as a JSON object", {
 
   # (a) init path: a constant named-vector prop ships as a named list.
   init <- mount_widget(list(vis = c(`8` = "legendonly", `6` = "true")))
+  init$session$flushReact() # drain the render batch carrying the widget-init
   init_msg <- Filter(function(m) m$type == "irid-widget-init", init$session$msgs())
   expect_length(init_msg, 1L)
   expect_identical(init_msg[[1]]$message$props$vis,
