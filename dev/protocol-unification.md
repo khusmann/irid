@@ -25,18 +25,27 @@ single coherent protocol.
    one synchronous pass. Emission order is apply order (a child's `mutate`
    precedes the `wire` / `widget-init` / attr that need its element to exist).
 
-2. **Flat `kind` per op — drop the `target` field.** Today an attr is
-   `{ target: "dom" | "text" | "widget" }`, a discriminant nested under the
-   `irid-attr` message. Promote the three to first-class op kinds, so every op
-   carries one flat `kind`:
+2. **One `kind` per operation; a `source`/`target` field only for dom/widget
+   variants.** The op set is:
 
    ```
-   mutate | wire | widget-init | dom-attr | text | widget-attr
+   mutate | wire | widget-init | attr | text
    ```
 
-   The three attr operations are genuinely distinct (range-text replace vs.
-   element property write vs. a widget `update()` hook call), so naming them
-   directly is clearer than an `attr` + `target` pair — and it removes a field.
+   Two ops have dom/widget variants and carry a discriminant for it — and the
+   field name encodes data-flow direction:
+   - `wire` registers a client→server channel, so the event *originates* from a
+     DOM listener or a widget → `source: "dom" | "widget"`.
+   - `attr` pushes a server→client value, so the value is *destined* for a DOM
+     property or a widget's `update()` hook → `target: "dom" | "widget"`.
+
+   Parallel structure, opposite field names — and that opposition is information
+   (which way the data flows). `attr`'s two targets share an identical shape
+   (`{ id, attr, value, gate }`); `target` selects how the client applies it.
+   `mutate`, `widget-init`, and `text` are single-shape operations, so they are
+   plain kinds. `text` is *not* an `attr` variant: it is a range-content replace
+   with a different shape (`{ id, value }`, no `attr`, no `gate`), not a
+   named-attribute write.
 
 3. **Widget props become single-key ops; the per-widget merge moves to the
    client.** Today the server coalesces a flush's prop writes per widget into one
@@ -45,14 +54,15 @@ single coherent protocol.
    server machinery exists only because, pre-#68, coalescing *required* packing
    into one message. With a single render frame, the merge moves to the client:
 
-   - A widget prop write is a single-key `widget-attr` op
-     (`{ id, attr, value, gate }`) — structurally identical to `dom-attr`, just a
-     different `kind`. The server emits one per write, exactly like `dom-attr`.
-   - The client, applying `irid-render`, **accumulates** `widget-attr` ops into a
-     per-widget map (gate-checked per op as they arrive), then after the last op
-     flushes each widget's map with **one** `update()`. Deferring the flush to
-     the end also fixes ordering for free: the widget's `widget-init` op (earlier
-     in the message) has already run, and `dom-attr`s have already applied.
+   - A widget prop write is a single-key `attr` op with `target: "widget"`
+     (`{ id, attr, value, gate }`) — structurally identical to a `target: "dom"`
+     attr. The server emits one per write, exactly like a DOM attr.
+   - The client, applying `irid-render`, **accumulates** `target: "widget"` attr
+     ops into a per-widget map (gate-checked per op as they arrive), then after
+     the last op flushes each widget's map with **one** `update()`. Deferring the
+     flush to the end also fixes ordering for free: the widget's `widget-init` op
+     (earlier in the message) has already run, and `target: "dom"` attrs have
+     already applied.
 
    The widget author's `update()` contract is unchanged — it still receives a
    `{attr -> value}` map; the client builds it instead of the server.
@@ -61,9 +71,10 @@ single coherent protocol.
 
 - **Server**: `irid_queue_widget_attr`, `session$userData$irid_widget_pending`
   (+ its `.order`), the second `onFlushed` drain, and `msg_irid_attr_widget`. A
-  widget prop write goes through the same `irid_send` path as `dom-attr` — no
+  widget prop write goes through the same `irid_send` path as a DOM attr — no
   special widget path, one coalescing point (the `irid-render` drain).
-- **Wire types**: the `IridAttrWidget`-with-maps variant.
+- **Wire types**: the `IridAttrWidget`-with-maps variant collapses into the
+  single-key `attr` op (`target: "widget"`).
 - **Client**: the standalone `irid-mutate` / `irid-attr` / `irid-wire` /
   `irid-widget-init` custom-message handlers. The `apply*` fns survive as the
   op-dispatch targets of the one `irid-render` handler.
@@ -117,8 +128,7 @@ interface IridConfig {
 // irid-render — one Shiny flush's render, an ordered op list applied in one pass.
 interface IridRender { ops: Op[]; }
 
-type Op =
-  | OpMutate | OpWire | OpWidgetInit | OpDomAttr | OpText | OpWidgetAttr;
+type Op = OpMutate | OpWire | OpWidgetInit | OpAttr | OpText;
 
 // Structural comment-anchor range mutation (Each / When / Match). Each part
 // always present; an unused part is [] (a no-op).
@@ -131,7 +141,8 @@ interface OpMutate {
 }
 
 // Attach one client->server channel's listener (one op per channel).
-// Discriminated on source: a DOM event carries listener options; widget adds none.
+// Discriminated on `source` (where the event comes FROM — the mirror of OpAttr's
+// outbound `target`): a DOM event carries listener options; widget adds none.
 type OpWire = OpWireDom | OpWireWidget;
 interface OpWireCore {
   kind: "wire";
@@ -156,30 +167,28 @@ interface OpWidgetInit {
   props: Record<string, unknown>;   // merged initial props ({} when none)
 }
 
-// DOM property/attribute write on getElementById(id).
-interface OpDomAttr {
-  kind: "dom-attr";
+// A bound value pushed to its sink, discriminated on `target` (where the value
+// GOES — the mirror of OpWire's inbound `source`). Identical shape for both
+// sinks; `target` selects how the client applies it:
+//   "dom"    — property/attribute write on getElementById(id), applied inline.
+//   "widget" — a prop write; the client collects all target="widget" ops in the
+//              message per id and calls the widget's update() once at the end
+//              with the merged { attr -> value } (one redraw).
+interface OpAttr {
+  kind: "attr";
+  target: "dom" | "widget";
   id: ElementId;
   attr: string;
   value: unknown;
-  gate: EchoGate | null;
+  gate: EchoGate | null;      // null = programmatic; else gated on the channel's seq
 }
 
-// Text replace inside a comment-anchor range. No gate (a range is display-only).
+// Text replace inside a comment-anchor range — its own kind, not an attr variant
+// (a range-content replace with a different shape: no `attr`, no gate).
 interface OpText {
   kind: "text";
   id: AnchorId;
   value: string;              // "" is the clear-the-range signal
-}
-
-// One widget prop write. The client collects all widget-attr ops in the message
-// per id and calls the widget's update() once with the merged {attr -> value}.
-interface OpWidgetAttr {
-  kind: "widget-attr";
-  id: ElementId;
-  attr: string;
-  value: unknown;
-  gate: EchoGate | null;
 }
 
 // irid-ready — the mount is fully wired (post-render barrier). Sent after the
@@ -213,10 +222,12 @@ function applyRender(msg):
       "mutate":      applyMutate(op)
       "wire":        applyWire(op)
       "widget-init": applyWidgetInit(op)
-      "dom-attr":    applyDomAttr(op)    # gate-checked, applied now
-      "text":        applyText(op)       # applied now
-      "widget-attr":                     # deferred + merged
-        if not isStaleEcho(op.gate): widgetAcc[op.id][op.attr] = op.value
+      "text":        applyText(op)               # applied now
+      "attr":
+        if op.target == "dom":
+          applyDomAttr(op)                       # gate-checked, applied now
+        else:                                    # target == "widget" — deferred + merged
+          if not isStaleEcho(op.gate): widgetAcc[op.id][op.attr] = op.value
   for id, values in widgetAcc:           # one update() per widget, after all ops
     applyWidgetValues(id, values)        # update() if handle live, else buffer in w.pending
   scheduleBindAll()                      # once, after the synchronous pass
@@ -228,31 +239,54 @@ Single `Shiny.bindAll` after the pass (replacing the per-mutate deferral).
 
 - **One paint** — every render op in one frame, applied synchronously.
 - **Ordering** — emission order = apply order; `mutate` precedes the
-  `wire`/`widget-init`/attr depending on its element. The `<select value=rv>`
+  `wire`/`widget-init`/`attr` depending on its element. The `<select value=rv>`
   options-before-value case holds (control-flow ops precede the binding's
-  `dom-attr` in the list).
+  `attr` (target="dom") in the list).
 - **Single widget redraw** — preserved, now via client-side per-widget collection
   within the atomic apply (instead of a server-side merge).
 - **`irid-ready` barrier** — `irid-render` drains before ready's `onFlushed`
   (armed at the depth-0 mount); unchanged.
-- **Stale-echo gate** — per-op `gate` on `dom-attr` / `widget-attr`, checked the
-  same way; widget gates are now per op rather than a `valueGates` map.
+- **Stale-echo gate** — per-op `gate` on every `attr` op (both targets), checked
+  the same way; widget gates are now per op rather than a `valueGates` map.
+
+## Op-modeling principles
+
+Two tests settled these shapes; keep them in mind when adding ops.
+
+- **A list field belongs to one op only when its elements are the *internal
+  structure* of a single operation — not when each is a complete op on its own.**
+  `mutate`'s `removes`/`inserts`/`order` stay one op: they are the three ordered
+  phases of one container reconciliation (the output of `plan_reconcile`), with
+  inter-phase dependencies, and `order` is an indivisible whole-sequence value.
+  `wire`, by contrast, carried a `rows[]` array only to save frames — each row is
+  a complete, independent registration — so it flattened to one op per channel.
+  Test: *could each element stand alone as its own op?* Yes → flatten; no → keep.
+
+- **When the producer knows a discriminant, put it on the wire; don't make the
+  client infer it.** `attr`'s `target` and `wire`'s `source` are explicit even
+  though the client could often guess (probe the widget registry, the anchor
+  map). The server knows for free (the binding's target, the event's source), and
+  inference couples the client to mutable state and op-processing order — an
+  `attr` that arrived before its `widget-init` would mis-route. Explicit beats
+  inferred.
 
 ## Implementation plan (incremental, folds into PR #68)
 
 1. **Protocol types** (`srcts/src/protocol/messages.ts`): replace the standalone
-   message interfaces + `IridBatch` with `IridRender` + the flat `Op` union; drop
-   `IridAttrWidget`'s map shape.
+   message interfaces + `IridBatch` with `IridRender` + the `Op` union (one
+   `OpAttr` with `target`; `OpText` separate); drop the `IridAttrWidget`-with-maps
+   shape.
 2. **Client** (`handlers.ts`): one `irid-render` handler + the apply algorithm
-   above (widget accumulation; single bindAll). Delete the four standalone render
-   handlers. Keep `irid-config` / `irid-ready`. Rebuild `inst/` bundles.
+   above (target="widget" accumulation; single bindAll). Delete the four
+   standalone render handlers. Keep `irid-config` / `irid-ready`. Rebuild `inst/`
+   bundles.
 3. **Server codec** (`R/encode.R`): `msg_irid_render(ops)`; per-op constructors
-   carrying `kind`; collapse `msg_irid_attr_*` to `dom-attr` / `text` /
-   `widget-attr` single-key forms. Remove `msg_irid_attr_widget`'s map form.
+   carrying `kind`; collapse `msg_irid_attr_*` to one `attr` form (`target` ∈
+   {dom, widget}, single key) plus `text`. Remove `msg_irid_attr_widget`'s map form.
 4. **Server send path** (`R/mount.R`): `irid_send` appends ops to the one buffer;
-   widget prop writes emit single `widget-attr` ops (no `irid_queue_widget_attr`).
-   Delete the widget-pending map + its drain. Rename the drain message to
-   `irid-render`.
+   widget prop writes emit single `attr` (target="widget") ops (no
+   `irid_queue_widget_attr`). Delete the widget-pending map + its drain. Rename
+   the drain message to `irid-render`.
 5. **Tests**: update the mock-session flatten + message-shape assertions; the
    widget-batching unit tests now assert client-side collection semantics via the
    op list (one `widget-attr` op per write, in order) rather than a server `values`
