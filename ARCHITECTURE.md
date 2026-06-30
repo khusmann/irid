@@ -421,8 +421,8 @@ frames and paint **chunk-by-chunk**. Coalescing every op into one frame the
 client applies in a single synchronous pass yields **one paint**.
 
 On the server, `irid_send` (R/mount.R) buffers each op in **emission order** on
-`session$userData$irid_render_batch`, and a one-shot `session$onFlushed` drains
-them into the `irid-render` frame (`msg_irid_render`). Emission order *is* apply
+`session$userData$irid_render`, and a one-shot `session$onFlushed` drains them
+into the `irid-render` frame (`msg_irid_render`). Emission order *is* apply
 order: a child's `mutate` precedes the `wire` / `widget-init` / `attr` that need
 its element to exist, so applying in order preserves that dependency. Every op
 rides this one path — including widget prop writes (`attr` with `target =

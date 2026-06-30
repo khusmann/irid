@@ -217,16 +217,16 @@ op_irid_text <- function(id, value) {
   list(kind = "text", id = json_string(id), value = json_string(value))
 }
 
-# --- irid-wire op constructor --------------------------------------------
+# --- wire op constructor -------------------------------------------------
 
-# One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
+# One `wire` op — the serialized per-slot `wire()` carrier for one channel.
 # `channel` is the namespaced inputId. The protocol shape is a discriminated union on
 # `source`: a dom event carries `domOpts` + `clientOnly`; the widget arm adds no
 # extra fields (the client indexes widget streams by the `{id}:{event}` pair its
 # setProp/sendEvent resolves against, both already present). The nested value
-# objects (`timing`, `dom_opts`) ride the event row whole, rendered via `as_protocol()`.
+# objects (`timing`, `dom_opts`) ride the op whole, rendered via `as_protocol()`.
 op_irid_wire <- function(ev, channel, client_only) {
-  msg <- list(
+  op <- list(
     kind = "wire",
     id = json_string(ev$id),
     event = json_string(ev$event),
@@ -236,13 +236,13 @@ op_irid_wire <- function(ev, channel, client_only) {
     coalesce = json_bool(ev$coalesce)
   )
   if (!identical(ev$source, "widget")) {
-    msg$domOpts <- as_protocol(ev$dom_opts)
-    msg$clientOnly <- json_bool(client_only)
+    op$domOpts <- as_protocol(ev$dom_opts)
+    op$clientOnly <- json_bool(client_only)
   }
-  msg
+  op
 }
 
-# --- irid-mutate op constructor ----------------------------------------
+# --- mutate op constructor -------------------------------------------------
 
 # Granular comment-anchor range mutations: the sole structural message, driving
 # Each (N keyed/positional children) AND When/Match (one child, keyed by active

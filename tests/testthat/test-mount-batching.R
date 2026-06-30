@@ -1,4 +1,4 @@
-# Flush-coalesced render (`irid_send` / `irid_arm_render_batch` in mount.R). Every
+# Flush-coalesced render (`irid_send` / `irid_arm_render` in mount.R). Every
 # DOM/widget op of one flush — mutate / attr (dom/widget) / text / wire /
 # widget-init — rides a single `irid-render` frame the client applies in one pass,
 # so a nested control-flow render lands in one paint instead of one-per-message.

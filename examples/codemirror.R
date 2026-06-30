@@ -257,9 +257,9 @@ App <- function() {
       tags$button(
         class = "btn btn-sm btn-outline-primary",
         # Coordinated same-flush multi-write: both bound props change in one
-        # flush, so the framework coalesces them into ONE `irid-attr` with a
-        # two-key `values` map -> one `update({content, cursor})` -> one
-        # `view.dispatch`. This is the batching path the design enables.
+        # flush, so they ride one `irid-render` as two `attr` ops the client
+        # merges per widget -> one `update({content, cursor})` -> one
+        # `view.dispatch`. This is the single-redraw path the design enables.
         onClick = \() {
           doc("function greet(name) {\n  return `hi ${name}`;\n}\n")
           cursor(list(line = 2, ch = 9))

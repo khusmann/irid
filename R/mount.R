@@ -45,17 +45,17 @@ coerce_text_child <- function(val) {
 # preserves the dependency. Widget prop writes (`attr` target = "widget") ride the
 # same buffer as DOM attrs — one coalescing point; the client accumulates them per
 # id and calls `update()` once at the end (one redraw).
-irid_arm_render_batch <- function(session) {
-  if (!is.null(session$userData$irid_render_batch)) return(invisible())
-  batch <- new.env(parent = emptyenv())
-  batch$ops <- list()
-  session$userData$irid_render_batch <- batch
+irid_arm_render <- function(session) {
+  if (!is.null(session$userData$irid_render)) return(invisible())
+  render <- new.env(parent = emptyenv())
+  render$ops <- list()
+  session$userData$irid_render <- render
   # Armed at the depth-0 mount, ahead of `irid_send_ready`, so this drain's
   # `onFlushed` registers before ready's — the render (the whole frame) reaches
   # the client before `irid:ready` fires.
   session$onFlushed(function() {
-    ops <- batch$ops
-    session$userData$irid_render_batch <- NULL
+    ops <- render$ops
+    session$userData$irid_render <- NULL
     if (length(ops) > 0L) {
       session$sendCustomMessage("irid-render", msg_irid_render(ops))
     }
@@ -67,9 +67,9 @@ irid_arm_render_batch <- function(session) {
 # first). `op` is a fully-constructed `op_irid_*` op payload, self-discriminated
 # by its `kind`.
 irid_send <- function(session, op) {
-  irid_arm_render_batch(session)
-  batch <- session$userData$irid_render_batch
-  batch$ops[[length(batch$ops) + 1L]] <- op
+  irid_arm_render(session)
+  render <- session$userData$irid_render
+  render$ops[[length(render$ops) + 1L]] <- op
   invisible()
 }
 
@@ -87,8 +87,8 @@ irid_echo_gate <- function(seq, channel) {
 # Pure reconciliation planner for `Each`. Decides *what* changes between two
 # renders of the item list — which entries to remove, add, keep, or rebuild —
 # and returns that decision as plain data. It performs no effects: constructing
-# entries (scopes, wrapper ids), tearing down, mounting, and sending
-# `irid-mutate` all live in `run_reconcile_plan()` below, which consumes the
+# entries (scopes, wrapper ids), tearing down, mounting, and emitting the
+# `mutate` op all live in `run_reconcile_plan()` below, which consumes the
 # returned plan. Inputs are shape *signatures* (from `shape_signature()`) named
 # by id, so the planner is testable without a Shiny session.
 #
@@ -124,8 +124,8 @@ plan_reconcile <- function(old_ids, new_ids, old_sigs, new_sigs) {
   removed <- c(setdiff(old_ids, new_ids), shape_changed)
   added   <- c(setdiff(new_ids, old_ids), shape_changed)
 
-  # `order` policy, derived from the client contract (see the `irid-mutate`
-  # handler in inst/js/irid.js): given only `removes` + tail-`inserts`, the
+  # `order` policy, derived from the client contract (see `applyMutate` in
+  # inst/js/irid.js): given only `removes` + tail-`inserts`, the
   # client produces this DOM sequence —
   #   natural = (old_ids without `removed`, in old order) ++ (added, insert order)
   # `added` here is exactly the insert order `run_reconcile_plan` uses. `order`
@@ -149,8 +149,8 @@ plan_reconcile <- function(old_ids, new_ids, old_sigs, new_sigs) {
 # Mode-agnostic executor. Runs a `plan_reconcile()` plan against the per-item
 # state held in `env` (`item_mounts`, a named map of entries by string id, and
 # `current_ids`, the ordered id vector). Order of effects mirrors the client's
-# `irid-mutate` handling and the framework's mount/teardown invariants:
-# teardown removed → build added (DOM string) → send mutate → mount added
+# `mutate` op handling and the framework's mount/teardown invariants:
+# teardown removed → build added (DOM string) → emit mutate → mount added
 # (after the DOM exists) → reposition kept. `build_entry` stays mode-aware (it
 # builds genuinely different value-access closures per mode); the executor only
 # calls it.
@@ -240,7 +240,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
 
 # Deliver a widget's dependencies at mount time through Shiny's *native render
 # pipeline*, via `insertUI` — the only dep-delivery path shinylive serves (a bare
-# `Shiny.renderDependencies` off the `irid-widget-init` custom message 404s
+# `Shiny.renderDependencies` off the `widget-init` op 404s
 # there; see ARCHITECTURE.md "Widgets -> Lifecycle and dependencies"). Verified:
 # an `insertUI`-delivered file-backed dep loads under shinylive (spike, web
 # assets 0.9.1 — re-confirm on bump).
@@ -307,11 +307,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   observers <- list()
   binding_priority <- -100L + depth
 
-  # Arm the render batch at the top-level mount so its flush-end drain registers
+  # Arm the render at the top-level mount so its flush-end drain registers
   # before `irid_send_ready`'s — guaranteeing the whole render reaches the client
-  # ahead of `irid:ready`. Nested mounts share the same flush's batch (already
+  # ahead of `irid:ready`. Nested mounts share the same flush's render (already
   # armed); subsequent-flush updates arm lazily via the first `irid_send`.
-  if (depth == 0L) irid_arm_render_batch(session)
+  if (depth == 0L) irid_arm_render(session)
 
   # Index bindings by element ID so event handlers can force-send
   # the authoritative value even when the reactive is a no-op.
@@ -347,7 +347,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
 
   # Set up event listeners
   if (length(result$events) > 0L) {
-    wire_msgs <- lapply(result$events, function(ev) {
+    wire_ops <- lapply(result$events, function(ev) {
       # Every inbound channel — DOM events, widget events, and widget prop
       # write-backs (client's `setProp`) — shares one input namespace,
       # `irid_input_{id}_{event}`. A prop and event can't share a name (enforced in
@@ -364,12 +364,12 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # The encoder builds the discriminated protocol shape (nested timing/domOpts,
       # domOpts/clientOnly on dom rows; the widget arm adds nothing). `clientOnly`
       # is a config-only dom wire — `dom_opts` with no server handler.
-      msg <- op_irid_wire(ev, channel, client_only = is.null(handler))
+      op <- op_irid_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
       # there is no server observer to register.
-      if (is.null(handler)) return(msg)
+      if (is.null(handler)) return(op)
 
       nformals <- length(formals(handler))
 
@@ -462,11 +462,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       }, ignoreInit = TRUE)
       observers[[length(observers) + 1L]] <<- obs
 
-      msg
+      op
     })
     # Each wire is its own op (one per channel) — sent in order, adjacent in the
     # render's op list.
-    for (m in wire_msgs) irid_send(session, m)
+    for (op in wire_ops) irid_send(session, op)
   }
 
   # Set up reactive attribute bindings. Lower priority than control flows
@@ -474,10 +474,10 @@ irid_mount_processed <- function(result, session, depth = 0L) {
   # inserted. Priority decreases with depth so deeper bindings fire before
   # shallower ones — see the function-level docs for the motivating case.
   #
-  # All bindings ride `irid-attr` with a `target` field. `target = "dom"`
-  # is a real DOM attribute / property write on `getElementById(b$id)`;
-  # `target = "text"` replaces the content between the comment-anchor
-  # pair `b$id`. Dispatch happens client-side on `msg.target`.
+  # A binding's `target` selects its op: `target = "dom"` / `"widget"` emit an
+  # `attr` op (a DOM property/attribute write on `getElementById(b$id)`, or a
+  # widget prop write); `target = "text"` emits a `text` op that replaces the
+  # content between the comment-anchor pair `b$id`.
   lapply(result$bindings, function(b) {
     obs <- observe({
       val <- b$fn()
@@ -727,7 +727,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
           # change to the parent collection (including in-place value
           # edits), but the per-item mini-store / scalar-accessor
           # propagators handle in-place changes themselves. No id or shape
-          # change means no DOM work — and emitting an `irid-mutate` here
+          # change means no DOM work — and emitting a `mutate` op here
           # detaches every child range into a fragment client-side just to
           # re-insert it, which kills focus on any focused input inside.
           if (plan$noop) return()

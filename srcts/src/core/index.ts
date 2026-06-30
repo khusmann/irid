@@ -12,7 +12,7 @@ const irid: Irid = { defineWidget };
 window.irid = irid;
 
 // Initial scan — comment anchors in the static page must be registered before any
-// irid-mutate message arrives.
+// irid-render mutate op arrives.
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     indexAnchors(document.body);
