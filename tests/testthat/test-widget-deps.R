@@ -2,7 +2,7 @@
 # native-render-pipeline path (`insertUI`) that delivers a widget's deps so they
 # load under shinylive, INCLUDING a widget mounted only inside When/Each/Match
 # (the case issue #34 could not serve). Deps no longer page-attach at render, nor
-# ride the `irid-widget-init` custom message.
+# ride the `widget-init` op.
 
 library(shiny)
 
@@ -120,15 +120,15 @@ test_that("an Each over many items delivers a shared dep once", {
   expect_equal(session$userData$irid_deps_seen, "plotly")  # one name, three mounts
 })
 
-test_that("the irid-widget-init message no longer carries deps", {
-  # new_fake_session (deferred onFlushed) so the render batch carrying the
-  # widget-init drains on flush, the way real Shiny sequences it.
+test_that("the widget-init op no longer carries deps", {
+  # new_fake_session (deferred onFlushed) so the render frame carrying the
+  # widget-init op drains on flush, the way real Shiny sequences it.
   s <- new_fake_session()
   shiny::isolate(irid_mount_processed(process_tags(IridWidget("demo")), s))
   s$flushReact()
 
-  init <- Filter(function(m) m$type == "irid-widget-init", s$msgs())
+  init <- Filter(function(m) m$kind == "widget-init", s$msgs())
   expect_length(init, 1L)
-  expect_false("deps" %in% names(init[[1]]$message))
-  expect_named(init[[1]]$message, c("id", "name", "props"))
+  expect_false("deps" %in% names(init[[1]]))
+  expect_named(init[[1]], c("kind", "id", "name", "props"))
 })

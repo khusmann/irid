@@ -2,16 +2,16 @@
 #
 # Drives the event observers in `irid_mount_processed` with simulated client
 # inputs (each an `{ id, seq, data }` envelope) and inspects the resulting
-# `irid-attr` echoes. The core invariant: an echo is stamped with the sequence
+# `attr` op echoes. The core invariant: an echo is stamped with the sequence
 # of ITS OWN channel, so a sibling channel firing in the same flush — another
 # prop, or a notification — cannot make a current echo look stale.
 
 attr_msgs <- function(session) {
-  Filter(function(m) m$type == "irid-attr", session$msgs())
+  Filter(function(m) m$kind == "attr", session$msgs())
 }
 
 # Mount a widget, drain the initial (programmatic) flush, and return a context
-# whose `$drain()` returns only the irid-attr echoes produced after `expr`.
+# whose `$drain()` returns only the `attr` op echoes produced after `expr`.
 mount_and_settle <- function(node) {
   s <- new_fake_session()
   result <- process_tags(node)
@@ -47,10 +47,10 @@ test_that("two props written in one flush each carry their own channel+seq", {
 
   # Each prop write is its own single-key widget attr op, gated per op.
   widget_attrs <- Filter(
-    function(m) identical(m$message$target, "widget"), ctx$new_attrs()
+    function(m) identical(m$target, "widget"), ctx$new_attrs()
   )
-  a_gate <- Filter(function(m) identical(m$message$attr, "a"), widget_attrs)[[1]]$message$gate
-  b_gate <- Filter(function(m) identical(m$message$attr, "b"), widget_attrs)[[1]]$message$gate
+  a_gate <- Filter(function(m) identical(m$attr, "a"), widget_attrs)[[1]]$gate
+  b_gate <- Filter(function(m) identical(m$attr, "b"), widget_attrs)[[1]]$gate
   expect_equal(a_gate$seq, 5)
   expect_equal(b_gate$seq, 9)
   # Distinct channels — `a`'s is not `b`'s.
@@ -84,13 +84,13 @@ test_that("a sibling notification does not pollute a prop's echo sequence", {
   ctx$session$flushReact()
 
   widget_attrs <- Filter(
-    function(m) identical(m$message$target, "widget"), ctx$new_attrs()
+    function(m) identical(m$target, "widget"), ctx$new_attrs()
   )
-  sel <- Filter(function(m) identical(m$message$attr, "selected_ids"), widget_attrs)
+  sel <- Filter(function(m) identical(m$attr, "selected_ids"), widget_attrs)
   expect_gte(length(sel), 1L)
   # The prop echo carries ITS seq (3), not the notification's later 8.
-  expect_equal(sel[[1]]$message$gate$seq, 3)
-  expect_true(grepl("_selected_ids$", sel[[1]]$message$gate$channel))
+  expect_equal(sel[[1]]$gate$seq, 3)
+  expect_true(grepl("_selected_ids$", sel[[1]]$gate$channel))
 
   ctx$handle$destroy()
 })
@@ -113,11 +113,11 @@ test_that("a hand-rolled handler's binding echo is ungated (no sequence)", {
 
   msgs <- ctx$new_attrs()
   # The value binding echoed the new value, with a null gate (programmatic).
-  value_echo <- Filter(function(m) identical(m$message$attr, "value"), msgs)
+  value_echo <- Filter(function(m) identical(m$attr, "value"), msgs)
   expect_length(value_echo, 1L)
-  expect_equal(value_echo[[1]]$message$value, "typed")
-  expect_true("gate" %in% names(value_echo[[1]]$message))
-  expect_null(value_echo[[1]]$message$gate)
+  expect_equal(value_echo[[1]]$value, "typed")
+  expect_true("gate" %in% names(value_echo[[1]]))
+  expect_null(value_echo[[1]]$gate)
 
   ctx$handle$destroy()
 })
@@ -138,12 +138,12 @@ test_that("an autobind handler stamps its value binding with seq + channel", {
   # Both the binding observer and the no-op force-send echo `value` (a known,
   # harmless duplicate) — each must carry the input channel's seq.
   value_echo <- Filter(
-    function(m) identical(m$message$attr, "value"), ctx$new_attrs()
+    function(m) identical(m$attr, "value"), ctx$new_attrs()
   )
   expect_gte(length(value_echo), 1L)
   for (m in value_echo) {
-    expect_equal(m$message$gate$seq, 4)
-    expect_true(grepl("_input$", m$message$gate$channel))
+    expect_equal(m$gate$seq, 4)
+    expect_true(grepl("_input$", m$gate$channel))
   }
 
   ctx$handle$destroy()
@@ -167,11 +167,10 @@ test_that("widget wire ops share one namespaced inputId space", {
 
   # Each wire is its own op (one per channel), so the prop write-back and the
   # event arrive as two separate irid-wire ops.
-  ev_msg <- Filter(function(m) m$type == "irid-wire", s$msgs())
+  ev_msg <- Filter(function(m) m$kind == "wire", s$msgs())
   expect_length(ev_msg, 2L)
-  rows <- lapply(ev_msg, function(m) m$message)
   byname <- stats::setNames(
-    rows, vapply(rows, function(r) r$event, character(1))
+    ev_msg, vapply(ev_msg, function(r) r$event, character(1))
   )
 
   expect_equal(byname$v$source, "widget")

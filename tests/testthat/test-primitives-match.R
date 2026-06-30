@@ -110,13 +110,13 @@ mount_match <- function(node) {
   list(
     session = s,
     handle = handle,
-    mutates = function() Filter(function(m) m$type == "irid-mutate", s$msgs())
+    mutates = function() Filter(function(m) m$kind == "mutate", s$msgs())
   )
 }
 
 # The active case body rides a child-anchor range, so its HTML arrives in the
 # mutate's `inserts`. Concatenate for a substring assertion.
-mutate_inserts <- function(msg) paste(unlist(msg$message$inserts), collapse = "")
+mutate_inserts <- function(msg) paste(unlist(msg$inserts), collapse = "")
 
 test_that("Match renders the first matching case", {
   m <- mount_match(Match(
@@ -168,7 +168,7 @@ test_that("Match destroys the previous case when the active case changes", {
   flushReact()
   mu <- m$mutates()
   expect_length(mu, 2L)
-  expect_length(mu[[2]]$message$removes, 1L)
+  expect_length(mu[[2]]$removes, 1L)
   expect_match(mutate_inserts(mu[[2]]), "B")
   m$handle$destroy()
 })

@@ -61,9 +61,9 @@ mount_when <- function(node) {
   list(
     session = session,
     handle = handle,
-    mutates = function() Filter(function(m) m$type == "irid-mutate", session$msgs()),
+    mutates = function() Filter(function(m) m$kind == "mutate", session$msgs()),
     attr_msgs = function(attr) Filter(
-      function(m) m$type == "irid-attr" && identical(m$message$attr, attr),
+      function(m) m$kind == "attr" && identical(m$attr, attr),
       session$msgs()
     )
   )
@@ -71,7 +71,7 @@ mount_when <- function(node) {
 
 # The body rides a child-anchor range, so its HTML arrives in the mutate's
 # `inserts` (a list of fragments). Concatenate them for a substring assertion.
-mutate_inserts <- function(msg) paste(unlist(msg$message$inserts), collapse = "")
+mutate_inserts <- function(msg) paste(unlist(msg$inserts), collapse = "")
 
 test_that("renders the yes branch when the condition is TRUE", {
   m <- mount_when(When(\() TRUE, \() tags$p("yes"), \() tags$p("no")))
@@ -135,7 +135,7 @@ test_that("switching branches re-renders the other branch (remove old + insert n
   mu <- m$mutates()
   expect_length(mu, 2L)
   # The flip removes the old child range and inserts the new branch.
-  expect_length(mu[[2]]$message$removes, 1L)
+  expect_length(mu[[2]]$removes, 1L)
   expect_match(mutate_inserts(mu[[2]]), "no")
   m$handle$destroy()
 })
@@ -159,7 +159,7 @@ test_that("switching branches tears down the previous branch's observers", {
   n <- length(m$attr_msgs("data-x"))
   expect_true(any(vapply(
     m$attr_msgs("data-x"),
-    function(mm) identical(mm$message$value, "b"),
+    function(mm) identical(mm$value, "b"),
     logical(1)
   )))
 

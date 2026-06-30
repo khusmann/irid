@@ -11,7 +11,7 @@
 # Just the widget-target attr ops, in send order.
 widget_attrs <- function(session) {
   Filter(
-    function(m) m$type == "irid-attr" && identical(m$message$target, "widget"),
+    function(m) m$kind == "attr" && identical(m$target, "widget"),
     session$msgs()
   )
 }
@@ -37,9 +37,9 @@ test_that("a single bound prop emits one single-key widget attr op", {
 
   ms <- widget_attrs(m$session)
   expect_length(ms, 1L)
-  expect_equal(ms[[1]]$message$target, "widget")
-  expect_equal(ms[[1]]$message$attr, "content")
-  expect_equal(ms[[1]]$message$value, "hi")
+  expect_equal(ms[[1]]$target, "widget")
+  expect_equal(ms[[1]]$attr, "content")
+  expect_equal(ms[[1]]$value, "hi")
 
   m$handle$destroy()
 })
@@ -54,10 +54,10 @@ test_that("two props changing in one flush emit two ops in one render frame", {
   expect_length(renders(m$session), 1L)
 
   ms <- widget_attrs(m$session)
-  by_attr <- stats::setNames(ms, vapply(ms, function(x) x$message$attr, character(1)))
+  by_attr <- stats::setNames(ms, vapply(ms, function(x) x$attr, character(1)))
   expect_setequal(names(by_attr), c("content", "cursor"))
-  expect_equal(by_attr$content$message$value, "hi")
-  expect_equal(by_attr$cursor$message$value, list(line = 1, ch = 0))
+  expect_equal(by_attr$content$value, "hi")
+  expect_equal(by_attr$cursor$value, list(line = 1, ch = 0))
 
   m$handle$destroy()
 })
@@ -79,10 +79,10 @@ test_that("props changing in separate flushes emit ops in separate frames", {
   expect_length(renders(m$session), 3L)
   ms <- widget_attrs(m$session)
   last_two <- ms[(length(ms) - 1L):length(ms)]
-  expect_equal(last_two[[1]]$message$attr, "content")
-  expect_equal(last_two[[1]]$message$value, "yo")
-  expect_equal(last_two[[2]]$message$attr, "cursor")
-  expect_equal(last_two[[2]]$message$value, list(line = 3, ch = 2))
+  expect_equal(last_two[[1]]$attr, "content")
+  expect_equal(last_two[[1]]$value, "yo")
+  expect_equal(last_two[[2]]$attr, "cursor")
+  expect_equal(last_two[[2]]$value, list(line = 3, ch = 2))
 
   m$handle$destroy()
 })
@@ -96,7 +96,7 @@ test_that("a later write for the same key appears after the earlier one", {
   shiny::isolate(content("new"))
   m$session$flushReact()
 
-  vals <- vapply(widget_attrs(m$session), function(x) x$message$value, character(1))
+  vals <- vapply(widget_attrs(m$session), function(x) x$value, character(1))
   expect_equal(vals, c("old", "new"))
 
   m$handle$destroy()
@@ -107,7 +107,7 @@ test_that("a NULL prop value rides as an explicit null op value", {
   m <- mount_widget(list(content = content))
   m$session$flushReact()
 
-  op <- widget_attrs(m$session)[[1]]$message
+  op <- widget_attrs(m$session)[[1]]
   expect_equal(op$attr, "content")
   expect_true("value" %in% names(op))
   expect_null(op$value)
@@ -131,7 +131,7 @@ test_that("a widget attr op carries its own {seq, channel} gate", {
     list(content = irid:::irid_echo_gate(42, "ch_content"))
   m$session$flushReact()
 
-  last <- widget_attrs(m$session)[[base + 1L]]$message
+  last <- widget_attrs(m$session)[[base + 1L]]
   expect_equal(last$attr, "content")
   expect_equal(last$gate, list(seq = 42, channel = "ch_content"))
 
@@ -153,7 +153,7 @@ test_that("a widget attr op with no current-sequence entry echoes ungated", {
     list(other_attr = irid:::irid_echo_gate(9, "ch_other"))
   m$session$flushReact()
 
-  last <- widget_attrs(m$session)[[base + 1L]]$message
+  last <- widget_attrs(m$session)[[base + 1L]]
   expect_true("gate" %in% names(last))
   expect_null(last$gate)
 
@@ -188,9 +188,9 @@ test_that("a named-vector prop round-trips through mount as a JSON object", {
   # (a) init path: a constant named-vector prop ships as a named list.
   init <- mount_widget(list(vis = c(`8` = "legendonly", `6` = "true")))
   init$session$flushReact() # drain the render frame carrying the widget-init
-  init_msg <- Filter(function(m) m$type == "irid-widget-init", init$session$msgs())
+  init_msg <- Filter(function(m) m$kind == "widget-init", init$session$msgs())
   expect_length(init_msg, 1L)
-  expect_identical(init_msg[[1]]$message$props$vis,
+  expect_identical(init_msg[[1]]$props$vis,
                    list(`8` = "legendonly", `6` = "true"))
   init$handle$destroy()
 
@@ -198,7 +198,7 @@ test_that("a named-vector prop round-trips through mount as a JSON object", {
   vis <- shiny::reactiveVal(c(`8` = "legendonly"))
   m <- mount_widget(list(vis = vis))
   m$session$flushReact()
-  expect_identical(widget_attrs(m$session)[[1]]$message$value,
+  expect_identical(widget_attrs(m$session)[[1]]$value,
                    list(`8` = "legendonly"))
   m$handle$destroy()
 })

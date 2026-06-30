@@ -5,13 +5,13 @@
 # Each inner binding is driven by an EXTERNAL reactiveVal captured in the body
 # closure (not the item/branch value), so "did the observer fire?" is a clean
 # signal independent of the reconcilers: while mounted, bumping the external rv
-# echoes irid-attr; after destroy, a live observer would still echo — so silence
+# emits an `attr` op; after destroy, a live observer would still echo — so silence
 # proves teardown.
 
-# irid-attr echoes for a given attr name.
+# `attr` op echoes for a given attr name.
 attrs <- function(s, attr) {
   Filter(
-    function(m) m$type == "irid-attr" && identical(m$message$attr, attr),
+    function(m) m$kind == "attr" && identical(m$attr, attr),
     s$msgs()
   )
 }
@@ -31,7 +31,7 @@ test_that("destroy() tears down the mount's own binding observers", {
   flushReact()
   expect_true(any(vapply(
     attrs(m$session, "data-e"),
-    function(x) identical(x$message$value, "q"), logical(1)
+    function(x) identical(x$value, "q"), logical(1)
   )))
 
   m$handle$destroy()
@@ -49,7 +49,7 @@ test_that("destroy() cascades into a When's active branch child mount", {
   flushReact()
   expect_true(any(vapply(
     attrs(m$session, "data-e"),
-    function(x) identical(x$message$value, "q"), logical(1)
+    function(x) identical(x$value, "q"), logical(1)
   )))
 
   m$handle$destroy()
@@ -70,7 +70,7 @@ test_that("destroy() cascades into a Match's active case (and per-case scope)", 
   flushReact()
   expect_true(any(vapply(
     attrs(m$session, "data-e"),
-    function(x) identical(x$message$value, "q"), logical(1)
+    function(x) identical(x$value, "q"), logical(1)
   )))
 
   m$handle$destroy()
@@ -91,7 +91,7 @@ test_that("destroy() cascades into all of an Each's per-item child mounts", {
   flushReact()
   # one echo per item
   q <- Filter(
-    function(x) identical(x$message$value, "q"),
+    function(x) identical(x$value, "q"),
     attrs(m$session, "data-e")
   )
   expect_length(q, 3L)
@@ -116,7 +116,7 @@ test_that("destroy() propagates recursively through nested control flow", {
   ext("q")
   flushReact()
   q <- Filter(
-    function(x) identical(x$message$value, "q"),
+    function(x) identical(x$value, "q"),
     attrs(m$session, "data-e")
   )
   expect_length(q, 2L)

@@ -308,11 +308,11 @@ test_that("Each rebuilds the entry when a positional slot's record shape changes
   msgs <- m$session$msgs()
   expect_gt(length(msgs), initial_msg_count)
   last <- msgs[[length(msgs)]]
-  expect_equal(last$type, "irid-mutate")
+  expect_equal(last$kind, "mutate")
   # Shape change in positional mode: remove + insert + order.
-  expect_equal(length(last$message$removes), 1L)
-  expect_equal(length(last$message$inserts), 1L)
-  expect_equal(length(last$message$order), 2L)
+  expect_equal(length(last$removes), 1L)
+  expect_equal(length(last$inserts), 1L)
+  expect_equal(length(last$order), 2L)
   m$handle$destroy()
 })
 
@@ -341,9 +341,9 @@ test_that("Each rebuilds the entry when a keyed item's shape changes", {
   msgs <- m$session$msgs()
   expect_gt(length(msgs), initial_msg_count)
   last <- msgs[[length(msgs)]]
-  expect_equal(last$type, "irid-mutate")
-  expect_equal(length(last$message$removes), 1L)
-  expect_equal(length(last$message$inserts), 1L)
+  expect_equal(last$kind, "mutate")
+  expect_equal(length(last$removes), 1L)
+  expect_equal(length(last$inserts), 1L)
   m$handle$destroy()
 })
 
@@ -378,16 +378,16 @@ test_that("Each keyed reorder emits an order payload that serializes to a JSON a
 
   msgs <- m$session$msgs()
   last <- msgs[[length(msgs)]]
-  expect_equal(last$type, "irid-mutate")
+  expect_equal(last$kind, "mutate")
   # removes/inserts are always present — empty arrays here, not omitted.
-  expect_length(last$message$removes, 0L)
-  expect_length(last$message$inserts, 0L)
-  expect_equal(length(last$message$order), 3L)
+  expect_length(last$removes, 0L)
+  expect_length(last$inserts, 0L)
+  expect_equal(length(last$order), 3L)
 
   # The payload must be an unnamed list so Shiny serializes it as a JSON
   # array (`[...]`), not an object (`{...}`).
-  expect_null(names(last$message$order))
-  json <- as.character(jsonlite::toJSON(last$message$order))
+  expect_null(names(last$order))
+  json <- as.character(jsonlite::toJSON(last$order))
   expect_true(startsWith(json, "["))
 
   m$handle$destroy()
@@ -477,10 +477,10 @@ test_that("Each positional shape transition does not affect sibling slots", {
 
   msgs <- m$session$msgs()
   last <- msgs[[length(msgs)]]
-  expect_equal(length(last$message$removes), 1L)
-  expect_equal(length(last$message$inserts), 1L)
+  expect_equal(length(last$removes), 1L)
+  expect_equal(length(last$inserts), 1L)
   # Order array reflects the new arrangement of all 3 slots.
-  expect_equal(length(last$message$order), 3L)
+  expect_equal(length(last$order), 3L)
   m$handle$destroy()
 })
 

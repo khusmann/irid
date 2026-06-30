@@ -2,15 +2,17 @@
 # test files, so any test can use these without redefining them.
 
 # A MockShinySession that captures the custom messages a mount would send.
-# `s$msgs()` returns the captured list of {type, message} entries; tests filter
-# it for irid-attr / irid-mutate / irid-wire / irid-config to assert behavior.
-#
-# Every DOM/widget op of one flush is coalesced into a single `irid-render` frame
-# at flush end (see `irid_send`). `s$msgs()` flattens that frame's ops back into
-# individual {type, message} entries — one per op, `type` = `irid-<kind>`, the
-# op's `kind` lifted off `message` — so tests filter on the op's kind and read its
-# fields off `message`. `s$raw_msgs()` exposes the unflattened stream for tests
-# that assert on the render frame itself.
+# `s$msgs()` returns the protocol stream tests assert on. There are only three
+# server->client messages — `irid-config`, `irid-render`, `irid-ready` — and every
+# DOM/widget update of one flush rides one `irid-render` frame as an ordered op
+# list (see `irid_send`). `s$msgs()` splices each `irid-render` frame's ops in
+# place, so the stream is a flat mix of:
+#   - real messages (`irid-config` / `irid-ready`) as `{type, message}`, and
+#   - render ops, each as-is — the flat op object with its `kind` and fields.
+# Tests filter ops on `m$kind` (e.g. "attr") and read fields directly (`m$attr`,
+# `m$value`, `m$gate`); messages on `m$type`. An op has no `$type` and a message
+# has no `$kind`, so the two never collide. `s$raw_msgs()` exposes the unflattened
+# stream for tests that assert on the `irid-render` frame itself.
 new_fake_session <- function() {
   s <- shiny::MockShinySession$new()
   store <- new.env(parent = emptyenv())
@@ -32,21 +34,14 @@ new_fake_session <- function() {
 .latest_fake_session <- new.env(parent = emptyenv())
 .latest_fake_session$s <- NULL
 
-# Unwrap an `irid-render` frame into its ordered ops; pass other messages through.
-# Each op is surfaced as a legacy `{type, message}` entry: `type` = `irid-<kind>`,
-# and the op's `kind` field is lifted off so `message` carries only the op's data
-# fields (the shape tests assert on).
+# Splice each `irid-render` frame's ordered ops into the stream as-is (each op the
+# flat object it is on the wire, with its `kind`), passing real messages
+# (`irid-config` / `irid-ready`) through unchanged as `{type, message}`.
 flatten_irid_render <- function(msgs) {
   out <- list()
   for (m in msgs) {
     if (identical(m$type, "irid-render")) {
-      for (op in m$message$ops) {
-        kind <- op$kind
-        op$kind <- NULL
-        out[[length(out) + 1L]] <- list(
-          type = paste0("irid-", kind), message = op
-        )
-      }
+      for (op in m$message$ops) out[[length(out) + 1L]] <- op
     } else {
       out[[length(out) + 1L]] <- m
     }
