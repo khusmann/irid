@@ -1,17 +1,18 @@
-# Producer-side wire codec: the `msg_irid_*` message constructors + the
+# Producer-side protocol codec: the `msg_irid_*` message constructors + the
 # `coerce_value_as_number` inbound step, built on a handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
-# not a config knob. These helpers centralize the discipline so each field's wire
-# shape is a function of its declared protocol type, never the runtime value.
+# not a config knob. These helpers centralize the discipline so each field's
+# protocol shape is a function of its declared protocol type, never the runtime
+# value.
 # The non-determinism under `auto_unbox` is
 # narrow and enumerable: array-typed fields that are contingently length-1 unbox
 # to a scalar, and empty/sentinel values encode by content (`NULL` -> `null` with
 # the key kept, `character(0)` -> `[]`, `NA` -> `null`). The combinators below pin
 # each.
 
-# Each `json_*` helper pins one declared protocol type to its wire shape, and the
+# Each `json_*` helper pins one declared protocol type to its protocol shape, and the
 # contract is uniform across the family:
 #   - it ASSERTS the value already matches the declared type and errors on a
 #     mismatch — a wrong type is an encoder bug, never silently coerced;
@@ -19,7 +20,7 @@
 #     (length-1 unboxing, name-keyed scalars/objects, the `[]`-vs-`{}` list-NAMES
 #     rule), never a real type conversion;
 #   - `null_ok = TRUE` marks a nullable field (`T | null`): NULL passes through as
-#     the wire `null`. By default NULL is an error — a required field must not
+#     the protocol `null`. By default NULL is an error — a required field must not
 #     silently vanish. Empty is distinct from NULL: a length-0 array/map is a
 #     legal `[]`/`{}`, not a null.
 
@@ -124,9 +125,9 @@ json_bool <- function(x, null_ok = FALSE) {
 as_protocol <- function(x) UseMethod("as_protocol")
 
 # Each method builds the protocol shape field-by-field, wrapping every field in the
-# `json_*` coercer for its declared wire type — even where `auto_unbox` would do the
+# `json_*` coercer for its declared protocol type — even where `auto_unbox` would do the
 # right thing anyway. The construction site, not a class strip, is the single place
-# the wire shape is pinned.
+# the protocol shape is pinned.
 
 # Rate-limit timing, discriminated on `mode`: ms/leading exist only where the
 # variant gives them meaning.
@@ -141,7 +142,7 @@ as_protocol.irid_wire_timing <- function(x) {
 }
 
 # DOM listener record. Field names are also translated snake_case (R) -> camelCase
-# (wire). `filter` is `string | null` (NULL -> wire null = "no filter").
+# (protocol). `filter` is `string | null` (NULL -> protocol null = "no filter").
 #' @export
 as_protocol.irid_dom_opts <- function(x) {
   list(
@@ -154,7 +155,7 @@ as_protocol.irid_dom_opts <- function(x) {
 }
 
 # Optimistic-update echo gate (constructor `irid_echo_gate` lives in R/mount.R,
-# the producer; this is its wire-shape method, mirroring wire_timing/dom_opts).
+# the producer; this is its protocol-shape method, mirroring wire_timing/dom_opts).
 #' @export
 as_protocol.irid_echo_gate <- function(x) {
   list(seq = json_number(x$seq), channel = json_string(x$channel))
@@ -193,7 +194,7 @@ msg_irid_widget_init <- function(id, name, props) {
 # passed through `json_value` to bridge the named-vector -> object quirk (a widget
 # prop can be a named atomic like plotly's `c("8" = "legendonly")`; a scalar DOM
 # value passes through untouched). `gate` is an `irid_echo_gate` value object, or
-# NULL for a programmatic write (rendered as the wire's `null`). Always present.
+# NULL for a programmatic write (rendered as the protocol `null`). Always present.
 msg_irid_attr <- function(target, id, attr, value, gate = NULL) {
   list(
     kind = "attr",
@@ -215,7 +216,7 @@ msg_irid_text <- function(id, value) {
 # --- irid-wire message constructor -----------------------------------------
 
 # One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
-# `channel` is the namespaced inputId. The wire shape is a discriminated union on
+# `channel` is the namespaced inputId. The protocol shape is a discriminated union on
 # `source`: a dom event carries `domOpts` + `clientOnly`; the widget arm adds no
 # extra fields (the client indexes widget streams by the `{id}:{event}` pair its
 # setProp/sendEvent resolves against, both already present). The nested value

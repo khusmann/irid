@@ -8,7 +8,7 @@ R/
   primitives.R    When, Each, Match/Case/Default, Output
   wire.R          wire carrier; wire_immediate/throttle/debounce timing
                   shapes; wire_dom_opts; merge.irid_wire
-  encode.R        producer-side wire codec — msg_irid_* message constructors
+  encode.R        producer-side protocol codec — msg_irid_* message constructors
                   (attr/wire/mutate/config/ready/widget-init), as_protocol value
                   tier, + coerce_value_as_number inbound step; centralizes the
                   jsonlite serialization discipline (json_array/json_map/
@@ -394,9 +394,9 @@ anchor references are preserved across moves.
 carrying no ordering dependency), `irid-render` (every DOM/widget update of one
 flush), and `irid-ready` (the post-render barrier).
 
-All server→client messages are built by the producer-side wire codec
+All server→client messages are built by the producer-side protocol codec
 (`R/encode.R`, the `msg_irid_*` constructors), which materializes each
-field's wire shape from its declared protocol type rather than from the runtime
+field's protocol shape from its declared protocol type rather than from the runtime
 value — the discipline that keeps the bytes matching `srcts/src/protocol/`.
 
 ### `irid-render`
