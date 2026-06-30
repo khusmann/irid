@@ -1,5 +1,7 @@
-# Producer-side protocol codec: the `msg_irid_*` message constructors + the
-# `coerce_value_as_number` inbound step, built on a handful of `json_*` shape helpers.
+# Producer-side protocol codec: the `msg_irid_*` message constructors (`config` /
+# `render` / `ready`), the `op_irid_*` op constructors (the ops carried inside an
+# `irid-render` message), + the `coerce_value_as_number` inbound step, built on a
+# handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
@@ -63,7 +65,7 @@ json_map <- function(x, null_ok = FALSE) {
 # named atomic vector serializes as a one-key-per-name object only as a named
 # *list* (jsonlite keys `[]`-vs-`{}` off list NAMES), so convert named atomics to
 # named lists at every depth. Unnamed vectors and scalars pass through unchanged.
-# Used by `json_map` (per member) and by `msg_irid_attr` (a widget prop value can
+# Used by `json_map` (per member) and by `op_irid_attr` (a widget prop value can
 # be a named atomic like plotly's `c("8" = "legendonly")`).
 json_value <- function(v) {
   if (is.list(v)) return(lapply(v, json_value))
@@ -117,9 +119,9 @@ json_bool <- function(x, null_ok = FALSE) {
 #
 # `as_protocol()` renders an irid value object (a classed config/value type) into
 # the plain-list protocol shape jsonlite serializes. It is the value tier of the
-# codec; `msg_irid_*` (below) is the message tier and calls it on nested value
-# objects. (Naming: `as_protocol` returns an R list — the protocol *shape* — not a
-# JSON string, so it is deliberately NOT `to_json`.)
+# codec; the `msg_irid_*` / `op_irid_*` constructors (below) are the message tier
+# and call it on nested value objects. (Naming: `as_protocol` returns an R list —
+# the protocol *shape* — not a JSON string, so it is deliberately NOT `to_json`.)
 #' @keywords internal
 #' @noRd
 as_protocol <- function(x) UseMethod("as_protocol")
@@ -161,7 +163,7 @@ as_protocol.irid_echo_gate <- function(x) {
   list(seq = json_number(x$seq), channel = json_string(x$channel))
 }
 
-# --- lifecycle message constructors ----------------------------------------
+# --- session message constructors (config / ready) -------------------------
 
 # irid-config: materialized stale-timeout (always present; `null` disables).
 msg_irid_config <- function(stale_timeout) {
@@ -175,9 +177,11 @@ msg_irid_ready <- function(output) {
   list(output = json_string(output, null_ok = TRUE))
 }
 
+# --- widget-init op constructor --------------------------------------------
+
 # widget-init op: `props` is a materialized map (empty -> `{}`); NULL-valued
 # props are kept as explicit `null` so the factory sees its full declared prop set.
-msg_irid_widget_init <- function(id, name, props) {
+op_irid_widget_init <- function(id, name, props) {
   list(
     kind = "widget-init",
     id = json_string(id), name = json_string(name), props = json_map(props)
@@ -195,7 +199,7 @@ msg_irid_widget_init <- function(id, name, props) {
 # prop can be a named atomic like plotly's `c("8" = "legendonly")`; a scalar DOM
 # value passes through untouched). `gate` is an `irid_echo_gate` value object, or
 # NULL for a programmatic write (rendered as the protocol `null`). Always present.
-msg_irid_attr <- function(target, id, attr, value, gate = NULL) {
+op_irid_attr <- function(target, id, attr, value, gate = NULL) {
   list(
     kind = "attr",
     target = json_string(target),
@@ -209,11 +213,11 @@ msg_irid_attr <- function(target, id, attr, value, gate = NULL) {
 # Text replacement inside a comment-anchor range — its own op kind (no attr, no
 # gate). `value` arrives already normalized to a string by `coerce_text_child`
 # (empty/NA -> ""), so `json_string` just asserts it.
-msg_irid_text <- function(id, value) {
+op_irid_text <- function(id, value) {
   list(kind = "text", id = json_string(id), value = json_string(value))
 }
 
-# --- irid-wire message constructor -----------------------------------------
+# --- irid-wire op constructor --------------------------------------------
 
 # One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
 # `channel` is the namespaced inputId. The protocol shape is a discriminated union on
@@ -221,7 +225,7 @@ msg_irid_text <- function(id, value) {
 # extra fields (the client indexes widget streams by the `{id}:{event}` pair its
 # setProp/sendEvent resolves against, both already present). The nested value
 # objects (`timing`, `dom_opts`) ride the event row whole, rendered via `as_protocol()`.
-msg_irid_wire <- function(ev, channel, client_only) {
+op_irid_wire <- function(ev, channel, client_only) {
   msg <- list(
     kind = "wire",
     id = json_string(ev$id),
@@ -238,7 +242,7 @@ msg_irid_wire <- function(ev, channel, client_only) {
   msg
 }
 
-# --- irid-mutate message constructor ---------------------------------------
+# --- irid-mutate op constructor ----------------------------------------
 
 # Granular comment-anchor range mutations: the sole structural message, driving
 # Each (N keyed/positional children) AND When/Match (one child, keyed by active
@@ -247,7 +251,7 @@ msg_irid_wire <- function(ev, channel, client_only) {
 # a no-op indistinguishable from omission, and a uniform shape beats a contextual
 # one. Callers speak in empty collections (never NULL), so `json_array` stays
 # strict (a NULL here is an encoder bug) and forces each to a JSON array.
-msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
+op_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
   list(
     kind = "mutate",
     id = json_string(id),
@@ -260,7 +264,7 @@ msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list
 # --- irid-render message constructor ---------------------------------------
 
 # One flush's render: an ordered op list applied by the client in one synchronous
-# pass (one paint). `ops` is the list of already-constructed `msg_irid_*` op
+# pass (one paint). `ops` is the list of already-constructed `op_irid_*` op
 # payloads in EMISSION order (apply order) — a child's `mutate` precedes the
 # `wire`/`widget-init`/`attr` that need its element, each op self-discriminated by
 # its `kind`. Each op's wire shape was pinned at construction, so the payloads pass

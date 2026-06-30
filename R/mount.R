@@ -64,7 +64,7 @@ irid_arm_render_batch <- function(session) {
 }
 
 # Buffer one op into the current flush's render (arming it if this is the flush's
-# first). `op` is a fully-constructed `msg_irid_*` op payload, self-discriminated
+# first). `op` is a fully-constructed `op_irid_*` op payload, self-discriminated
 # by its `kind`.
 irid_send <- function(session, op) {
   irid_arm_render_batch(session)
@@ -76,8 +76,8 @@ irid_send <- function(session, op) {
 # Optimistic-update echo gate value object: the classed `{seq, channel}` an
 # irid-managed binding stamps on its echo so the client can drop it if a newer
 # local edit has superseded it. NULL when there is no gating context (a
-# programmatic write — nothing to gate against); the message constructor renders
-# that absence as the protocol `null`/omitted gate. The `as_protocol` method lives
+# programmatic write — nothing to gate against); the `op_irid_attr` constructor
+# renders that absence as the protocol `null` gate. The `as_protocol` method lives
 # in the codec (R/encode.R), mirroring wire_timing/dom_opts.
 irid_echo_gate <- function(seq, channel) {
   if (is.null(seq)) return(NULL)
@@ -180,7 +180,7 @@ run_reconcile_plan <- function(plan, new_ids, item_list, env, build_entry,
       character(1L)
     )
   } else character(0)
-  irid_send(session, msg_irid_mutate(
+  irid_send(session, op_irid_mutate(
     cf_id, removes = removes, inserts = inserts, order = order_ids
   ))
 
@@ -220,7 +220,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
   removes <- old_child_id %||% character(0)
   if (is.null(body_tag)) {
     if (length(removes) > 0L) {
-      irid_send(session, msg_irid_mutate(cf_id, removes = removes))
+      irid_send(session, op_irid_mutate(cf_id, removes = removes))
     }
     return(list(child_id = NULL, mount = NULL))
   }
@@ -231,7 +231,7 @@ cf_render_child <- function(session, cf_id, old_child_id, body_tag,
     htmltools::HTML(paste0("<!--irid:e:", child_id, "-->"))
   )
   processed <- process_tags(wrapped, counter = counter)
-  irid_send(session, msg_irid_mutate(
+  irid_send(session, op_irid_mutate(
     cf_id, removes = removes, inserts = list(as.character(processed$tag))
   ))
   mount <- irid_mount_processed(processed, session, depth = depth + 1L)
@@ -342,7 +342,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       props[key] <- list(isolate(wi$prop_fns[[key]]()))
     }
     deliver_widget_deps(session, wi$deps)
-    irid_send(session, msg_irid_widget_init(wi$id, wi$name, props))
+    irid_send(session, op_irid_widget_init(wi$id, wi$name, props))
   }
 
   # Set up event listeners
@@ -364,7 +364,7 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       # The encoder builds the discriminated protocol shape (nested timing/domOpts,
       # domOpts/clientOnly on dom rows; the widget arm adds nothing). `clientOnly`
       # is a config-only dom wire — `dom_opts` with no server handler.
-      msg <- msg_irid_wire(ev, channel, client_only = is.null(handler))
+      msg <- op_irid_wire(ev, channel, client_only = is.null(handler))
 
       # A config-only event (e.g. `dom_opts` with no handler) attaches a
       # client-side listener for its DOM flags but never round-trips, so
@@ -450,11 +450,11 @@ irid_mount_processed <- function(result, session, depth = 0L) {
               # A single-key widget attr, stamped with this event's channel; the
               # client accumulates it with the binding observers' ops for this id
               # and calls update() once.
-              msg_irid_attr("widget", sb$id, sb$attr, val, gate)
+              op_irid_attr("widget", sb$id, sb$attr, val, gate)
             } else if (sb$target == "text") {
-              msg_irid_text(sb$id, coerce_text_child(val))
+              op_irid_text(sb$id, coerce_text_child(val))
             } else {
-              msg_irid_attr("dom", sb$id, sb$attr, val, gate)
+              op_irid_attr("dom", sb$id, sb$attr, val, gate)
             }
             irid_send(session, op)
           }
@@ -490,13 +490,13 @@ irid_mount_processed <- function(result, session, depth = 0L) {
       op <- if (b$target == "widget") {
         # A single-key widget attr; the client accumulates every widget op for
         # this id across the render and calls update() once (one redraw).
-        msg_irid_attr("widget", b$id, b$attr, val, gate)
+        op_irid_attr("widget", b$id, b$attr, val, gate)
       } else if (b$target == "text") {
         # Text never gates (it is never an event write_target), so `gate` is
         # always NULL here — the encoder carries no gate for it.
-        msg_irid_text(b$id, coerce_text_child(val))
+        op_irid_text(b$id, coerce_text_child(val))
       } else {
-        msg_irid_attr("dom", b$id, b$attr, val, gate)
+        op_irid_attr("dom", b$id, b$attr, val, gate)
       }
       irid_send(session, op)
     }, priority = binding_priority)

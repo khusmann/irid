@@ -181,7 +181,7 @@ test_that("json_map converts named-vector members to named lists (JSON objects)"
 
 test_that("a named-vector prop round-trips through mount as a JSON object", {
   # Integration guard for the global jsonify hook (`json_value`, used by both the
-  # init `json_map` and the per-op `msg_irid_attr`): a generic widget whose prop
+  # init `json_map` and the per-op `op_irid_attr`): a generic widget whose prop
   # value is a named atomic vector must reach the wire as a named *list* — so Shiny
   # encodes it as a `{ }` object — on BOTH the init and the per-op attr paths.
 
