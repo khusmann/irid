@@ -195,20 +195,19 @@ function applyReady(msg: IridReady): void {
 // initialize any new Shiny outputs introduced by mutates.
 function applyRender(msg: IridRender): void {
   const widgetAcc: Record<string, Record<string, unknown>> = {};
-  let sawMutate = false;
-  let mutateParent: Element | null = null;
+  // Every distinct subtree a mutate touched — one render can carry mutates for
+  // several disjoint control-flow regions, and each inserted subtree needs its
+  // own bindAll (a sibling region is not covered by another's parent).
+  const mutateParents = new Set<Element>();
 
   msg.ops.forEach((op) => {
     switch (op.kind) {
-      case "mutate":
+      case "mutate": {
         applyMutate(op);
-        sawMutate = true;
-        // Remember a parent to bind after the pass; document.body covers all.
-        if (!mutateParent) {
-          const a = lookupAnchors(op.id);
-          if (a) mutateParent = a.start.parentNode as Element;
-        }
+        const a = lookupAnchors(op.id);
+        if (a) mutateParents.add(a.start.parentNode as Element);
         break;
+      }
       case "wire":
         applyWire(op);
         break;
@@ -233,12 +232,13 @@ function applyRender(msg: IridRender): void {
   // widget-init earlier in the list has run).
   for (const id in widgetAcc) applyWidgetValues(id, widgetAcc[id]);
 
-  // One bindAll after the pass (replacing the per-mutate setTimeout), deferred so
-  // Shiny finishes processing the flush's messages first.
-  if (sawMutate) {
-    const root = mutateParent;
+  // One bindAll per mutated subtree after the pass (replacing the per-mutate
+  // setTimeout), deferred so Shiny finishes processing the flush's messages
+  // first. Binding each parent — not just the first — wires Shiny outputs that a
+  // later, disjoint mutate inserted.
+  if (mutateParents.size > 0) {
     setTimeout(() => {
-      Shiny.bindAll!((root || document.body) as Element);
+      mutateParents.forEach((parent) => Shiny.bindAll!(parent));
     }, 0);
   }
 }

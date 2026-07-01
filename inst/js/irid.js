@@ -616,18 +616,15 @@
   }
   function applyRender(msg) {
     const widgetAcc = {};
-    let sawMutate = false;
-    let mutateParent = null;
+    const mutateParents = /* @__PURE__ */ new Set();
     msg.ops.forEach((op) => {
       switch (op.kind) {
-        case "mutate":
+        case "mutate": {
           applyMutate(op);
-          sawMutate = true;
-          if (!mutateParent) {
-            const a = lookupAnchors(op.id);
-            if (a) mutateParent = a.start.parentNode;
-          }
+          const a = lookupAnchors(op.id);
+          if (a) mutateParents.add(a.start.parentNode);
           break;
+        }
         case "wire":
           applyWire(op);
           break;
@@ -647,10 +644,9 @@
       }
     });
     for (const id in widgetAcc) applyWidgetValues(id, widgetAcc[id]);
-    if (sawMutate) {
-      const root = mutateParent;
+    if (mutateParents.size > 0) {
       setTimeout(() => {
-        Shiny.bindAll(root || document.body);
+        mutateParents.forEach((parent) => Shiny.bindAll(parent));
       }, 0);
     }
   }
