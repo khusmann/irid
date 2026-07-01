@@ -40,7 +40,7 @@ A irid widget construct with class \code{irid_widget}.
 \description{
 \code{IridWidget()} is the third irid process-tags citizen (alongside
 control-flow nodes and \code{Output}). It emits a container element plus an
-init record that mount turns into an \code{irid-widget-init} custom message.
+init record that mount turns into a \code{widget-init} op.
 The client's \code{irid.defineWidget("<name>", factory)} registration is
 looked up by \code{name} and called once per mount. The factory may return its
 \verb{\{update, destroy\}} handle directly or a Promise of it — make it \code{async}

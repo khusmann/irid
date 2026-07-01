@@ -47,7 +47,7 @@ normalize_widget_events <- function(events) {
 #'
 #' `IridWidget()` is the third irid process-tags citizen (alongside
 #' control-flow nodes and `Output`). It emits a container element plus an
-#' init record that mount turns into an `irid-widget-init` custom message.
+#' init record that mount turns into a `widget-init` op.
 #' The client's `irid.defineWidget("<name>", factory)` registration is
 #' looked up by `name` and called once per mount. The factory may return its
 #' `{update, destroy}` handle directly or a Promise of it — make it `async`

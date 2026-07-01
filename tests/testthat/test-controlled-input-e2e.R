@@ -1,5 +1,5 @@
 # End-to-end tests for the controlled-input optimistic-update gate and reactive
-# DOM writes in handlers.ts (irid-attr target=dom/text) — the browser-side
+# DOM writes in handlers.ts (`attr` target=dom / `text` ops) — the browser-side
 # behavior the core/seq vitest suite cannot reach. Fixture: controlled.R.
 #
 #   IRID_E2E=1 Rscript -e 'devtools::test(filter = "controlled-input-e2e")'

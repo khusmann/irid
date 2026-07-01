@@ -1,5 +1,7 @@
-# Producer-side protocol codec: the `msg_irid_*` message constructors + the
-# `coerce_value_as_number` inbound step, built on a handful of `json_*` shape helpers.
+# Producer-side protocol codec: the `msg_irid_*` message constructors (`config` /
+# `render` / `ready`), the `op_irid_*` op constructors (the ops carried inside an
+# `irid-render` message), + the `coerce_value_as_number` inbound step, built on a
+# handful of `json_*` shape helpers.
 #
 # Shiny owns the `toJSON` call in `sendCustomMessage` (`auto_unbox = TRUE`,
 # hardcoded), so predictable serialization is a *producer-construction* concern,
@@ -56,12 +58,19 @@ json_map <- function(x, null_ok = FALSE) {
   if (is.null(nms) || any(!nzchar(nms))) {
     cli::cli_abort("A JSON map field must be fully named.")
   }
-  jsonify <- function(v) {
-    if (is.list(v)) return(lapply(v, jsonify))
-    if (is.atomic(v) && !is.null(names(v))) return(as.list(v))
-    v
-  }
-  jsonify(as.list(x))
+  json_value(as.list(x))
+}
+
+# Recursively bridge the named-vector -> object quirk for an arbitrary value: a
+# named atomic vector serializes as a one-key-per-name object only as a named
+# *list* (jsonlite keys `[]`-vs-`{}` off list NAMES), so convert named atomics to
+# named lists at every depth. Unnamed vectors and scalars pass through unchanged.
+# Used by `json_map` (per member) and by `op_irid_attr` (a widget prop value can
+# be a named atomic like plotly's `c("8" = "legendonly")`).
+json_value <- function(v) {
+  if (is.list(v)) return(lapply(v, json_value))
+  if (is.atomic(v) && !is.null(names(v))) return(as.list(v))
+  v
 }
 
 # A JSON string: asserts a length-1, non-NA character; strips names. Strict — an
@@ -110,9 +119,9 @@ json_bool <- function(x, null_ok = FALSE) {
 #
 # `as_protocol()` renders an irid value object (a classed config/value type) into
 # the plain-list protocol shape jsonlite serializes. It is the value tier of the
-# codec; `msg_irid_*` (below) is the message tier and calls it on nested value
-# objects. (Naming: `as_protocol` returns an R list — the protocol *shape* — not a
-# JSON string, so it is deliberately NOT `to_json`.)
+# codec; the `msg_irid_*` / `op_irid_*` constructors (below) are the message tier
+# and call it on nested value objects. (Naming: `as_protocol` returns an R list —
+# the protocol *shape* — not a JSON string, so it is deliberately NOT `to_json`.)
 #' @keywords internal
 #' @noRd
 as_protocol <- function(x) UseMethod("as_protocol")
@@ -154,7 +163,7 @@ as_protocol.irid_echo_gate <- function(x) {
   list(seq = json_number(x$seq), channel = json_string(x$channel))
 }
 
-# --- lifecycle message constructors ----------------------------------------
+# --- session message constructors (config / ready) -------------------------
 
 # irid-config: materialized stale-timeout (always present; `null` disables).
 msg_irid_config <- function(stale_timeout) {
@@ -168,55 +177,57 @@ msg_irid_ready <- function(output) {
   list(output = json_string(output, null_ok = TRUE))
 }
 
-# irid-widget-init: `props` is a materialized map (empty -> `{}`); NULL-valued
+# --- widget-init op constructor --------------------------------------------
+
+# widget-init op: `props` is a materialized map (empty -> `{}`); NULL-valued
 # props are kept as explicit `null` so the factory sees its full declared prop set.
-msg_irid_widget_init <- function(id, name, props) {
-  list(id = json_string(id), name = json_string(name), props = json_map(props))
+op_irid_widget_init <- function(id, name, props) {
+  list(
+    kind = "widget-init",
+    id = json_string(id), name = json_string(name), props = json_map(props)
+  )
 }
 
-# --- irid-attr message constructors ----------------------------------------
+# --- attr / text op constructors -------------------------------------------
 
-# DOM property/attribute write. `value` is arbitrary user data (left as-is); `gate`
-# is an `irid_echo_gate` value object, or NULL for a programmatic write (no echo to
-# gate, rendered as the protocol `null`). Always present.
-msg_irid_attr_dom <- function(id, attr, value, gate = NULL) {
+# A bound value pushed to its sink, discriminated on `target`:
+#   "dom"    — a DOM property/attribute write on `getElementById(id)`.
+#   "widget" — a single-key prop write; the client accumulates every `target =
+#              "widget"` op for one id across the render and calls `update()` once.
+# Both share the shape `{ id, attr, value, gate }`. `value` is arbitrary user data,
+# passed through `json_value` to bridge the named-vector -> object quirk (a widget
+# prop can be a named atomic like plotly's `c("8" = "legendonly")`; a scalar DOM
+# value passes through untouched). `gate` is an `irid_echo_gate` value object, or
+# NULL for a programmatic write (rendered as the protocol `null`). Always present.
+op_irid_attr <- function(target, id, attr, value, gate = NULL) {
   list(
-    id = json_string(id), target = "dom", attr = json_string(attr), value = value,
+    kind = "attr",
+    target = json_string(target),
+    id = json_string(id),
+    attr = json_string(attr),
+    value = json_value(value),
     gate = if (is.null(gate)) NULL else as_protocol(gate)
   )
 }
 
-# Text replacement inside a comment-anchor range. No gate (text never gates).
-# `value` arrives already normalized to a string by `coerce_text_child` (empty/NA
-# -> ""), so `json_string` just asserts it.
-msg_irid_attr_text <- function(id, value) {
-  list(id = json_string(id), target = "text", value = json_string(value))
+# Text replacement inside a comment-anchor range — its own op kind (no attr, no
+# gate). `value` arrives already normalized to a string by `coerce_text_child`
+# (empty/NA -> ""), so `json_string` just asserts it.
+op_irid_text <- function(id, value) {
+  list(kind = "text", id = json_string(id), value = json_string(value))
 }
 
-# Coalesced widget batch. `values` is a map (always >= 1 key); `gates` is the
-# sparse per-key map of `irid_echo_gate` value objects, rendered to protocol shape
-# here. `valueGates` is ALWAYS present — empty `{}` when no key is gated (all
-# programmatic). The client reads gates per key, so an absent key (undefined gate)
-# applies unconditionally, making `{}` indistinguishable from omission.
-msg_irid_attr_widget <- function(id, values, gates) {
-  list(
-    id = json_string(id),
-    target = "widget",
-    values = json_map(values),
-    valueGates = json_map(lapply(gates, as_protocol))
-  )
-}
+# --- wire op constructor -------------------------------------------------
 
-# --- irid-wire message constructor -----------------------------------------
-
-# One `irid-wire` entry — the serialized per-slot `wire()` carrier for one channel.
+# One `wire` op — the serialized per-slot `wire()` carrier for one channel.
 # `channel` is the namespaced inputId. The protocol shape is a discriminated union on
 # `source`: a dom event carries `domOpts` + `clientOnly`; the widget arm adds no
 # extra fields (the client indexes widget streams by the `{id}:{event}` pair its
 # setProp/sendEvent resolves against, both already present). The nested value
-# objects (`timing`, `dom_opts`) ride the event row whole, rendered via `as_protocol()`.
-msg_irid_wire <- function(ev, channel, client_only) {
-  msg <- list(
+# objects (`timing`, `dom_opts`) ride the op whole, rendered via `as_protocol()`.
+op_irid_wire <- function(ev, channel, client_only) {
+  op <- list(
+    kind = "wire",
     id = json_string(ev$id),
     event = json_string(ev$event),
     channel = json_string(channel),
@@ -225,13 +236,13 @@ msg_irid_wire <- function(ev, channel, client_only) {
     coalesce = json_bool(ev$coalesce)
   )
   if (!identical(ev$source, "widget")) {
-    msg$domOpts <- as_protocol(ev$dom_opts)
-    msg$clientOnly <- json_bool(client_only)
+    op$domOpts <- as_protocol(ev$dom_opts)
+    op$clientOnly <- json_bool(client_only)
   }
-  msg
+  op
 }
 
-# --- irid-mutate message constructor ---------------------------------------
+# --- mutate op constructor -------------------------------------------------
 
 # Granular comment-anchor range mutations: the sole structural message, driving
 # Each (N keyed/positional children) AND When/Match (one child, keyed by active
@@ -240,13 +251,26 @@ msg_irid_wire <- function(ev, channel, client_only) {
 # a no-op indistinguishable from omission, and a uniform shape beats a contextual
 # one. Callers speak in empty collections (never NULL), so `json_array` stays
 # strict (a NULL here is an encoder bug) and forces each to a JSON array.
-msg_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
+op_irid_mutate <- function(id, removes = list(), inserts = list(), order = list()) {
   list(
+    kind = "mutate",
     id = json_string(id),
     removes = json_array(removes),
     inserts = json_array(inserts),
     order = json_array(order)
   )
+}
+
+# --- irid-render message constructor ---------------------------------------
+
+# One flush's render: an ordered op list applied by the client in one synchronous
+# pass (one paint). `ops` is the list of already-constructed `op_irid_*` op
+# payloads in EMISSION order (apply order) — a child's `mutate` precedes the
+# `wire`/`widget-init`/`attr` that need its element, each op self-discriminated by
+# its `kind`. Each op's wire shape was pinned at construction, so the payloads pass
+# through unchanged. The drain only sends a non-empty render, so `ops` is >= 1.
+msg_irid_render <- function(ops) {
+  list(ops = json_array(ops))
 }
 
 # --- Inbound: client -> server payload coercion ----------------------------

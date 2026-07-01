@@ -16,9 +16,9 @@ export const sequences: Sequences = {};
 /**
  * Has the gate's channel counter already moved past the echo's seq? Inert when
  * no gate is present (a programmatic update) or when the counter hasn't advanced
- * beyond the echo. One `EchoGate` shape, called identically from the dom path
- * (`msg.gate`, `EchoGate | null`) and the widget per-key path (`valueGates[k]`,
- * `EchoGate | undefined`) — both "no gate" spellings mean "apply".
+ * beyond the echo. One `EchoGate` shape, checked identically for a dom `attr` op
+ * and a widget `attr` op — both carry `op.gate` (`EchoGate | null`), and a null
+ * gate means "apply".
  */
 export function isStaleEcho(
   gate: EchoGate | null | undefined,

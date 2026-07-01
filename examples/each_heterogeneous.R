@@ -21,7 +21,7 @@
 # observes the parent change, sees the entry's shape signature
 # changed, tears down the old mini-store + scope + DOM, and rebuilds
 # with a fresh mini-store of the new shape — emitted as a single
-# irid-mutate carrying the new range plus `order`. Sibling blocks
+# `mutate` op carrying the new range plus `order`. Sibling blocks
 # keep their state and focus.
 #
 # Try in the running app:

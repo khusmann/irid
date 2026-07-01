@@ -379,8 +379,8 @@ process_tags <- function(tag, counter = irid_id_counter()) {
       # inside restricted-content parents (`<option>`, `<textarea>`, etc.),
       # which use insertion modes that drop unrecognised start tags. Comment
       # nodes are valid children of any element, so the same shape works
-      # everywhere. The binding's `target = "text"` tells mount to send an
-      # `irid-attr` message that replaces the range with a single text node.
+      # everywhere. The binding's `target = "text"` tells mount to emit a
+      # `text` op that replaces the range with a single text node.
       id <- next_id()
       bindings[[length(bindings) + 1L]] <<- list(
         id = id, target = "text", fn = node

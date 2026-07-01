@@ -88,8 +88,8 @@ test_that("an in-place value change updates text without remounting the item", {
   e2e_wait_until(app, "document.querySelectorAll('#klist > li').length === 3")
   e2e_wait_idle(app)
 
-  # Stamp the 'a' <li>; renaming it must update only its inner text (irid-attr
-  # target=text), reusing the same element — no remove/insert, marker survives.
+  # Stamp the 'a' <li>; renaming it must update only its inner text (a `text`
+  # op), reusing the same element — no remove/insert, marker survives.
   e2e_eval(app, "document.querySelector('#klist > li[data-id=a]').__keep = 'K'")
   e2e_click(app, "#btn-rename")
   e2e_wait_until(app, "document.querySelector('#klist > li[data-id=a]').textContent.indexOf('Alpha2') !== -1")

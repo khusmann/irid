@@ -47,7 +47,7 @@ App <- function() {
 
     # Keyed Each in a restricted-content parent (<ul> accepts only <li>). The
     # reactive text child (`\() item$text()`) lives inside each <li>, so an
-    # in-place rename round-trips through irid-attr target="text".
+    # in-place rename round-trips through a `text` op.
     tags$ul(
       id = "klist",
       Each(items, by = \(x) x$id, \(item) {

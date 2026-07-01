@@ -10,7 +10,7 @@ import {
   setupImmediate,
   setupThrottle,
 } from "../core/ratelimit";
-import type { IridClientEvent, IridWireWidget } from "../protocol";
+import type { IridClientEvent, OpWireWidget } from "../protocol";
 
 interface Sent {
   inputId: string;
@@ -43,8 +43,9 @@ afterEach(() => {
 // source:"widget" so no DOM listener is attached (el can be null); coalesce:false
 // so the server-idle path ($(document).one) is never hit. Timing (ms/leading) is
 // passed explicitly to each setup factory, so the carrier `timing` here is inert.
-function msg(over: Partial<IridWireWidget>): IridWireWidget {
+function msg(over: Partial<OpWireWidget>): OpWireWidget {
   return {
+    kind: "wire",
     id: "el",
     event: "input",
     channel: "in",

@@ -81,9 +81,16 @@ test_that("iridApp server sends config synchronously and wires the tree", {
   shiny::isolate(server_fn(s$input, s$output, s))
   s$flushReact()
 
-  types <- vapply(s$msgs(), function(m) m$type, character(1))
-  expect_true("irid-config" %in% types)  # sent before mounting
-  expect_true("irid-wire" %in% types)  # the value autobind registered an event
+  msgs <- s$msgs()
+  # `irid-config` is a standalone message (has `$type`); a `wire` op rides the
+  # `irid-render` frame (has `$kind`). An op has no `$type` and a message no
+  # `$kind`, so each predicate is NULL-safe via `identical`.
+  expect_true(any(vapply(
+    msgs, function(m) identical(m$type, "irid-config"), logical(1)
+  )))  # sent before mounting
+  expect_true(any(vapply(
+    msgs, function(m) identical(m$kind, "wire"), logical(1)
+  )))  # the value autobind registered an event
 })
 
 # --- iridOutput --------------------------------------------------------------

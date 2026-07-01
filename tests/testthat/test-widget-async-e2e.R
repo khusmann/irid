@@ -40,7 +40,7 @@ test_that("updates during async construction are buffered, then flushed in order
   expect_false(tw(app)$inited)
 
   # Change a bound prop while the factory is still awaiting. The substrate must
-  # BUFFER this irid-attr (handle is null), not drop it or error.
+  # BUFFER this widget attr op (handle is null), not drop it or error.
   e2e_click(app, "#btn-change")
   e2e_wait_idle(app)
   expect_false(tw(app)$inited)              # still parked
