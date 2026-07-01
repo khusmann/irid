@@ -141,7 +141,7 @@ test_that("switching branches re-renders the other branch (remove old + insert n
 })
 
 test_that("switching branches tears down the previous branch's observers", {
-  # A reactive attr binding in the yes branch fires irid-attr while mounted.
+  # A reactive attr binding in the yes branch fires an attr op while mounted.
   # After flipping to otherwise, the yes mount is destroyed, so further changes
   # to its reactive must produce no echo.
   cond <- shiny::reactiveVal(TRUE)

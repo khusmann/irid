@@ -166,7 +166,7 @@ test_that("widget wire ops share one namespaced inputId space", {
   s$flushReact() # drain the render frame (wire ops ride it now)
 
   # Each wire is its own op (one per channel), so the prop write-back and the
-  # event arrive as two separate irid-wire ops.
+  # event arrive as two separate wire ops.
   ev_msg <- Filter(function(m) m$kind == "wire", s$msgs())
   expect_length(ev_msg, 2L)
   byname <- stats::setNames(

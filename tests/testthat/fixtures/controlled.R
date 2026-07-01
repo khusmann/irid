@@ -8,7 +8,7 @@
 #                                   even while the input is focused.
 #  - #btn-clear -> text(""):        a programmatic write from ANOTHER element
 #                                   applies while #trunc is focused.
-#  - #ro-text (\() text()):         reactive text child — irid-attr target=text.
+#  - #ro-text (\() text()):         reactive text child — a `text` op.
 #  - #box data-active:              reactive DOM attribute — setAttribute on a
 #                                   value, removeAttribute on FALSE.
 

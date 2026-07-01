@@ -23,11 +23,14 @@ new_fake_session <- function() {
   }
   s$msgs <- function() flatten_irid_render(store$msgs)
   s$raw_msgs <- function() store$msgs
-  # Remember the latest fake session so the bare `flushReact()` helper can route
-  # through its `s$flushReact()`, which fires `onFlushed` — the render drain rides
-  # `session$onFlushed`, and the bare reactive flush alone does not fire it, so
-  # without this the render frame never drains.
+  # Register this session as the one the bare `flushReact()` helper routes
+  # through, so its `s$flushReact()` fires `onFlushed` — the render drain rides
+  # `session$onFlushed`, and a bare reactive flush alone does not fire it, so
+  # without this the render frame never drains. Cleared at the end of the test
+  # file (the boundary session-less test files fall on), so a later file's
+  # session-less `flushReact()` never routes through a stale foreign session.
   .latest_fake_session$s <- s
+  withr::defer(.latest_fake_session$s <- NULL, envir = testthat::teardown_env())
   s
 }
 
@@ -50,9 +53,10 @@ flatten_irid_render <- function(msgs) {
 }
 
 # Flush pending reactive invalidations outside an observer context. Routes
-# through the latest fake session's `flushReact()` so `onFlushed` fires (a render
-# batch armed during the flush gets sent), matching real Shiny's flush ->
-# onFlushed sequencing. Falls back to a bare reactive flush before any session.
+# through the current test's fake session `flushReact()` so `onFlushed` fires (a
+# render armed during the flush gets sent), matching real Shiny's flush ->
+# onFlushed sequencing. Falls back to a bare reactive flush when the test has no
+# session (`new_fake_session` scopes its registration to the calling test).
 flushReact <- function() {
   s <- .latest_fake_session$s
   if (is.null(s)) shiny:::flushReact() else s$flushReact()
