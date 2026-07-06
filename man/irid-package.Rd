@@ -20,7 +20,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Kyle Husmann \email{khusmann@gmail.com}
+\strong{Maintainer}: Kyle Husmann \email{irid@kylehusmann.com}
 
 }
 \keyword{internal}

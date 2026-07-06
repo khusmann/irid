@@ -7,7 +7,7 @@ This is the first submission of 'irid' to CRAN.
 0 errors | 0 warnings | 1 note
 
 * checking CRAN incoming feasibility ... NOTE
-  Maintainer: 'Kyle Husmann <khusmann@gmail.com>'
+  Maintainer: 'Kyle Husmann <irid@kylehusmann.com>'
   New submission
 
   This is a new submission.
