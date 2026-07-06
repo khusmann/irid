@@ -11,14 +11,17 @@
 coverage](https://codecov.io/gh/khusmann/irid/graph/badge.svg)](https://app.codecov.io/gh/khusmann/irid)
 <!-- badges: end -->
 
+**Fine-grained reactive components for Shiny.**
+
 If you’ve ever fought `updateSliderInput`, wrestled
 `freezeReactiveValue`, or watched `renderUI` destroy your DOM on every
-change — irid is for you.
+change, irid is for you.
 
-irid lets you bind a `reactiveVal` directly to any DOM attribute. One
-reactive changes, one attribute updates. No `ui`/`server` split. No
-fragile input IDs to wire together. Just component functions with
-reactive state and DOM in the same scope.
+irid lets you bind a `reactiveVal` directly to any DOM attribute —
+change the reactive, and that one attribute updates. There’s no
+[ui/server
+split](https://www.kylehusmann.com/posts/2026/shinys-achilles-heel/):
+your component is an ordinary R function holding both state and markup.
 
 ``` r
 library(irid)
