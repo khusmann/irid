@@ -21,8 +21,8 @@ If you’ve ever fought `updateSliderInput`, wrestled
 change, irid is for you.
 
 irid lets you bind a `reactiveVal` directly to any DOM attribute —
-change the reactive, and that one attribute updates. There’s no
-[ui/server
+change the reactive, and that one attribute updates without re-rendering
+the whole component. There’s no [ui/server
 split](https://www.kylehusmann.com/posts/2026/shinys-achilles-heel/):
 your component is an ordinary R function holding both state and markup.
 
