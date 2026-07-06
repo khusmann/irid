@@ -135,10 +135,10 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
       keys
     )
 
-    set_internal <- function(record) {
+    set_internal <- function(value) {
       for (k in keys) {
-        if (k %in% names(record)) {
-          child_nodes[[k]]$set_internal(record[[k]])
+        if (k %in% names(value)) {
+          child_nodes[[k]]$set_internal(value[[k]])
         }
       }
       invisible()
@@ -159,9 +159,9 @@ build_mini_node <- function(initial, get_self, set_self, scope, path) {
     # reactiveVal auto-registers for destroy (no-op wrap pre-#4372).
     rv <- scope$with_scope(shiny::reactiveVal(strip_asis(initial)))
 
-    set_internal <- function(v) {
+    set_internal <- function(value) {
       old_v <- shiny::isolate(rv())
-      if (!identical(old_v, v)) rv(v)
+      if (!identical(old_v, value)) rv(value)
       invisible()
     }
 
