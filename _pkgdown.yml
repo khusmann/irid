@@ -20,6 +20,7 @@ reference:
       - iridApp
       - iridOutput
       - renderIrid
+      - iridExample
 
   - title: Control Flow
     desc: Reactive control flow for conditional and list rendering
