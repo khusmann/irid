@@ -16,3 +16,4 @@
 ^srcts$
 ^codecov\.yml$
 ^cran-comments\.md$
+\.js\.map$
