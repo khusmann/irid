@@ -60,14 +60,12 @@ it live</strong></a>
 
 See more examples:
 
-- <a href="https://irid.kylehusmann.com/apps/composing/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Composing
-  Components</a>
-- <a href="https://irid.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
-  List</a>
 - <a href="https://irid.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature
   Converter</a>
-- <a href="https://irid.kylehusmann.com/apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Optimistic
-  Updates</a>
+- <a href="https://irid.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
+  List</a>
+- <a href="https://irid.kylehusmann.com/apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Reactive
+  Plotly</a>
 
 ## 100% backward compatible
 
