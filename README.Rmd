@@ -110,7 +110,7 @@ See the [Getting Started](https://irid.kylehusmann.com/articles/irid.html) vigne
 
 ## Why irid?
 
-Irid comes from *iridescent* — like the rainbow shimmer inside a shell, formed
+irid comes from *iridescent* — like the rainbow shimmer inside a shell, formed
 by its layered structure. A component layer for Shiny — extra shiny, for Shiny.
 
 ## Inspiration
