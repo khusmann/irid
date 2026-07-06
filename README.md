@@ -5,20 +5,26 @@
 
 <!-- badges: start -->
 
-[![WIP](https://img.shields.io/badge/status-WIP-yellow)](https://github.com/khusmann/irid)
+[![CRAN
+status](https://www.r-pkg.org/badges/version/irid)](https://CRAN.R-project.org/package=irid)
+[![Lifecycle:
+experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/khusmann/irid/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/khusmann/irid/actions/workflows/R-CMD-check.yaml)
 [![Codecov test
 coverage](https://codecov.io/gh/khusmann/irid/graph/badge.svg)](https://app.codecov.io/gh/khusmann/irid)
 <!-- badges: end -->
 
+**Component-based UI for Shiny, with fine-grained reactivity.**
+
 If you’ve ever fought `updateSliderInput`, wrestled
 `freezeReactiveValue`, or watched `renderUI` destroy your DOM on every
-change — irid is for you.
+change, irid is for you.
 
-irid lets you bind a `reactiveVal` directly to any DOM attribute. One
-reactive changes, one attribute updates. No `ui`/`server` split. No
-fragile input IDs to wire together. Just component functions with
-reactive state and DOM in the same scope.
+irid lets you bind a `reactiveVal` directly to any DOM attribute —
+change the reactive, and that one attribute updates without re-rendering
+the whole component. There’s no [ui/server
+split](https://www.kylehusmann.com/posts/2026/shinys-achilles-heel/):
+your component is an ordinary R function holding both state and markup.
 
 ``` r
 library(irid)
@@ -57,14 +63,12 @@ it live</strong></a>
 
 See more examples:
 
-- <a href="https://irid.kylehusmann.com/apps/composing/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Composing
-  Components</a>
-- <a href="https://irid.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
-  List</a>
 - <a href="https://irid.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Temperature
   Converter</a>
-- <a href="https://irid.kylehusmann.com/apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Optimistic
-  Updates</a>
+- <a href="https://irid.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Todo
+  List</a>
+- <a href="https://irid.kylehusmann.com/apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Reactive
+  Plotly</a>
 
 ## 100% backward compatible
 
@@ -108,7 +112,7 @@ get started.
 
 ## Why irid?
 
-Irid comes from *iridescent* — like the rainbow shimmer inside a shell,
+irid comes from *iridescent* — like the rainbow shimmer inside a shell,
 formed by its layered structure. A component layer for Shiny — extra
 shiny, for Shiny.
 
