@@ -5,7 +5,10 @@
 
 <!-- badges: start -->
 
-[![WIP](https://img.shields.io/badge/status-WIP-yellow)](https://github.com/khusmann/irid)
+[![CRAN
+status](https://www.r-pkg.org/badges/version/irid)](https://CRAN.R-project.org/package=irid)
+[![Lifecycle:
+experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/khusmann/irid/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/khusmann/irid/actions/workflows/R-CMD-check.yaml)
 [![Codecov test
 coverage](https://codecov.io/gh/khusmann/irid/graph/badge.svg)](https://app.codecov.io/gh/khusmann/irid)
