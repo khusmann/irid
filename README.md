@@ -58,7 +58,7 @@ OldFaithful <- function() {
 iridApp(OldFaithful)
 ```
 
-<a href="https://irid.kylehusmann.com/apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank"><strong>Try
+<a href="https://irid.kylehusmann.com/apps/old_faithful/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank"><strong>Try
 it live</strong></a>
 
 See more examples:
@@ -94,7 +94,7 @@ Migrate one `renderUI` at a time, or switch to `iridApp` when you’re
 ready.
 
 See also:
-<a href="https://irid.kylehusmann.com/apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
+<a href="https://irid.kylehusmann.com/apps/shiny_interop/index.html?_shinylive-mode=editor-terminal-viewer" target="_blank">Shiny
 Interop</a> example.
 
 ## Installation

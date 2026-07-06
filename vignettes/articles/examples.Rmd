@@ -4,13 +4,21 @@ title: "Examples"
 
 Each example below opens in a live [Shinylive](https://shinylive.io/) editor where you can read the source, modify it, and see the result — all in the browser.
 
+Every example also ships with the package, so you can run it locally with `iridExample()`. Pass the name from its link to launch it:
+
+```r
+iridExample("old_faithful")
+```
+
+Call `iridExample()` with no argument to list the available examples. Some examples need extra packages (e.g. bslib, plotly); the runner checks for these first and tells you what to install. A couple (`plotly`, `codemirror`) load JavaScript from a CDN at runtime, so they need an internet connection even when run locally.
+
 <div class="examples-list" style="margin-top: 1.5rem;">
 
 ### [Counter](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 The three core bindings in one place: a reactive text child, a reactive attribute (`disabled`), and a direct `onClick` handler.
 
-### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Old Faithful](../apps/old_faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 The classic Shiny demo, rebuilt with irid. A controlled slider drives a histogram of Old Faithful eruption wait times.
 
@@ -26,11 +34,11 @@ Two inputs representing the same value in different units, where editing either 
 
 A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R list. Adding, toggling, filtering, and removing items are ordinary functions that update that list.
 
-### [Nested Each](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Nested Each](../apps/each_nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 A question editor showing how `Each` composes with hierarchical state. Each question is projected as a mini-store, a nested `author = list(name, role)` field is itself a sub-mini-store, and an inner `Each` iterates each question's options. Editing a deeply nested field re-renders only that one input, and kept questions keep their inner state across sibling adds and removes.
 
-### [Heterogeneous Each](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Heterogeneous Each](../apps/each_heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 A minimal block editor whose list mixes record shapes — heading, paragraph, and todo blocks. A `Match` inside the `Each` body dispatches on each block's `type`. Changing a block's kind reshapes just that slot in the parent collection: the reconciler tears down the old slot and rebuilds it with a fresh mini-store of the new shape, while sibling blocks keep their state and focus.
 
@@ -38,11 +46,11 @@ A minimal block editor whose list mixes record shapes — heading, paragraph, an
 
 Rebuilds the scenario from [Shiny's dynamic-observers problem](https://www.kylehusmann.com/posts/2025/shiny-dynamic-observers/): pick a dataset, pick columns from it, each column becomes a card with a close button, and removing a card puts the column back in the dropdown. In Shiny this required nested observers, ghost-input workarounds, and a memory leak fix. Here the parent owns a `reactiveVal` and the dropdown and close buttons both read and write it directly.
 
-### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Optimistic Updates](../apps/optimistic_updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 irid applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
 
-### [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### [Shiny Modules](../apps/shiny_interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 irid components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `iridOutput()` and `renderIrid()`.
 

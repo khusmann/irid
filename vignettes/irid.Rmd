@@ -374,4 +374,4 @@ The migration path:
 4. Eventually switch to `iridApp` when the whole app is irid
 5. Old `sliderInput` etc. still work at every stage
 
-*See the [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
+*See the [Shiny Modules](../apps/shiny_interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*

@@ -20,6 +20,7 @@ R/
   scope.R         make_scope — per-item / per-case lifetime container; feature-detects shiny#4372 scoped teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
   widget.R        IridWidget (two-way props)
+  example.R       iridExample — dependency-checked runner for inst/examples/*
   irid-package.R Package-level imports
 
 inst/js/
@@ -42,8 +43,11 @@ srcts/             TypeScript source for the client — the single source vendor
                          widgets, handlers, index) -> inst/js/irid.js
   src/widgets/plotly/*   plotly factory (pure + index) -> plotly-irid.js
 
-examples/
+inst/examples/          Example apps, shipped with the package and launchable
+                        via iridExample(); also the source the pkgdown workflow
+                        shinylive-compiles to the website (filename stem → slug)
   old_faithful.R        Old Faithful geyser histogram with PlotOutput
+  counter.R             Single Counter component — the minimal reactive example
   composing.R           Two Counter instances showing closure-based isolation
   temperature.R         Bidirectional temperature converter (controlled inputs)
   todo.R                Todo app (Each positional, When, dynamic lists)

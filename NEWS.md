@@ -20,13 +20,19 @@
 
 ## New features
 
+* `iridExample()` — run the example apps shipped with the package (mirroring
+  `shiny::runExample()`). The examples now live in `inst/examples/` and ship
+  with the package. A no-arg call lists the available examples; the runner
+  checks each example's extra package dependencies up front and stops with an
+  actionable message if any are missing.
+
 * `IridWidget()` — wrap arbitrary JavaScript libraries (CodeMirror,
   Plotly, Leaflet, ...) as reactive irid components. Props are
   two-way-capable by default (symmetric with DOM `value`/`checked`): a
   callable prop reads inbound and accepts write-back when the widget JS
   calls `setProp(key, value)`. Genuine notifications flow back via `events`
   (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
-  irid construct. See `examples/codemirror.R`.
+  irid construct. See `inst/examples/codemirror.R`.
 
 * Per-item (`Each`) and per-case (`Match`) `reactiveVal`s are now reclaimed on
   unmount, rather than leaking until session end. `make_scope` feature-detects

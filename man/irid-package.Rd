@@ -4,11 +4,11 @@
 \name{irid-package}
 \alias{irid}
 \alias{irid-package}
-\title{irid: Component-Based Shiny UI with Fine-Grained Reactivity}
+\title{irid: Component-Based 'Shiny' UI with Fine-Grained Reactivity}
 \description{
 \if{html}{\figure{logo.png}{options: style='float: right' alt='logo' width='120'}}
 
-A component-based reactive UI framework for Shiny that binds reactive values directly to DOM attributes, enabling fine-grained updates without re-rendering or 'update*Input' callbacks.
+A component-based reactive UI framework for 'Shiny' that binds reactive values directly to DOM attributes, enabling fine-grained updates without re-rendering or 'update*Input' callbacks.
 }
 \seealso{
 Useful links:
