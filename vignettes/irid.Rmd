@@ -52,7 +52,7 @@ Counter <- function() {
 iridApp(Counter)
 ```
 
-***[Try it live.](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
+***[Try it live.](https://irid.kylehusmann.com/apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
 
 A irid app is a single function that returns a tag tree. Inside the function
 you create `reactiveVal`s for state and wire them to the DOM with functions.
@@ -115,7 +115,7 @@ App <- function() {
 iridApp(App)
 ```
 
-***[Try it live.](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
+***[Try it live.](https://irid.kylehusmann.com/apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}***
 
 `count_a` and `count_b` are created once in `App` and passed down to each
 `Counter`. There are no string IDs to keep in sync. `total` is a derived
@@ -252,7 +252,7 @@ validation on write, put it in the proxy's `set`
 (`value = reactiveProxy(get, set)`); to react asynchronously, observe the
 bound reactive.
 
-*See the [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
+*See the [Temperature Converter](https://irid.kylehusmann.com/apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
 ## Control flow
 
@@ -312,7 +312,7 @@ changes update slots in place without DOM recreation. `by = fn` keys
 items by `fn(item)` — kept items are reused across reorders, adds, and
 removes; mini-store leaves are diffed so only changed fields fire.
 
-*See the [Todo List](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
+*See the [Todo List](https://irid.kylehusmann.com/apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
 
 ## Shiny outputs
 
@@ -374,4 +374,4 @@ The migration path:
 4. Eventually switch to `iridApp` when the whole app is irid
 5. Old `sliderInput` etc. still work at every stage
 
-*See the [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*
+*See the [Shiny Modules](https://irid.kylehusmann.com/apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"} example.*

@@ -12,11 +12,14 @@ This is the first submission of 'irid' to CRAN.
 
   This is a new submission.
 
+  The check also flags "Possibly misspelled words in DESCRIPTION: DOM, UI".
+  These are standard technical acronyms (Document Object Model; user
+  interface), not misspellings.
+
 ## Test environments
 
 * Local: Ubuntu 20.04.2 LTS, R 4.2.2
-* win-builder: R-devel and R-release  <!-- TODO: run devtools::check_win_devel() / check_win_release() and confirm before submitting -->
-* macOS builder: macbuilder.r-project.org  <!-- TODO: run devtools::check_mac_release() and confirm before submitting -->
+* win-builder: R-devel and R-release (https://win-builder.r-project.org/)
 
 ## Note on bundled JavaScript
 
