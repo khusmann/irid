@@ -32,6 +32,12 @@
   (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
   irid construct. See `inst/examples/codemirror/app.R`.
 
+* `PlotlyOutput()` — a plotly component built on `IridWidget()`. UI state
+  (axis ranges, drag mode, selection, trace visibility) is exposed as two-way
+  reactive props; discrete interactions (clicks, hovers, legend) are `on*`
+  callbacks. Data changes diff via `Plotly.react()`, preserving zoom, pan, and
+  selection. See `inst/examples/plotly/app.R`.
+
 * Per-item (`Each`) and per-case (`Match`) `reactiveVal`s are now reclaimed on
   unmount, rather than leaking until session end. `make_scope` feature-detects
   [shiny#4372](https://github.com/rstudio/shiny/pull/4372)'s scoped-teardown
