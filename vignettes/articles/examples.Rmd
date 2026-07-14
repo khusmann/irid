@@ -14,7 +14,7 @@ The three core bindings in one place: a reactive text child, a reactive attribut
 iridExample("counter")
 ```
 
-[Edit in the browser](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Old Faithful
 
@@ -24,7 +24,7 @@ The classic Shiny demo, rebuilt with irid. A controlled slider drives a histogra
 iridExample("old-faithful")
 ```
 
-[Edit in the browser](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Composing Components
 
@@ -34,7 +34,7 @@ Two counter components sharing state with a parent `App`. `reactiveVal`s are cre
 iridExample("composing")
 ```
 
-[Edit in the browser](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Temperature Converter
 
@@ -44,7 +44,7 @@ Two inputs representing the same value in different units, where editing either 
 iridExample("temperature")
 ```
 
-[Edit in the browser](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Todo List
 
@@ -54,7 +54,7 @@ A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R 
 iridExample("todo")
 ```
 
-[Edit in the browser](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Nested Each
 
@@ -64,7 +64,7 @@ A question editor showing how `Each` composes with hierarchical state. Each ques
 iridExample("each-nested")
 ```
 
-[Edit in the browser](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Heterogeneous Each
 
@@ -74,7 +74,7 @@ A minimal block editor whose list mixes record shapes — heading, paragraph, an
 iridExample("each-heterogeneous")
 ```
 
-[Edit in the browser](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Dynamic Column Cards
 
@@ -84,7 +84,7 @@ Rebuilds the scenario from [Shiny's dynamic-observers problem](https://www.kyleh
 iridExample("cards")
 ```
 
-[Edit in the browser](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Optimistic Updates
 
@@ -94,7 +94,7 @@ irid applies controlled input changes immediately in the browser before the serv
 iridExample("optimistic-updates")
 ```
 
-[Edit in the browser](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Shiny Modules
 
@@ -104,7 +104,7 @@ irid components work naturally inside standard Shiny modules. This example embed
 iridExample("shiny-interop")
 ```
 
-[Edit in the browser](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### Plotly Output
 
@@ -114,7 +114,7 @@ iridExample("shiny-interop")
 iridExample("plotly")
 ```
 
-[Edit in the browser](../apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 ### CodeMirror Editor
 
@@ -124,6 +124,6 @@ A custom widget built on the `IridWidget` substrate, wrapping CodeMirror 6. Show
 iridExample("codemirror")
 ```
 
-[Edit in the browser](../apps/codemirror/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+[Run in the browser](../apps/codemirror/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 </div>
