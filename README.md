@@ -14,7 +14,7 @@ experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](h
 coverage](https://codecov.io/gh/khusmann/irid/graph/badge.svg)](https://app.codecov.io/gh/khusmann/irid)
 <!-- badges: end -->
 
-**Component-based UI for Shiny, with fine-grained reactivity.**
+**Component-based UI for Shiny with fine-grained reactivity.**
 
 If you’ve ever fought `updateSliderInput`, wrestled
 `freezeReactiveValue`, or watched `renderUI` destroy your DOM on every
