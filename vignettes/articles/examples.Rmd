@@ -2,7 +2,7 @@
 title: "Examples"
 ---
 
-Each example ships with the package — run it locally with the `iridExample()` call shown, or open the live [Shinylive](https://shinylive.io/) editor to read the source, modify it, and see the result in the browser. Call `iridExample()` with no argument to list them all.
+Each example ships with the package — run it locally with the `iridExample()` call shown, or open it in the [Shinylive](https://shinylive.io/) editor. Call `iridExample()` with no argument to list them all.
 
 <div class="examples-list" style="margin-top: 1.5rem;">
 
