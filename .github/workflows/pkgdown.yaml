@@ -140,20 +140,15 @@ jobs:
             saveRDS(metadata, meta_file)
           }
 
-          # Auto-discover examples from examples/*.R. The filename stem
-          # (with underscores) is the R script; the slug (with hyphens)
-          # becomes the URL path under docs/apps/.
-          example_files <- list.files("examples", pattern = "\\.R$", full.names = TRUE)
-          for (app_dir in example_files) {
-            stem <- tools::file_path_sans_ext(basename(app_dir))
-            slug <- gsub("_", "-", stem)
+          # Auto-discover examples from inst/examples/*/. Each example is a
+          # self-contained Shiny app directory; its name is used verbatim as
+          # the URL path under docs/apps/ and as the iridExample() argument.
+          example_dirs <- list.dirs("inst/examples", recursive = FALSE)
+          for (app_dir in example_dirs) {
+            slug <- basename(app_dir)
             dest_dir <- file.path("docs", "apps", slug)
 
-            tmp_dir <- file.path(tempdir(), slug)
-            dir.create(tmp_dir)
-            file.copy(app_dir, file.path(tmp_dir, "app.R"))
-
-            shinylive::export(appdir = tmp_dir, destdir = dest_dir)
+            shinylive::export(appdir = app_dir, destdir = dest_dir)
             inject_local_wasm(dest_dir, "_rwasm", "irid")
           }
         shell: Rscript {0}

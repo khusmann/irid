@@ -12,7 +12,6 @@
 ^TESTING\.md$
 ^\.claude$
 ^dev$
-^examples$
 ^srcts$
 ^codecov\.yml$
 ^cran-comments\.md$
