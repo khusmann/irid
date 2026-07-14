@@ -7,3 +7,5 @@ pkgdown/favicon/
 .claude/worktrees/
 srcts/node_modules/
 srcts/coverage/
+irid.Rcheck/
+*.tar.gz

@@ -1,4 +1,4 @@
-# irid (development version)
+# irid 0.3.0
 
 ## Breaking changes
 
@@ -31,6 +31,12 @@
   calls `setProp(key, value)`. Genuine notifications flow back via `events`
   (`sendEvent`). Composes inside `When`, `Each`, and `Match` like any other
   irid construct. See `inst/examples/codemirror/app.R`.
+
+* `PlotlyOutput()` — a plotly component built on `IridWidget()`. UI state
+  (axis ranges, drag mode, selection, trace visibility) is exposed as two-way
+  reactive props; discrete interactions (clicks, hovers, legend) are `on*`
+  callbacks. Data changes diff via `Plotly.react()`, preserving zoom, pan, and
+  selection. See `inst/examples/plotly/app.R`.
 
 * Per-item (`Each`) and per-case (`Match`) `reactiveVal`s are now reclaimed on
   unmount, rather than leaking until session end. `make_scope` feature-detects
