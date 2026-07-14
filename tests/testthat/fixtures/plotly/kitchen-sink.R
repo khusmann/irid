@@ -1,6 +1,6 @@
 # kitchen-sink.R — test-owned PlotlyOutput fixture (e2e rows 1-17, 22-26).
 #
-# Modeled on examples/plotly.R but OWNED BY THE SUITE: it diverges on purpose so
+# Modeled on inst/examples/plotly/app.R but OWNED BY THE SUITE: it diverges on purpose so
 # the load-bearing round-trip bugs are exercised. Stable element ids let the
 # harness target controls and readouts without scraping text. The selection is
 # bound via a *translating* reactiveProxy (car name <-> row index into the full

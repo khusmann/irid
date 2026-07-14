@@ -20,6 +20,7 @@ R/
   scope.R         make_scope — per-item / per-case lifetime container; feature-detects shiny#4372 scoped teardown
   proxy.R         reactiveProxy — callable built from a reader and optional writer
   widget.R        IridWidget (two-way props)
+  example.R       iridExample — dependency-checked runner for inst/examples/*
   irid-package.R Package-level imports
 
 inst/js/
@@ -42,18 +43,22 @@ srcts/             TypeScript source for the client — the single source vendor
                          widgets, handlers, index) -> inst/js/irid.js
   src/widgets/plotly/*   plotly factory (pure + index) -> plotly-irid.js
 
-examples/
-  old_faithful.R        Old Faithful geyser histogram with PlotOutput
-  composing.R           Two Counter instances showing closure-based isolation
-  temperature.R         Bidirectional temperature converter (controlled inputs)
-  todo.R                Todo app (Each positional, When, dynamic lists)
-  optimistic_updates.R  Controlled inputs with simulated server latency
-  shiny_interop.R       irid components inside a standard Shiny module
-  cards.R               Dynamic column cards (Each, keyed by column name)
-  each_nested.R         Nested Each + recursive mini-store fields
-  each_heterogeneous.R  Block editor with mixed record shapes + Match dispatch
-  codemirror.R          CodeMirror editor widget via IridWidget + esm.sh CDN
-  plotly.R              Reactive plotly chart via PlotlyOutput — named state
+inst/examples/<name>/app.R   Example apps, one self-contained Shiny app dir
+                        each, shipped with the package and launchable via
+                        iridExample(); also the source the pkgdown workflow
+                        shinylive-compiles to the website (dir name = URL slug)
+  old-faithful/         Old Faithful geyser histogram with PlotOutput
+  counter/              Single Counter component — the minimal reactive example
+  composing/            Two Counter instances showing closure-based isolation
+  temperature/          Bidirectional temperature converter (controlled inputs)
+  todo/                 Todo app (Each positional, When, dynamic lists)
+  optimistic-updates/   Controlled inputs with simulated server latency
+  shiny-interop/        irid components inside a standard Shiny module
+  cards/                Dynamic column cards (Each, keyed by column name)
+  each-nested/          Nested Each + recursive mini-store fields
+  each-heterogeneous/   Block editor with mixed record shapes + Match dispatch
+  codemirror/           CodeMirror editor widget via IridWidget + esm.sh CDN
+  plotly/               Reactive plotly chart via PlotlyOutput — named state
                         args (ranges/dragmode/visibility), snap-back, discrete
                         callbacks, onRelayout escape hatch, and identity-based
                         selection (selected_points via a translating

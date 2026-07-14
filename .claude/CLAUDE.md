@@ -5,7 +5,7 @@
 - Read `ARCHITECTURE.md` before searching through the project
 - Read `TESTING.md` for suite layout and how to run tests; the behavior spec
   lives in the test files under `tests/testthat/`
-- Examples live in `examples/*` and `vignettes/articles/examples.Rmd`
+- Examples live in `inst/examples/*` (shipped; run via `iridExample()`) and `vignettes/articles/examples.Rmd`
 
 ## Terminology
 
@@ -22,6 +22,7 @@
 - Do not include Co-Authored-By
 - Do not add "created with Claude"-type attribution to commits, issues, or PRs
 - Do not hard-wrap (e.g. at 80 chars) issue or PR descriptions — let them flow
+- Do not force-push or amend already-pushed commits. Make normal additive commits and plain `git push`; leave squashing to the PR's squash-merge.
 
 - If there are uncommitted changes and the user asks for something unrelated to the current work, suggest committing first before switching directions
 

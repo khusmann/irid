@@ -2,56 +2,128 @@
 title: "Examples"
 ---
 
-Each example below opens in a live [Shinylive](https://shinylive.io/) editor where you can read the source, modify it, and see the result — all in the browser.
+Each example ships with the package — run it locally with the `iridExample()` call shown, or edit and run it right in your browser. Call `iridExample()` with no argument to list them all.
 
 <div class="examples-list" style="margin-top: 1.5rem;">
 
-### [Counter](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+### Counter
 
 The three core bindings in one place: a reactive text child, a reactive attribute (`disabled`), and a direct `onClick` handler.
 
-### [Old Faithful](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("counter")
+```
+
+[Run in the browser](../apps/counter/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Old Faithful
 
 The classic Shiny demo, rebuilt with irid. A controlled slider drives a histogram of Old Faithful eruption wait times.
 
-### [Composing Components](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("old-faithful")
+```
+
+[Run in the browser](../apps/old-faithful/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Composing Components
 
 Two counter components sharing state with a parent `App`. `reactiveVal`s are created in the parent and passed down as arguments — no string IDs, no module namespacing. A derived `total` reactive shows how shared state flows naturally across the tree.
 
-### [Temperature Converter](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("composing")
+```
+
+[Run in the browser](../apps/composing/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Temperature Converter
 
 Two inputs representing the same value in different units, where editing either one updates the other. Demonstrates how controlled inputs and `reactive()` keep multiple views of the same state in sync.
 
-### [Todo List](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("temperature")
+```
+
+[Run in the browser](../apps/temperature/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Todo List
 
 A TodoMVC-style app where items are stored as a `reactiveVal` holding a plain R list. Adding, toggling, filtering, and removing items are ordinary functions that update that list.
 
-### [Nested Each](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("todo")
+```
+
+[Run in the browser](../apps/todo/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Nested Each
 
 A question editor showing how `Each` composes with hierarchical state. Each question is projected as a mini-store, a nested `author = list(name, role)` field is itself a sub-mini-store, and an inner `Each` iterates each question's options. Editing a deeply nested field re-renders only that one input, and kept questions keep their inner state across sibling adds and removes.
 
-### [Heterogeneous Each](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("each-nested")
+```
+
+[Run in the browser](../apps/each-nested/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Heterogeneous Each
 
 A minimal block editor whose list mixes record shapes — heading, paragraph, and todo blocks. A `Match` inside the `Each` body dispatches on each block's `type`. Changing a block's kind reshapes just that slot in the parent collection: the reconciler tears down the old slot and rebuilds it with a fresh mini-store of the new shape, while sibling blocks keep their state and focus.
 
-### [Dynamic Column Cards](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("each-heterogeneous")
+```
+
+[Run in the browser](../apps/each-heterogeneous/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Dynamic Column Cards
 
 Rebuilds the scenario from [Shiny's dynamic-observers problem](https://www.kylehusmann.com/posts/2025/shiny-dynamic-observers/): pick a dataset, pick columns from it, each column becomes a card with a close button, and removing a card puts the column back in the dropdown. In Shiny this required nested observers, ghost-input workarounds, and a memory leak fix. Here the parent owns a `reactiveVal` and the dropdown and close buttons both read and write it directly.
 
-### [Optimistic Updates](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("cards")
+```
+
+[Run in the browser](../apps/cards/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Optimistic Updates
 
 irid applies controlled input changes immediately in the browser before the server round-trip completes. If the server responds with a different value, the browser reconciles automatically.
 
-### [Shiny Modules](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("optimistic-updates")
+```
+
+[Run in the browser](../apps/optimistic-updates/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Shiny Modules
 
 irid components work naturally inside standard Shiny modules. This example embeds two independent counter modules side by side using `iridOutput()` and `renderIrid()`.
 
-### [Plotly Output](../apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("shiny-interop")
+```
+
+[Run in the browser](../apps/shiny-interop/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### Plotly Output
 
 `PlotlyOutput` as a first-class reactive output. Unlike the `{plotly}` htmlwidget, it uses `Plotly.react()` for incremental updates, so a data change preserves the user's zoom, pan, and selection. Axis ranges, drag mode, box/lasso selection (identity-keyed by point `ids`), and per-trace visibility are all exposed as two-way reactive arguments — interactions write back, and a rejecting `reactiveProxy` snaps the plot back.
 
-### [CodeMirror Editor](../apps/codemirror/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+```r
+iridExample("plotly")
+```
+
+[Run in the browser](../apps/plotly/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
+
+### CodeMirror Editor
 
 A custom widget built on the `IridWidget` substrate, wrapping CodeMirror 6. Shows a non-trivial widget end to end: a two-way bound document and cursor, a reactive `language` prop that swaps the editor's syntax via a CodeMirror `Compartment`, a `focus-changed` event, and a server-update annotation that keeps the editor from echoing the server's own writes back.
+
+```r
+iridExample("codemirror")
+```
+
+[Run in the browser](../apps/codemirror/index.html?_shinylive-mode=editor-terminal-viewer){target="_blank"}
 
 </div>
