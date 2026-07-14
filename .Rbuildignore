@@ -17,3 +17,4 @@
 ^cran-comments\.md$
 ^vignettes/articles$
 \.js\.map$
+^CRAN-SUBMISSION$
