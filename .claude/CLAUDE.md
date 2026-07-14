@@ -5,7 +5,7 @@
 - Read `ARCHITECTURE.md` before searching through the project
 - Read `TESTING.md` for suite layout and how to run tests; the behavior spec
   lives in the test files under `tests/testthat/`
-- Examples live in `examples/*` and `vignettes/articles/examples.Rmd`
+- Examples live in `inst/examples/*` (shipped; run via `iridExample()`) and `vignettes/articles/examples.Rmd`
 
 ## Terminology
 
