@@ -15,4 +15,5 @@
 ^srcts$
 ^codecov\.yml$
 ^cran-comments\.md$
+^vignettes/articles$
 \.js\.map$
