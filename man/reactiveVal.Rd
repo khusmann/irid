@@ -9,6 +9,23 @@
 \alias{tags}
 \alias{tagList}
 \title{Shiny reactive primitives}
+\value{
+The return values are those of the underlying \pkg{shiny}
+functions:
+\itemize{
+\item \code{reactiveVal()} returns a function that reads the current value when
+called with no argument and sets it when called with one value.
+\item \code{reactive()} returns a reactive expression (a function of class
+\code{reactiveExpr}/\code{reactive}) that yields the cached expression value when
+called.
+\item \code{observe()} and \code{observeEvent()} return an observer reference object
+(class \code{Observer}) invisibly; they are called for their side effects.
+\item \code{isolate()} returns the value of \code{expr}, evaluated without taking a
+reactive dependency.
+\item \code{tags} is a named list of functions that construct HTML tag objects, and
+\code{tagList()} returns a list of tags (class \code{shiny.tag.list}).
+}
+}
 \description{
 These functions are re-exported from \pkg{shiny} for convenience, so you
 can use them in irid apps without loading shiny explicitly.

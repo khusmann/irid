@@ -1,3 +1,9 @@
+## Resubmission
+
+This is a resubmission. In response to CRAN feedback, I have added a `\value`
+section to `reactiveVal.Rd` (the shared documentation page for the re-exported
+shiny primitives), describing the return value of each documented function.
+
 ## Submission
 
 This is the first submission of 'irid' to CRAN.

@@ -23,6 +23,20 @@
 #'
 #' See the \pkg{shiny} documentation for full details.
 #'
+#' @return The return values are those of the underlying \pkg{shiny}
+#'   functions:
+#'   - `reactiveVal()` returns a function that reads the current value when
+#'     called with no argument and sets it when called with one value.
+#'   - `reactive()` returns a reactive expression (a function of class
+#'     `reactiveExpr`/`reactive`) that yields the cached expression value when
+#'     called.
+#'   - `observe()` and `observeEvent()` return an observer reference object
+#'     (class `Observer`) invisibly; they are called for their side effects.
+#'   - `isolate()` returns the value of `expr`, evaluated without taking a
+#'     reactive dependency.
+#'   - `tags` is a named list of functions that construct HTML tag objects, and
+#'     `tagList()` returns a list of tags (class `shiny.tag.list`).
+#'
 #' @name reactiveVal
 #' @aliases reactive observe observeEvent isolate tags tagList
 #' @rawNamespace
